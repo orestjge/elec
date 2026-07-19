@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: analyze & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.35.5
+          channel: stable
+          cache: true
+
+      - name: App (flutter) analyze & test
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test
+
+      - name: packages/edge_core
+        working-directory: packages/edge_core
+        run: |
+          dart pub get
+          dart analyze
+          dart test
+
+      - name: packages/edge_sjis
+        working-directory: packages/edge_sjis
+        run: |
+          dart pub get
+          dart analyze
+          dart test
