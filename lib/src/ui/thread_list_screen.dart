@@ -78,6 +78,9 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   ThreadFilter _filter = ThreadFilter.current;
   final _search = TextEditingController();
   bool _searchOpen = false;
+  double _horizontalDragDistance = 0;
+  double _verticalDragDistance = 0;
+  static const double _swipeDistanceThreshold = 96;
 
   /// 表示中の並び順（スレキー列）の固定スナップショット。実況板では最近レス順
   /// が高頻度で入れ替わり一覧を追えないため、自動更新では並べ替えず、レス数・
@@ -420,25 +423,68 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   }
 
   Future<void> _openThread(ThreadSummary thread) async {
-    await _history.rememberThread(thread);
+    await _history.markLastViewedThread(thread);
     if (!mounted) return;
     // ここでは既読にしない。既読位置はスレ画面が「実際にスクロールで見た最大レス
     // 番号」を離脱時に記録する（前回位置からの再開のため、開いただけで全既読に
     // しない）。
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => ThreadScreen(
-          threadKey: thread.key,
-          threadTitle: thread.title,
-          endpoints: widget.endpoints,
-          readHistory: _history,
-          initialStatusLabel: _statusLabel(thread),
-        ),
-      ),
-    );
+    await Navigator.of(context).push(_threadRoute(thread));
     // 戻ってきたら既読状態が変わっているので再描画し、並び順も貼り直す
     // （既読優先ソートなどに反映）。
     if (mounted) setState(_reorder);
+  }
+
+  PageRoute<void> _threadRoute(ThreadSummary thread) {
+    return PageRouteBuilder<void>(
+      pageBuilder: (context, animation, secondaryAnimation) => ThreadScreen(
+        threadKey: thread.key,
+        threadTitle: thread.title,
+        fetcher: _fetcher,
+        endpoints: widget.endpoints,
+        readHistory: _history,
+        initialStatusLabel: _statusLabel(thread),
+      ),
+      transitionDuration: const Duration(milliseconds: 240),
+      reverseTransitionDuration: const Duration(milliseconds: 220),
+      transitionsBuilder: (context, animation, secondaryAnimation, child) {
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+          reverseCurve: Curves.easeInCubic,
+        );
+        return SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(1, 0),
+            end: Offset.zero,
+          ).animate(curved),
+          child: child,
+        );
+      },
+    );
+  }
+
+  Future<void> _openLastViewedThread() async {
+    if (_searchOpen) return;
+    final stored = _history.lastViewedThread;
+    if (stored == null) return;
+    await _openThread(stored.toSummary());
+  }
+
+  void _handlePointerDown(PointerDownEvent event) {
+    _horizontalDragDistance = 0;
+    _verticalDragDistance = 0;
+  }
+
+  void _handlePointerMove(PointerMoveEvent event) {
+    _horizontalDragDistance += event.delta.dx;
+    _verticalDragDistance += event.delta.dy.abs();
+  }
+
+  void _handlePointerUp(PointerUpEvent event) {
+    final leftwardDistance = -_horizontalDragDistance;
+    if (leftwardDistance < _swipeDistanceThreshold) return;
+    if (leftwardDistance < _verticalDragDistance * 1.2) return;
+    _openLastViewedThread();
   }
 
   Future<void> _openNewThread() async {
@@ -492,30 +538,36 @@ class _ThreadListScreenState extends State<ThreadListScreen>
       ),
       body: RefreshIndicator(
         onRefresh: _refresh,
-        child: CustomScrollView(
-          slivers: [
-            SliverAppBar.large(
-              title: const Text('エッヂ'),
-              bottom: _searchOpen
-                  ? PreferredSize(
-                      preferredSize: const Size.fromHeight(64),
-                      child: _ThreadSearchField(
-                        controller: _search,
-                        onChanged: (_) => setState(() {}),
-                        onClear: () => setState(_search.clear),
-                      ),
-                    )
-                  : null,
-              actions: [
-                _PollingIndicator(active: _polling),
-                _SearchButton(active: _searchOpen, onPressed: _toggleSearch),
-                _FilterButton(filter: _filter, onPressed: _pickFilter),
-                _SortButton(sort: _sort, onPressed: _pickSort),
-                const SizedBox(width: 4),
-              ],
-            ),
-            _body(),
-          ],
+        child: Listener(
+          behavior: HitTestBehavior.translucent,
+          onPointerDown: _handlePointerDown,
+          onPointerMove: _handlePointerMove,
+          onPointerUp: _handlePointerUp,
+          child: CustomScrollView(
+            slivers: [
+              SliverAppBar.large(
+                title: const Text('エッヂ'),
+                bottom: _searchOpen
+                    ? PreferredSize(
+                        preferredSize: const Size.fromHeight(64),
+                        child: _ThreadSearchField(
+                          controller: _search,
+                          onChanged: (_) => setState(() {}),
+                          onClear: () => setState(_search.clear),
+                        ),
+                      )
+                    : null,
+                actions: [
+                  _PollingIndicator(active: _polling),
+                  _SearchButton(active: _searchOpen, onPressed: _toggleSearch),
+                  _FilterButton(filter: _filter, onPressed: _pickFilter),
+                  _SortButton(sort: _sort, onPressed: _pickSort),
+                  const SizedBox(width: 4),
+                ],
+              ),
+              _body(),
+            ],
+          ),
         ),
       ),
     );

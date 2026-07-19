@@ -8,6 +8,7 @@ import 'package:jis0208/jis0208.dart';
 
 final _win31j = Windows31JCodec();
 List<int> sjis(String s) => _win31j.encode(s);
+List<int> datLine(String s) => [...sjis(s), 0x0A];
 
 /// 呼ばれるたびに次の応答を返すフェイク。使い切ったら最後の応答を返し続ける。
 class QueueFetcher implements HttpFetcher {
@@ -31,6 +32,8 @@ FetchResponse subjectOk(String body, String lm) => FetchResponse(
   bodyBytes: sjis(body),
   headers: {'last-modified': lm},
 );
+FetchResponse datOk(List<int> body) =>
+    FetchResponse(statusCode: 200, bodyBytes: body, headers: const {});
 
 void main() {
   testWidgets('ポーリング間隔ごとに subject.txt を取り、変化を反映する', (tester) async {
@@ -269,5 +272,64 @@ void main() {
 
     expect(find.text('料理スレ'), findsOneWidget);
     expect(find.text('野球スレ'), findsNothing);
+  });
+
+  testWidgets('一覧を左に引っ張ると直近に見たスレを開く', (tester) async {
+    final history = ReadHistory(MemoryReadHistoryStorage());
+    await history.markLastViewedThread(
+      const ThreadSummary(key: '1', title: '直近スレ', resCount: 1, capName: null),
+    );
+    final fetcher = QueueFetcher([
+      subjectOk('1.dat<>直近スレ (1)\n', 'LM1'),
+      datOk(datLine('名無し<><>2025/11/03(月) 02:14:51.907 ID:aaa<> 本文 <>直近スレ')),
+    ]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadListScreen(
+          fetcher: fetcher,
+          pollInterval: const Duration(seconds: 15),
+          readHistory: history,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.drag(find.byType(CustomScrollView), const Offset(-500, 0));
+    await tester.pumpAndSettle();
+
+    expect(find.text('1レス'), findsOneWidget);
+    expect(find.textContaining('本文', findRichText: true), findsOneWidget);
+  });
+
+  testWidgets('スレ画面を右に引っ張ると一覧に戻る', (tester) async {
+    final fetcher = QueueFetcher([
+      subjectOk('1.dat<>戻れるスレ (1)\n', 'LM1'),
+      datOk(datLine('名無し<><>2025/11/03(月) 02:14:51.907 ID:aaa<> 本文 <>戻れるスレ')),
+    ]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadListScreen(
+          fetcher: fetcher,
+          pollInterval: const Duration(seconds: 15),
+          readHistory: ReadHistory(MemoryReadHistoryStorage()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('戻れるスレ'));
+    await tester.pumpAndSettle();
+    expect(find.text('1レス'), findsOneWidget);
+
+    await tester.drag(
+      find.textContaining('本文', findRichText: true),
+      const Offset(500, 0),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('エッヂ'), findsWidgets);
+    expect(find.text('戻れるスレ'), findsOneWidget);
+    expect(find.text('1レス'), findsNothing);
   });
 }

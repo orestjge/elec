@@ -94,6 +94,9 @@ class _ThreadScreenState extends State<ThreadScreen>
   OverlayEntry? _topSnackEntry;
   bool _fetching = false;
   int _pendingOwnPosts = 0;
+  double _horizontalDragDistance = 0;
+  double _verticalDragDistance = 0;
+  static const double _swipeDistanceThreshold = 96;
 
   Uri get _url => widget.endpoints.dat(widget.threadKey);
 
@@ -170,7 +173,7 @@ class _ThreadScreenState extends State<ThreadScreen>
       final r = await _dat.fetch(_url);
       if (!mounted) return;
       final total = r.state.res.length;
-      await _history.rememberThread(
+      await _history.markLastViewedThread(
         ThreadSummary(
           key: widget.threadKey,
           title: widget.threadTitle,
@@ -633,6 +636,24 @@ class _ThreadScreenState extends State<ThreadScreen>
     if (!ok && mounted) _showSnack('リンクを開けませんでした');
   }
 
+  void _handlePointerDown(PointerDownEvent event) {
+    _horizontalDragDistance = 0;
+    _verticalDragDistance = 0;
+  }
+
+  void _handlePointerMove(PointerMoveEvent event) {
+    _horizontalDragDistance += event.delta.dx;
+    _verticalDragDistance += event.delta.dy.abs();
+  }
+
+  void _handlePointerUp(PointerUpEvent event) {
+    if (_composerFocus.hasFocus) return;
+    if (_horizontalDragDistance < _swipeDistanceThreshold) return;
+    if (_horizontalDragDistance < _verticalDragDistance * 1.2) return;
+    final navigator = Navigator.of(context);
+    if (navigator.canPop()) navigator.pop();
+  }
+
   /// スレ画面の通知は入力欄や末尾レスに重ならないよう、上部へ出す。
   void _showSnack(String message) {
     _showTopSnack(message);
@@ -756,16 +777,22 @@ class _ThreadScreenState extends State<ThreadScreen>
               )
             : null,
       ),
-      body: Column(
-        children: [
-          Expanded(child: _body()),
-          _Composer(
-            controller: _composer,
-            focusNode: _composerFocus,
-            onSend: _submit,
-            enabled: !_isStopped,
-          ),
-        ],
+      body: Listener(
+        behavior: HitTestBehavior.translucent,
+        onPointerDown: _handlePointerDown,
+        onPointerMove: _handlePointerMove,
+        onPointerUp: _handlePointerUp,
+        child: Column(
+          children: [
+            Expanded(child: _body()),
+            _Composer(
+              controller: _composer,
+              focusNode: _composerFocus,
+              onSend: _submit,
+              enabled: !_isStopped,
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -49,6 +49,21 @@ void main() {
       expect(h.storedThreads.single.toSummary().resCount, 50);
     });
 
+    test('直近に見たスレを保存できる', () async {
+      final h = ReadHistory(MemoryReadHistoryStorage());
+      const thread = ThreadSummary(
+        key: '123',
+        title: '最後に見たスレ',
+        resCount: 50,
+        capName: null,
+      );
+
+      await h.markLastViewedThread(thread);
+
+      expect(h.lastViewedThread?.toSummary().key, '123');
+      expect(h.lastViewedThread?.toSummary().title, '最後に見たスレ');
+    });
+
     test('空データを load した直後でもスレ情報を保存できる', () async {
       final h = ReadHistory(MemoryReadHistoryStorage());
       await h.load();
@@ -112,6 +127,23 @@ void main() {
       expect(b.isFavorite('123'), isTrue);
       expect(b.isFavorite('456'), isFalse);
       expect(b.storedThreads.single.toSummary().title, '保存済みお気に入り');
+    });
+
+    test('直近に見たスレも保存される', () async {
+      final a = ReadHistory(FileReadHistoryStorage(directory: dir));
+      await a.markLastViewedThread(
+        const ThreadSummary(
+          key: '123',
+          title: '永続化する直近スレ',
+          resCount: 12,
+          capName: null,
+        ),
+      );
+
+      final b = ReadHistory(FileReadHistoryStorage(directory: dir));
+      await b.load();
+      expect(b.lastViewedThread?.toSummary().key, '123');
+      expect(b.lastViewedThread?.toSummary().title, '永続化する直近スレ');
     });
 
     test('自分のスレとレスも保存される', () async {
