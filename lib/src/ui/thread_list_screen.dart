@@ -26,8 +26,8 @@ enum ThreadSort {
 
 enum ThreadFilter {
   current('現行', '現在一覧にあるスレを表示', Icons.forum_outlined),
-  history('履歴', '開いたことがあるスレだけ表示', Icons.history),
-  favorites('お気に入り', 'お気に入りのスレだけ表示', Icons.star_border);
+  history('履歴', '開いたことがあるスレ（dat落ちも含む）', Icons.history),
+  favorites('お気に入り', 'お気に入りに登録したスレ（dat落ちも含む）', Icons.star_border);
 
   const ThreadFilter(this.label, this.description, this.icon);
   final String label;
