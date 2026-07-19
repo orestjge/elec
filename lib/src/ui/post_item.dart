@@ -347,8 +347,7 @@ class _IdChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final brightness = Theme.of(context).brightness;
-    final color = idColor(id, brightness);
+    final color = idColorForCount(Theme.of(context).colorScheme, count);
     return InkWell(
       onTap: onTap == null ? null : () => onTap!(id),
       borderRadius: BorderRadius.circular(6),

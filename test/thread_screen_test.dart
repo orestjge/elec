@@ -271,6 +271,28 @@ void main() {
     expect(find.text('お気に入りを解除'), findsOneWidget);
   });
 
+  testWidgets('スレタイは AppBar 内で複数行表示する', (tester) async {
+    const title = 'これはかなり長いスレッドタイトルで省略せずに複数行で読みたいテスト用のタイトルです';
+    final f = QueueFetcher([ok(res1)]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadScreen(
+          threadKey: '1762103691',
+          threadTitle: title,
+          fetcher: f,
+          pollInterval: const Duration(seconds: 5),
+          readHistory: ReadHistory(MemoryReadHistoryStorage()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final titleText = tester.widget<Text>(find.text(title));
+    expect(titleText.maxLines, 2);
+    expect(tester.widget<AppBar>(find.byType(AppBar)).toolbarHeight, 80);
+  });
+
   testWidgets('1001 行があれば完走表示を出す', (tester) async {
     final f = QueueFetcher([
       ok([...res1, ...res2, ...over1000]),
