@@ -78,7 +78,7 @@ class _NewThreadScreenState extends State<NewThreadScreen> {
       bbsCgi: widget.endpoints.bbsCgi,
       board: widget.endpoints.boardKey,
       title: _title.text.trim(),
-      message: _body.text.trim(),
+      message: _body.text,
       tokens: _authStore.tokens,
     );
     await _authStore.setTokens(result.tokens);

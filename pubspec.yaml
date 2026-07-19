@@ -78,6 +78,11 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
+  assets:
+    - assets/fonts/Monapo-README
+    - assets/fonts/Mona-README-ttf.txt
+    - assets/fonts/IPA_Font_License_Agreement_v1.0.txt
+
   # To add assets to your application, add an assets section, like this:
   # assets:
   #   - images/a_dot_burr.jpeg
@@ -108,3 +113,7 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+  fonts:
+    - family: Monapo
+      fonts:
+        - asset: assets/fonts/monapo.ttf

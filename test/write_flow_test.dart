@@ -27,6 +27,7 @@ class ScriptedClient implements HttpFetcher, HttpPoster {
   final List<FetchResponse> _postResponses;
   final List<int>? dat;
   int posts = 0;
+  String? lastBody;
 
   @override
   Future<FetchResponse> get(
@@ -44,6 +45,7 @@ class ScriptedClient implements HttpFetcher, HttpPoster {
     Map<String, String> headers = const {},
     required String body,
   }) async {
+    lastBody = body;
     final i = posts < _postResponses.length ? posts : _postResponses.length - 1;
     posts++;
     return _postResponses[i];
@@ -161,6 +163,39 @@ void main() {
 
     // 後始末: 保留中の SnackBar タイマーを流す。
     await tester.pump(const Duration(seconds: 5));
+  });
+
+  testWidgets('レス投稿では本文前後の空白を保持する', (tester) async {
+    final client = ScriptedClient([
+      FetchResponse(statusCode: 200, bodyBytes: successBody()),
+    ]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadScreen(
+          threadKey: '123',
+          threadTitle: 'テスト',
+          fetcher: client,
+          authStore: AuthStore(MemoryTokenStorage()),
+          authLauncher: FakeLauncher(),
+          pollInterval: const Duration(seconds: 60),
+          readHistory: ReadHistory(MemoryReadHistoryStorage()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    const aa = '　 ∧＿∧\n　（　´∀｀）\n ';
+    await tester.enterText(find.byType(TextField), aa);
+    await tester.tap(find.byIcon(Icons.send));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(client.lastBody, isNotNull);
+    expect(
+      client.lastBody,
+      buildBbsCgiBody(board: 'liveedge', threadKey: '123', message: aa),
+    );
   });
 
   testWidgets('期限切れで再送すると新しいコードに更新される', (tester) async {

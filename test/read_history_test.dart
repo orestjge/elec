@@ -64,6 +64,23 @@ void main() {
       expect(h.lastViewedThread?.toSummary().title, '最後に見たスレ');
     });
 
+    test('開いたスレはすぐ履歴と直近に入り既読扱いになる', () async {
+      final h = ReadHistory(MemoryReadHistoryStorage());
+      const thread = ThreadSummary(
+        key: '123',
+        title: '開いたスレ',
+        resCount: 50,
+        capName: null,
+      );
+
+      await h.markOpenedThread(thread);
+
+      expect(h.isRead('123'), isTrue);
+      expect(h.lastSeen('123'), 0);
+      expect(h.lastViewedThread?.toSummary().key, '123');
+      expect(h.storedThreads.single.toSummary().title, '開いたスレ');
+    });
+
     test('空データを load した直後でもスレ情報を保存できる', () async {
       final h = ReadHistory(MemoryReadHistoryStorage());
       await h.load();

@@ -3,6 +3,61 @@ import 'package:flutter/material.dart';
 
 import 'link_urls.dart';
 
+/// AA（アスキーアート）らしい本文だけ、MS Pゴシック互換寄りの同梱フォントで
+/// 表示する。単発の顔文字まで巻き込まないよう、AA 記号を含む行数を見る。
+bool looksLikeAsciiArt(String text) {
+  final lines = text.split('\n');
+  var aaLines = 0;
+  for (final line in lines) {
+    if (_looksLikeAsciiArtLine(line)) aaLines++;
+  }
+  if (aaLines >= 2) return true;
+
+  if (lines.length == 1) {
+    final line = lines.single.trim();
+    return line.length >= 24 && _aaSymbolCount(line) >= 8;
+  }
+  return false;
+}
+
+final _aaSymbolRunes =
+    '　＿￣ー─━│┃┌┐└┘├┤┬┴┼┏┓┗┛┣┫┳┻╋'
+            '／＼/\\|｜∧∨ＶvＷwＭm（）()[]［］{}｛｝<>＜＞'
+            '・.．,:;；"\'`´｀~～^＾-‐=＝+＋*＊'
+        .runes
+        .toSet();
+
+bool _looksLikeAsciiArtLine(String line) {
+  final trimmed = line.trim();
+  if (trimmed.length < 4) return false;
+
+  final symbolCount = _aaSymbolCount(line);
+  final symbolRatio = symbolCount / trimmed.length;
+  final leadingSpaces = _leadingSpaceCount(line);
+  final hasFullWidthSpace = line.contains('　');
+
+  return symbolCount >= 4 && symbolRatio >= 0.18 ||
+      hasFullWidthSpace && symbolCount >= 2 ||
+      leadingSpaces >= 4 && symbolCount >= 2;
+}
+
+int _aaSymbolCount(String line) {
+  var count = 0;
+  for (final rune in line.runes) {
+    if (_aaSymbolRunes.contains(rune)) count++;
+  }
+  return count;
+}
+
+int _leadingSpaceCount(String line) {
+  var count = 0;
+  for (final rune in line.runes) {
+    if (rune != 0x20 && rune != 0x3000 && rune != 0x09) break;
+    count++;
+  }
+  return count;
+}
+
 /// レス本文。`>>123` / `>>3-5` のレス参照と URL をタップ可能にして表示する。
 ///
 /// - `>>N` タップ → [onTapRes]（該当レスへスクロール）
@@ -64,6 +119,10 @@ class _ResBodyState extends State<ResBody> {
 
     final spans = <InlineSpan>[];
     final text = widget.text;
+    final isAsciiArt = looksLikeAsciiArt(text);
+    final effectiveStyle = isAsciiArt
+        ? _asciiArtStyle(context, widget.style)
+        : widget.style;
     var last = 0;
     for (final m in _pattern.allMatches(text)) {
       if (m.start > last) {
@@ -117,6 +176,22 @@ class _ResBodyState extends State<ResBody> {
       spans.add(TextSpan(text: text.substring(last)));
     }
 
-    return SelectableText.rich(TextSpan(style: widget.style, children: spans));
+    final body = SelectableText.rich(
+      TextSpan(style: effectiveStyle, children: spans),
+    );
+    if (!isAsciiArt) return body;
+
+    return SingleChildScrollView(scrollDirection: Axis.horizontal, child: body);
+  }
+
+  TextStyle _asciiArtStyle(BuildContext context, TextStyle? style) {
+    final baseStyle = style ?? Theme.of(context).textTheme.bodyLarge;
+    final baseSize = baseStyle?.fontSize ?? 16;
+    return (baseStyle ?? const TextStyle()).copyWith(
+      fontFamily: 'Monapo',
+      fontSize: baseSize,
+      height: 1.15,
+      letterSpacing: 0,
+    );
   }
 }

@@ -219,6 +219,7 @@ class ReadHistory {
   Set<String> _ownThreads = {};
   Map<String, Set<int>> _ownPosts = {};
   String? _lastViewedThreadKey;
+  Future<void> _pendingSave = Future.value();
 
   Future<void> load() async {
     final snapshot = await _storage.load();
@@ -244,12 +245,16 @@ class ReadHistory {
   }
 
   Future<void> rememberThread(ThreadSummary thread) async {
+    if (_rememberThreadInMemory(thread)) await _save();
+  }
+
+  bool _rememberThreadInMemory(ThreadSummary thread) {
     final prev = _threads[thread.key];
     if (prev != null &&
         prev.title == thread.title &&
         prev.resCount >= thread.resCount &&
         prev.capName == thread.capName) {
-      return;
+      return false;
     }
     _threads[thread.key] = StoredThread(
       key: thread.key,
@@ -257,13 +262,29 @@ class ReadHistory {
       resCount: thread.resCount,
       capName: thread.capName,
     );
-    await _save();
+    return true;
   }
 
   Future<void> markLastViewedThread(ThreadSummary thread) async {
-    await rememberThread(thread);
-    if (_lastViewedThreadKey == thread.key) return;
-    _lastViewedThreadKey = thread.key;
+    final changedThread = _rememberThreadInMemory(thread);
+    final changedLastViewed = _lastViewedThreadKey != thread.key;
+    if (changedLastViewed) _lastViewedThreadKey = thread.key;
+    if (changedThread || changedLastViewed) await _save();
+  }
+
+  /// スレを開いた事実をすぐ保存する。本文取得や画面離脱を待たず、履歴一覧と
+  /// 「直近に見たスレ」に反映する。既読位置はまだ見えていないので 0 にする。
+  Future<void> markOpenedThread(ThreadSummary thread) async {
+    var changed = _rememberThreadInMemory(thread);
+    if (_lastViewedThreadKey != thread.key) {
+      _lastViewedThreadKey = thread.key;
+      changed = true;
+    }
+    if (!_seen.containsKey(thread.key)) {
+      _seen[thread.key] = 0;
+      changed = true;
+    }
+    if (!changed) return;
     await _save();
   }
 
@@ -314,15 +335,15 @@ class ReadHistory {
       setFavorite(threadKey, !isFavorite(threadKey));
 
   Future<void> _save() async {
-    await _storage.save(
-      ReadHistorySnapshot(
-        seen: Map.of(_seen),
-        favorites: Set.of(_favorites),
-        threads: Map.of(_threads),
-        ownThreads: Set.of(_ownThreads),
-        ownPosts: _ownPosts.map((k, v) => MapEntry(k, Set.of(v))),
-        lastViewedThreadKey: _lastViewedThreadKey,
-      ),
+    final snapshot = ReadHistorySnapshot(
+      seen: Map.of(_seen),
+      favorites: Set.of(_favorites),
+      threads: Map.of(_threads),
+      ownThreads: Set.of(_ownThreads),
+      ownPosts: _ownPosts.map((k, v) => MapEntry(k, Set.of(v))),
+      lastViewedThreadKey: _lastViewedThreadKey,
     );
+    _pendingSave = _pendingSave.then((_) => _storage.save(snapshot));
+    await _pendingSave;
   }
 }

@@ -28,6 +28,7 @@ class ThreadScreen extends StatefulWidget {
     this.authLauncher = const SystemBrowserLauncher(),
     this.readHistory,
     this.initialStatusLabel,
+    this.initialResCount = 0,
   });
 
   final String threadKey;
@@ -35,6 +36,7 @@ class ThreadScreen extends StatefulWidget {
   final HttpFetcher? fetcher;
   final EdgeEndpoints endpoints;
   final Duration pollInterval;
+  final int initialResCount;
 
   /// 既読履歴。離脱時に「見たレス数」を記録する。
   final ReadHistory? readHistory;
@@ -96,7 +98,9 @@ class _ThreadScreenState extends State<ThreadScreen>
   int _pendingOwnPosts = 0;
   double _horizontalDragDistance = 0;
   double _verticalDragDistance = 0;
+  bool _trackingSwipe = false;
   static const double _swipeDistanceThreshold = 96;
+  static const double _swipeEdgeWidth = 24;
 
   Uri get _url => widget.endpoints.dat(widget.threadKey);
 
@@ -110,6 +114,16 @@ class _ThreadScreenState extends State<ThreadScreen>
     _history = widget.readHistory ?? ReadHistory.shared;
     _positions.itemPositions.addListener(_onPositions);
     WidgetsBinding.instance.addObserver(this);
+    unawaited(
+      _history.markOpenedThread(
+        ThreadSummary(
+          key: widget.threadKey,
+          title: widget.threadTitle,
+          resCount: widget.initialResCount,
+          capName: null,
+        ),
+      ),
+    );
     _initialLoad();
     _startPolling();
   }
@@ -119,7 +133,7 @@ class _ThreadScreenState extends State<ThreadScreen>
     // 離脱時に「どこまで読んだか（スクロールで見た最大レス番号）」を記録する。
     // 次に開いたときの再開位置と、一覧の新着判定に使う。markRead は下げない。
     if (_furthestRead > 0) {
-      _history.markRead(widget.threadKey, _furthestRead);
+      unawaited(_history.markRead(widget.threadKey, _furthestRead));
     }
     _positions.itemPositions.removeListener(_onPositions);
     WidgetsBinding.instance.removeObserver(this);
@@ -142,6 +156,7 @@ class _ThreadScreenState extends State<ThreadScreen>
       case AppLifecycleState.paused:
       case AppLifecycleState.hidden:
         _timer?.cancel();
+        _persistReadPosition();
       case AppLifecycleState.inactive:
       case AppLifecycleState.detached:
         break;
@@ -261,12 +276,20 @@ class _ThreadScreenState extends State<ThreadScreen>
       if (item is Res && item.number > maxRes) maxRes = item.number;
       if (p.index == lastIndex && p.itemTrailingEdge <= 1.0001) atBottom = true;
     }
+    final readAdvanced = maxRes > _furthestRead;
     if (maxRes != _furthestRead || atBottom != _atBottomNow) {
       setState(() {
         _furthestRead = maxRes;
         _atBottomNow = atBottom;
       });
     }
+    if (readAdvanced) _persistReadPosition(maxRes);
+  }
+
+  void _persistReadPosition([int? resCount]) {
+    final count = resCount ?? _furthestRead;
+    if (count <= 0) return;
+    unawaited(_history.markRead(widget.threadKey, count));
   }
 
   void _scrollToBottomSoon() {
@@ -639,19 +662,34 @@ class _ThreadScreenState extends State<ThreadScreen>
   void _handlePointerDown(PointerDownEvent event) {
     _horizontalDragDistance = 0;
     _verticalDragDistance = 0;
+    _trackingSwipe = _isLeftEdgePointer(event);
   }
 
   void _handlePointerMove(PointerMoveEvent event) {
+    if (!_trackingSwipe) return;
     _horizontalDragDistance += event.delta.dx;
     _verticalDragDistance += event.delta.dy.abs();
   }
 
   void _handlePointerUp(PointerUpEvent event) {
+    if (!_trackingSwipe) return;
+    _trackingSwipe = false;
     if (_composerFocus.hasFocus) return;
     if (_horizontalDragDistance < _swipeDistanceThreshold) return;
     if (_horizontalDragDistance < _verticalDragDistance * 1.2) return;
     final navigator = Navigator.of(context);
     if (navigator.canPop()) navigator.pop();
+  }
+
+  void _handlePointerCancel(PointerCancelEvent event) {
+    _trackingSwipe = false;
+  }
+
+  bool _isLeftEdgePointer(PointerDownEvent event) {
+    final box = context.findRenderObject();
+    if (box is! RenderBox || !box.hasSize) return false;
+    final local = box.globalToLocal(event.position);
+    return local.dx <= _swipeEdgeWidth;
   }
 
   /// スレ画面の通知は入力欄や末尾レスに重ならないよう、上部へ出す。
@@ -782,6 +820,7 @@ class _ThreadScreenState extends State<ThreadScreen>
         onPointerDown: _handlePointerDown,
         onPointerMove: _handlePointerMove,
         onPointerUp: _handlePointerUp,
+        onPointerCancel: _handlePointerCancel,
         child: Column(
           children: [
             Expanded(child: _body()),
@@ -1266,8 +1305,8 @@ class _ComposerState extends State<_Composer> {
   bool _sending = false;
 
   Future<void> _send() async {
-    final text = widget.controller.text.trim();
-    if (!widget.enabled || text.isEmpty || _sending) return;
+    final text = widget.controller.text;
+    if (!widget.enabled || text.trim().isEmpty || _sending) return;
     setState(() => _sending = true);
     try {
       final accepted = await widget.onSend(text);
