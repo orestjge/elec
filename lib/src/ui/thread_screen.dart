@@ -488,8 +488,9 @@ class _ThreadScreenState extends State<ThreadScreen>
             _showConversation(n);
           },
           onTapUrl: _openUrl,
-          onReply: _reply,
+          onSend: _submit,
           isOwnPost: (n) => _history.isOwnPost(widget.threadKey, n),
+          enabled: !_isStopped,
         ),
       ),
     );
@@ -945,8 +946,9 @@ class _ConversationSheet extends StatefulWidget {
     required this.onTapResRange,
     required this.onTapReplies,
     required this.onTapUrl,
-    required this.onReply,
+    required this.onSend,
     required this.isOwnPost,
+    required this.enabled,
   });
 
   final String title;
@@ -960,8 +962,13 @@ class _ConversationSheet extends StatefulWidget {
   final void Function(int source, List<int> targets) onTapResRange;
   final ValueChanged<int> onTapReplies;
   final ValueChanged<Uri> onTapUrl;
-  final ValueChanged<int> onReply;
+
+  /// 会話シート内の入力欄から直接送信する投稿関数（受理で true）。
+  final Future<bool> Function(String) onSend;
   final bool Function(int number) isOwnPost;
+
+  /// 入力欄を有効にするか（停止スレでは false）。
+  final bool enabled;
 
   @override
   State<_ConversationSheet> createState() => _ConversationSheetState();
@@ -969,12 +976,36 @@ class _ConversationSheet extends StatefulWidget {
 
 class _ConversationSheetState extends State<_ConversationSheet> {
   late final Map<int, GlobalKey> _keys;
+  // 会話シート専用の入力欄（main の入力欄はシートに覆われて見えないため）。
+  final _controller = TextEditingController();
+  final _focus = FocusNode();
 
   @override
   void initState() {
     super.initState();
     _keys = {for (final entry in widget.entries) entry.res.number: GlobalKey()};
     WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToFocus());
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _focus.dispose();
+    super.dispose();
+  }
+
+  /// シート内の入力欄に `>>N` を挿入してフォーカスする。
+  void _replyLocal(int number) {
+    final anchor = '>>$number\n';
+    final sel = _controller.selection;
+    final text = _controller.text;
+    final start = sel.isValid ? sel.start : text.length;
+    final end = sel.isValid ? sel.end : text.length;
+    _controller.value = TextEditingValue(
+      text: text.replaceRange(start, end, anchor),
+      selection: TextSelection.collapsed(offset: start + anchor.length),
+    );
+    _focus.requestFocus();
   }
 
   void _scrollToFocus() {
@@ -1027,7 +1058,7 @@ class _ConversationSheetState extends State<_ConversationSheet> {
                           replyCount:
                               widget.replyCountByNumber[entry.res.number] ?? 0,
                           onTapReplies: widget.onTapReplies,
-                          onReply: widget.onReply,
+                          onReply: _replyLocal,
                           isOwn: widget.isOwnPost(entry.res.number),
                         ),
                       ),
@@ -1035,6 +1066,19 @@ class _ConversationSheetState extends State<_ConversationSheet> {
                   },
                 ),
             ],
+          ),
+        ),
+        // 会話を開いたまま返信できる入力欄。シート内の返信ボタンの >>N もここへ。
+        // キーボード分だけ持ち上げる。
+        Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.viewInsetsOf(context).bottom,
+          ),
+          child: _Composer(
+            controller: _controller,
+            focusNode: _focus,
+            onSend: widget.onSend,
+            enabled: widget.enabled,
           ),
         ),
       ],

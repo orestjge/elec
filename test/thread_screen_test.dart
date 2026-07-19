@@ -155,6 +155,31 @@ void main() {
     );
   });
 
+  testWidgets('会話シートを開いたままレス入力できる（入力欄が被さる）', (tester) async {
+    final f = QueueFetcher([
+      ok([...res1, ...res2, ...res3]),
+    ]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    // 開く前は入力欄は本体の 1 つだけ。
+    expect(find.widgetWithText(TextField, 'レスを書く'), findsOneWidget);
+
+    // 返信数チップから会話シートを開く。
+    await tester.tap(find.text('返信 2').first);
+    await tester.pumpAndSettle();
+    expect(find.text('会話 #1  3件'), findsOneWidget);
+
+    // シートにも入力欄が出る（本体＋シートで 2 つ＝入力欄が被さっている）。
+    final composers = find.widgetWithText(TextField, 'レスを書く');
+    expect(composers, findsNWidgets(2));
+
+    // シート側の入力欄で実際に入力できる。
+    await tester.enterText(composers.last, 'てすと返信');
+    await tester.pump();
+    expect(find.text('てすと返信'), findsOneWidget);
+  });
+
   testWidgets('スレタイシートからお気に入りを切り替える', (tester) async {
     final history = ReadHistory(MemoryReadHistoryStorage());
     final f = QueueFetcher([
