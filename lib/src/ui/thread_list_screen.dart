@@ -428,21 +428,39 @@ class _ThreadListScreenState extends State<ThreadListScreen>
     // ここでは既読にしない。既読位置はスレ画面が「実際にスクロールで見た最大レス
     // 番号」を離脱時に記録する（前回位置からの再開のため、開いただけで全既読に
     // しない）。
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => ThreadScreen(
-          threadKey: thread.key,
-          threadTitle: thread.title,
-          fetcher: _fetcher,
-          endpoints: widget.endpoints,
-          readHistory: _history,
-          initialStatusLabel: _statusLabel(thread),
-        ),
-      ),
-    );
+    await Navigator.of(context).push(_threadRoute(thread));
     // 戻ってきたら既読状態が変わっているので再描画し、並び順も貼り直す
     // （既読優先ソートなどに反映）。
     if (mounted) setState(_reorder);
+  }
+
+  PageRoute<void> _threadRoute(ThreadSummary thread) {
+    return PageRouteBuilder<void>(
+      pageBuilder: (context, animation, secondaryAnimation) => ThreadScreen(
+        threadKey: thread.key,
+        threadTitle: thread.title,
+        fetcher: _fetcher,
+        endpoints: widget.endpoints,
+        readHistory: _history,
+        initialStatusLabel: _statusLabel(thread),
+      ),
+      transitionDuration: const Duration(milliseconds: 240),
+      reverseTransitionDuration: const Duration(milliseconds: 220),
+      transitionsBuilder: (context, animation, secondaryAnimation, child) {
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+          reverseCurve: Curves.easeInCubic,
+        );
+        return SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(1, 0),
+            end: Offset.zero,
+          ).animate(curved),
+          child: child,
+        );
+      },
+    );
   }
 
   Future<void> _openLastViewedThread() async {
