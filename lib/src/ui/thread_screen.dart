@@ -488,8 +488,9 @@ class _ThreadScreenState extends State<ThreadScreen>
             _showConversation(n);
           },
           onTapUrl: _openUrl,
-          onReply: _reply,
+          onSend: _submit,
           isOwnPost: (n) => _history.isOwnPost(widget.threadKey, n),
+          enabled: !_isStopped,
         ),
       ),
     );
@@ -945,8 +946,9 @@ class _ConversationSheet extends StatefulWidget {
     required this.onTapResRange,
     required this.onTapReplies,
     required this.onTapUrl,
-    required this.onReply,
+    required this.onSend,
     required this.isOwnPost,
+    required this.enabled,
   });
 
   final String title;
@@ -960,8 +962,13 @@ class _ConversationSheet extends StatefulWidget {
   final void Function(int source, List<int> targets) onTapResRange;
   final ValueChanged<int> onTapReplies;
   final ValueChanged<Uri> onTapUrl;
-  final ValueChanged<int> onReply;
+
+  /// 会話シート内の入力欄から直接送信する投稿関数（受理で true）。
+  final Future<bool> Function(String) onSend;
   final bool Function(int number) isOwnPost;
+
+  /// 入力欄を有効にするか（停止スレでは false）。
+  final bool enabled;
 
   @override
   State<_ConversationSheet> createState() => _ConversationSheetState();
@@ -969,12 +976,54 @@ class _ConversationSheet extends StatefulWidget {
 
 class _ConversationSheetState extends State<_ConversationSheet> {
   late final Map<int, GlobalKey> _keys;
+  // 会話シート専用の入力欄（main の入力欄はシートに覆われて見えないため）。
+  // 返信アイコンを押したときだけ出す（常時表示だと「会話全体への返信」と誤解
+  // されうるため）。
+  final _controller = TextEditingController();
+  final _focus = FocusNode();
+  bool _replying = false;
 
   @override
   void initState() {
     super.initState();
     _keys = {for (final entry in widget.entries) entry.res.number: GlobalKey()};
     WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToFocus());
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _focus.dispose();
+    super.dispose();
+  }
+
+  /// レスの返信ボタンで呼ばれる。入力欄を出して `>>N` を挿入・フォーカスする。
+  void _replyLocal(int number) {
+    final anchor = '>>$number\n';
+    final sel = _controller.selection;
+    final text = _controller.text;
+    final start = sel.isValid ? sel.start : text.length;
+    final end = sel.isValid ? sel.end : text.length;
+    _controller.value = TextEditingValue(
+      text: text.replaceRange(start, end, anchor),
+      selection: TextSelection.collapsed(offset: start + anchor.length),
+    );
+    setState(() => _replying = true);
+    _focus.requestFocus();
+  }
+
+  /// 送信。受理されたら入力欄を閉じる。
+  Future<bool> _handleSend(String text) async {
+    final accepted = await widget.onSend(text);
+    if (accepted && mounted) setState(() => _replying = false);
+    return accepted;
+  }
+
+  /// 入力欄を閉じ、下書きを破棄する。
+  void _cancelReply() {
+    _controller.clear();
+    _focus.unfocus();
+    setState(() => _replying = false);
   }
 
   void _scrollToFocus() {
@@ -1027,7 +1076,7 @@ class _ConversationSheetState extends State<_ConversationSheet> {
                           replyCount:
                               widget.replyCountByNumber[entry.res.number] ?? 0,
                           onTapReplies: widget.onTapReplies,
-                          onReply: widget.onReply,
+                          onReply: _replyLocal,
                           isOwn: widget.isOwnPost(entry.res.number),
                         ),
                       ),
@@ -1037,6 +1086,27 @@ class _ConversationSheetState extends State<_ConversationSheet> {
             ],
           ),
         ),
+        // 返信アイコンを押したときだけ入力欄を出す（対象は本文の >>N で明示）。
+        // キーボード分だけ持ち上げる。
+        if (_replying)
+          Padding(
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.viewInsetsOf(context).bottom,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Divider(height: 1),
+                _ReplyBar(onClose: _cancelReply),
+                _Composer(
+                  controller: _controller,
+                  focusNode: _focus,
+                  onSend: _handleSend,
+                  enabled: widget.enabled,
+                ),
+              ],
+            ),
+          ),
       ],
     );
   }
@@ -1108,6 +1178,39 @@ class _ConversationPost extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// 会話シートの返信入力欄の上に出す見出し。返信対象は本文の `>>N` で示す。
+class _ReplyBar extends StatelessWidget {
+  const _ReplyBar({required this.onClose});
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 6, 0),
+      child: Row(
+        children: [
+          Icon(Icons.reply, size: 15, color: scheme.onSurfaceVariant),
+          const SizedBox(width: 6),
+          Text(
+            '返信（>>で対象を指定）',
+            style: Theme.of(
+              context,
+            ).textTheme.labelMedium?.copyWith(color: scheme.onSurfaceVariant),
+          ),
+          const Spacer(),
+          IconButton(
+            icon: const Icon(Icons.close, size: 18),
+            tooltip: '閉じる',
+            visualDensity: VisualDensity.compact,
+            onPressed: onClose,
+          ),
+        ],
       ),
     );
   }

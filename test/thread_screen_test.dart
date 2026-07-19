@@ -155,6 +155,36 @@ void main() {
     );
   });
 
+  testWidgets('会話シートは返信アイコンを押したときだけ入力欄を出す', (tester) async {
+    final f = QueueFetcher([
+      ok([...res1, ...res2, ...res3]),
+    ]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    // 会話シートを開く。
+    await tester.tap(find.text('返信 2').first);
+    await tester.pumpAndSettle();
+    expect(find.text('会話 #1  3件'), findsOneWidget);
+
+    // 開いただけでは入力欄は出ない（本体の 1 つだけ＝会話全体への返信と誤解しない）。
+    expect(find.widgetWithText(TextField, 'レスを書く'), findsOneWidget);
+
+    // シート内の返信アイコンを押すと入力欄が出る（本体＋シートで 2 つ）。
+    await tester.tap(find.byIcon(Icons.reply).last);
+    await tester.pumpAndSettle();
+    final composers = find.widgetWithText(TextField, 'レスを書く');
+    expect(composers, findsNWidgets(2));
+    // シート側の入力欄には対象の >>N が入っている。
+    final tf = tester.widget<TextField>(composers.last);
+    expect(tf.controller!.text.startsWith('>>'), isTrue);
+
+    // 閉じるボタンで入力欄を隠せる。
+    await tester.tap(find.byIcon(Icons.close));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(TextField, 'レスを書く'), findsOneWidget);
+  });
+
   testWidgets('スレタイシートからお気に入りを切り替える', (tester) async {
     final history = ReadHistory(MemoryReadHistoryStorage());
     final f = QueueFetcher([
