@@ -289,8 +289,8 @@ void main() {
     await tester.pumpAndSettle();
 
     final titleText = tester.widget<Text>(find.text(title));
-    expect(titleText.maxLines, 3);
-    expect(tester.widget<AppBar>(find.byType(AppBar)).toolbarHeight, 96);
+    expect(titleText.maxLines, 2);
+    expect(tester.widget<AppBar>(find.byType(AppBar)).toolbarHeight, 80);
   });
 
   testWidgets('1001 行があれば完走表示を出す', (tester) async {

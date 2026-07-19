@@ -809,7 +809,7 @@ class _ThreadScreenState extends State<ThreadScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        toolbarHeight: 96,
+        toolbarHeight: 80,
         // タイトルは重要なので AppBar 内でできるだけ読ませる。極端に長い場合は
         // これまで通りタップで全文を出す。
         title: InkWell(
@@ -823,7 +823,7 @@ class _ThreadScreenState extends State<ThreadScreen>
               children: [
                 Text(
                   decodeEntities(widget.threadTitle),
-                  maxLines: 3,
+                  maxLines: 2,
                   style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
