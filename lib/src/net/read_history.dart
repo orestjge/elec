@@ -17,6 +17,7 @@ class ReadHistorySnapshot {
     this.threads = const {},
     this.ownThreads = const {},
     this.ownPosts = const {},
+    this.lastViewedThreadKey,
   });
 
   final Map<String, int> seen;
@@ -24,6 +25,7 @@ class ReadHistorySnapshot {
   final Map<String, StoredThread> threads;
   final Set<String> ownThreads;
   final Map<String, Set<int>> ownPosts;
+  final String? lastViewedThreadKey;
 }
 
 class StoredThread {
@@ -105,6 +107,9 @@ class FileReadHistoryStorage implements ReadHistoryStorage {
           ownPosts: ownPostsJson is Map<String, dynamic>
               ? _decodeOwnPosts(ownPostsJson)
               : const {},
+          lastViewedThreadKey: json['lastViewedThreadKey'] is String
+              ? json['lastViewedThreadKey'] as String
+              : null,
         );
       }
       // 旧形式（スレッドキー → 最後に見たレス数）もそのまま読めるようにする。
@@ -128,6 +133,7 @@ class FileReadHistoryStorage implements ReadHistoryStorage {
         'ownPosts': snapshot.ownPosts.map(
           (k, v) => MapEntry(k, v.toList()..sort()),
         ),
+        'lastViewedThreadKey': snapshot.lastViewedThreadKey,
       }),
     );
   }
@@ -162,17 +168,20 @@ class MemoryReadHistoryStorage implements ReadHistoryStorage {
   Map<String, StoredThread> _threads;
   Set<String> _ownThreads;
   Map<String, Set<int>> _ownPosts;
+  String? _lastViewedThreadKey;
   MemoryReadHistoryStorage([
     Map<String, int>? seen,
     Set<String>? favorites,
     Map<String, StoredThread>? threads,
     Set<String>? ownThreads,
     Map<String, Set<int>>? ownPosts,
+    String? lastViewedThreadKey,
   ]) : _seen = seen ?? {},
        _favorites = favorites ?? {},
        _threads = threads ?? {},
        _ownThreads = ownThreads ?? {},
-       _ownPosts = ownPosts ?? {};
+       _ownPosts = ownPosts ?? {},
+       _lastViewedThreadKey = lastViewedThreadKey;
 
   @override
   Future<ReadHistorySnapshot> load() async => ReadHistorySnapshot(
@@ -181,6 +190,7 @@ class MemoryReadHistoryStorage implements ReadHistoryStorage {
     threads: Map.of(_threads),
     ownThreads: Set.of(_ownThreads),
     ownPosts: _ownPosts.map((k, v) => MapEntry(k, Set.of(v))),
+    lastViewedThreadKey: _lastViewedThreadKey,
   );
 
   @override
@@ -190,6 +200,7 @@ class MemoryReadHistoryStorage implements ReadHistoryStorage {
     _threads = Map.of(snapshot.threads);
     _ownThreads = Set.of(snapshot.ownThreads);
     _ownPosts = snapshot.ownPosts.map((k, v) => MapEntry(k, Set.of(v)));
+    _lastViewedThreadKey = snapshot.lastViewedThreadKey;
   }
 }
 
@@ -207,6 +218,7 @@ class ReadHistory {
   Map<String, StoredThread> _threads = {};
   Set<String> _ownThreads = {};
   Map<String, Set<int>> _ownPosts = {};
+  String? _lastViewedThreadKey;
 
   Future<void> load() async {
     final snapshot = await _storage.load();
@@ -215,6 +227,7 @@ class ReadHistory {
     _threads = Map.of(snapshot.threads);
     _ownThreads = Set.of(snapshot.ownThreads);
     _ownPosts = snapshot.ownPosts.map((k, v) => MapEntry(k, Set.of(v)));
+    _lastViewedThreadKey = snapshot.lastViewedThreadKey;
   }
 
   bool isRead(String threadKey) => _seen.containsKey(threadKey);
@@ -223,6 +236,12 @@ class ReadHistory {
   int? lastSeen(String threadKey) => _seen[threadKey];
 
   Iterable<StoredThread> get storedThreads => _threads.values;
+
+  StoredThread? get lastViewedThread {
+    final key = _lastViewedThreadKey;
+    if (key == null) return null;
+    return _threads[key];
+  }
 
   Future<void> rememberThread(ThreadSummary thread) async {
     final prev = _threads[thread.key];
@@ -238,6 +257,13 @@ class ReadHistory {
       resCount: thread.resCount,
       capName: thread.capName,
     );
+    await _save();
+  }
+
+  Future<void> markLastViewedThread(ThreadSummary thread) async {
+    await rememberThread(thread);
+    if (_lastViewedThreadKey == thread.key) return;
+    _lastViewedThreadKey = thread.key;
     await _save();
   }
 
@@ -295,6 +321,7 @@ class ReadHistory {
         threads: Map.of(_threads),
         ownThreads: Set.of(_ownThreads),
         ownPosts: _ownPosts.map((k, v) => MapEntry(k, Set.of(v))),
+        lastViewedThreadKey: _lastViewedThreadKey,
       ),
     );
   }
