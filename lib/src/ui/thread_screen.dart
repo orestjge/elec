@@ -99,8 +99,9 @@ class _ThreadScreenState extends State<ThreadScreen>
   double _horizontalDragDistance = 0;
   double _verticalDragDistance = 0;
   bool _trackingSwipe = false;
+  Timer? _swipeStartTimer;
   static const double _swipeDistanceThreshold = 96;
-  static const double _swipeEdgeWidth = 24;
+  static const Duration _swipeStartTimeout = Duration(milliseconds: 450);
 
   Uri get _url => widget.endpoints.dat(widget.threadKey);
 
@@ -138,6 +139,7 @@ class _ThreadScreenState extends State<ThreadScreen>
     _positions.itemPositions.removeListener(_onPositions);
     WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
+    _swipeStartTimer?.cancel();
     _topSnackTimer?.cancel();
     _topSnackEntry?.remove();
     _composer.dispose();
@@ -662,7 +664,11 @@ class _ThreadScreenState extends State<ThreadScreen>
   void _handlePointerDown(PointerDownEvent event) {
     _horizontalDragDistance = 0;
     _verticalDragDistance = 0;
-    _trackingSwipe = _isLeftEdgePointer(event);
+    _trackingSwipe = true;
+    _swipeStartTimer?.cancel();
+    _swipeStartTimer = Timer(_swipeStartTimeout, () {
+      _trackingSwipe = false;
+    });
   }
 
   void _handlePointerMove(PointerMoveEvent event) {
@@ -672,6 +678,7 @@ class _ThreadScreenState extends State<ThreadScreen>
   }
 
   void _handlePointerUp(PointerUpEvent event) {
+    _swipeStartTimer?.cancel();
     if (!_trackingSwipe) return;
     _trackingSwipe = false;
     if (_composerFocus.hasFocus) return;
@@ -682,14 +689,8 @@ class _ThreadScreenState extends State<ThreadScreen>
   }
 
   void _handlePointerCancel(PointerCancelEvent event) {
+    _swipeStartTimer?.cancel();
     _trackingSwipe = false;
-  }
-
-  bool _isLeftEdgePointer(PointerDownEvent event) {
-    final box = context.findRenderObject();
-    if (box is! RenderBox || !box.hasSize) return false;
-    final local = box.globalToLocal(event.position);
-    return local.dx <= _swipeEdgeWidth;
   }
 
   /// スレ画面の通知は入力欄や末尾レスに重ならないよう、上部へ出す。

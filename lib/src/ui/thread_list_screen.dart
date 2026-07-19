@@ -81,8 +81,9 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   double _horizontalDragDistance = 0;
   double _verticalDragDistance = 0;
   bool _trackingSwipe = false;
+  Timer? _swipeStartTimer;
   static const double _swipeDistanceThreshold = 96;
-  static const double _swipeEdgeWidth = 24;
+  static const Duration _swipeStartTimeout = Duration(milliseconds: 450);
 
   /// 表示中の並び順（スレキー列）の固定スナップショット。実況板では最近レス順
   /// が高頻度で入れ替わり一覧を追えないため、自動更新では並べ替えず、レス数・
@@ -109,6 +110,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
+    _swipeStartTimer?.cancel();
     _search.dispose();
     final fetcher = _fetcher;
     if (_ownsFetcher && fetcher is HttpClientFetcher) {
@@ -473,7 +475,11 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   void _handlePointerDown(PointerDownEvent event) {
     _horizontalDragDistance = 0;
     _verticalDragDistance = 0;
-    _trackingSwipe = _isRightEdgePointer(event);
+    _trackingSwipe = true;
+    _swipeStartTimer?.cancel();
+    _swipeStartTimer = Timer(_swipeStartTimeout, () {
+      _trackingSwipe = false;
+    });
   }
 
   void _handlePointerMove(PointerMoveEvent event) {
@@ -483,6 +489,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   }
 
   void _handlePointerUp(PointerUpEvent event) {
+    _swipeStartTimer?.cancel();
     if (!_trackingSwipe) return;
     _trackingSwipe = false;
     final leftwardDistance = -_horizontalDragDistance;
@@ -492,14 +499,8 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   }
 
   void _handlePointerCancel(PointerCancelEvent event) {
+    _swipeStartTimer?.cancel();
     _trackingSwipe = false;
-  }
-
-  bool _isRightEdgePointer(PointerDownEvent event) {
-    final box = context.findRenderObject();
-    if (box is! RenderBox || !box.hasSize) return false;
-    final local = box.globalToLocal(event.position);
-    return local.dx >= box.size.width - _swipeEdgeWidth;
   }
 
   Future<void> _openNewThread() async {

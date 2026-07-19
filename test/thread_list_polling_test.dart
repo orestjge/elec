@@ -295,17 +295,14 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    final listSize = tester.getSize(find.byType(CustomScrollView));
-    final gesture = await tester.startGesture(Offset(listSize.width - 8, 320));
-    await gesture.moveBy(const Offset(-500, 0));
-    await gesture.up();
+    await tester.drag(find.byType(CustomScrollView), const Offset(-500, 0));
     await tester.pumpAndSettle();
 
     expect(find.text('1レス'), findsOneWidget);
     expect(find.textContaining('本文', findRichText: true), findsOneWidget);
   });
 
-  testWidgets('一覧中央の左ドラッグでは直近スレを開かない', (tester) async {
+  testWidgets('一覧で長押し後の左ドラッグでは直近スレを開かない', (tester) async {
     final history = ReadHistory(MemoryReadHistoryStorage());
     await history.markLastViewedThread(
       const ThreadSummary(key: '1', title: '直近スレ', resCount: 1, capName: null),
@@ -323,7 +320,12 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.drag(find.byType(CustomScrollView), const Offset(-500, 0));
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byType(CustomScrollView)),
+    );
+    await tester.pump(const Duration(milliseconds: 500));
+    await gesture.moveBy(const Offset(-500, 0));
+    await gesture.up();
     await tester.pumpAndSettle();
 
     expect(find.text('エッヂ'), findsWidgets);
@@ -377,7 +379,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('1レス'), findsOneWidget);
 
-    final gesture = await tester.startGesture(const Offset(8, 320));
+    final gesture = await tester.startGesture(const Offset(240, 320));
     await gesture.moveBy(const Offset(500, 0));
     await gesture.up();
     await tester.pumpAndSettle();
@@ -387,7 +389,7 @@ void main() {
     expect(find.text('1レス'), findsNothing);
   });
 
-  testWidgets('スレ画面中央の右ドラッグでは一覧に戻らない', (tester) async {
+  testWidgets('スレ画面で長押し後の右ドラッグでは一覧に戻らない', (tester) async {
     final fetcher = QueueFetcher([
       subjectOk('1.dat<>選択できるスレ (1)\n', 'LM1'),
       datOk(datLine('名無し<><>2025/11/03(月) 02:14:51.907 ID:aaa<> 本文 <>選択できるスレ')),
@@ -406,10 +408,12 @@ void main() {
     await tester.tap(find.text('選択できるスレ'));
     await tester.pumpAndSettle();
 
-    await tester.drag(
-      find.textContaining('本文', findRichText: true),
-      const Offset(500, 0),
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.textContaining('本文', findRichText: true)),
     );
+    await tester.pump(const Duration(milliseconds: 500));
+    await gesture.moveBy(const Offset(500, 0));
+    await gesture.up();
     await tester.pumpAndSettle();
 
     expect(find.text('1レス'), findsOneWidget);
