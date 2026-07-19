@@ -208,17 +208,7 @@ class _Header extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              Flexible(
-                child: Text(
-                  name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    color: scheme.onSurface,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
+              Flexible(child: _NameLabel(name: name)),
               if (res.id != null) ...[
                 const SizedBox(width: 8),
                 _IdChip(
@@ -254,6 +244,32 @@ class _Header extends StatelessWidget {
           ),
         ],
       ],
+    );
+  }
+}
+
+class _NameLabel extends StatelessWidget {
+  const _NameLabel({required this.name});
+  final String name;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final label = Text(
+      name,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: theme.textTheme.labelLarge?.copyWith(
+        color: theme.colorScheme.onSurface,
+        fontWeight: FontWeight.w600,
+      ),
+    );
+    if (name.isEmpty) return label;
+    return Tooltip(
+      message: name,
+      triggerMode: TooltipTriggerMode.tap,
+      preferBelow: false,
+      child: label,
     );
   }
 }

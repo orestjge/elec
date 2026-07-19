@@ -168,6 +168,25 @@ void main() {
     expect(find.text('ID:aaa  2レス'), findsNothing);
   });
 
+  testWidgets('ユーザー名をタップすると全文を表示する', (tester) async {
+    final longName = 'とても長いユーザー名' * 6;
+    final f = QueueFetcher([
+      ok([
+        ...datLine(
+          '$longName<><>2025/11/03(月) 02:14:51.907 ID:aaa<> 本文 <>スレタイ',
+        ),
+      ]),
+    ]);
+
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text(longName));
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip(longName), findsOneWidget);
+  });
+
   testWidgets('返信数チップから会話ビューを出す', (tester) async {
     final f = QueueFetcher([
       ok([...res1, ...res2, ...res3]),
