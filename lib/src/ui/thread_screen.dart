@@ -364,6 +364,19 @@ class _ThreadScreenState extends State<ThreadScreen>
     return counts;
   }
 
+  Map<int, int> _idOrdinals(List<Res> res) {
+    final seenById = <String, int>{};
+    final ordinals = <int, int>{};
+    for (final r in res) {
+      final id = r.id;
+      if (id == null) continue;
+      final ordinal = (seenById[id] ?? 0) + 1;
+      seenById[id] = ordinal;
+      ordinals[r.number] = ordinal;
+    }
+    return ordinals;
+  }
+
   Future<void> _markPendingOwnPosts(List<Res> newRes) async {
     if (_pendingOwnPosts <= 0 || newRes.isEmpty) return;
     final count = _pendingOwnPosts < newRes.length
@@ -404,6 +417,7 @@ class _ThreadScreenState extends State<ThreadScreen>
   /// レス群をボトムシートで一覧表示する（同一 ID・返信一覧で共用）。
   void _showPostsSheet(String title, List<Res> posts) {
     final idCounts = _idCounts(_state.res);
+    final idOrdinals = _idOrdinals(_state.res);
     final replyCountByNumber = replyCounts(_state.res);
     showModalBottomSheet<void>(
       context: context,
@@ -434,6 +448,7 @@ class _ThreadScreenState extends State<ThreadScreen>
                 itemBuilder: (context, i) => PostItem(
                   res: posts[i],
                   idCount: idCounts[posts[i].id] ?? 1,
+                  idOrdinal: idOrdinals[posts[i].number] ?? 1,
                   onTapId: null,
                   onTapRes: (n) {
                     Navigator.pop(context);
@@ -480,6 +495,7 @@ class _ThreadScreenState extends State<ThreadScreen>
     }
     final entries = _conversationEntries(centers);
     final idCounts = _idCounts(res);
+    final idOrdinals = _idOrdinals(res);
     final replyCountByNumber = replyCounts(res);
     final title = centers.length == 1
         ? '会話 #${centers.single}'
@@ -502,6 +518,7 @@ class _ThreadScreenState extends State<ThreadScreen>
           scrollController: controller,
           focusNumber: effectiveFocusNumber,
           idCounts: idCounts,
+          idOrdinals: idOrdinals,
           replyCountByNumber: replyCountByNumber,
           onTapId: _showIdPosts,
           onTapRes: (_, target) {
@@ -862,6 +879,7 @@ class _ThreadScreenState extends State<ThreadScreen>
 
     final res = _state.res;
     final idCounts = _idCounts(res);
+    final idOrdinals = _idOrdinals(res);
     final replies = replyCounts(res);
     // 「新着」の境界（前回位置）。0 か総数以上なら新着ライン無し。
     final hasNewArrival = _openCount > 0 && _openCount < res.length;
@@ -898,6 +916,7 @@ class _ThreadScreenState extends State<ThreadScreen>
                   PostItem(
                     res: item,
                     idCount: idCounts[item.id] ?? 1,
+                    idOrdinal: idOrdinals[item.number] ?? 1,
                     onTapId: _showIdPosts,
                     onTapRes: _showResPopup,
                     onTapResRange: _showConversationRange,
@@ -1024,6 +1043,7 @@ class _ConversationSheet extends StatefulWidget {
     required this.scrollController,
     required this.focusNumber,
     required this.idCounts,
+    required this.idOrdinals,
     required this.replyCountByNumber,
     required this.onTapId,
     required this.onTapRes,
@@ -1040,6 +1060,7 @@ class _ConversationSheet extends StatefulWidget {
   final ScrollController scrollController;
   final int? focusNumber;
   final Map<String, int> idCounts;
+  final Map<int, int> idOrdinals;
   final Map<int, int> replyCountByNumber;
   final ValueChanged<String> onTapId;
   final void Function(int source, int target) onTapRes;
@@ -1152,6 +1173,7 @@ class _ConversationSheetState extends State<_ConversationSheet> {
                         child: PostItem(
                           res: entry.res,
                           idCount: widget.idCounts[entry.res.id] ?? 1,
+                          idOrdinal: widget.idOrdinals[entry.res.number] ?? 1,
                           onTapId: widget.onTapId,
                           onTapRes: (n) => widget.onTapRes(entry.res.number, n),
                           onTapResRange: (numbers) =>
