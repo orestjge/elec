@@ -9,6 +9,15 @@
 # packages, and plugins designed to encourage good coding practices.
 include: package:flutter_lints/flutter.yaml
 
+analyzer:
+  # サブパッケージ（packages/）は独立した pub パッケージで、それぞれ自分の
+  # 依存・テストを持つ。アプリ側の `flutter analyze` から除外し、各パッケージは
+  # 自身のコンテキスト（`cd packages/xxx && dart analyze`）で解析する。
+  # これをしないと、ルート解析がサブパッケージの test を巻き込み、CI のように
+  # まだ `dart pub get` されていない環境で package:test 未解決エラーになる。
+  exclude:
+    - packages/**
+
 linter:
   # The lint rules applied to this project can be customized in the
   # section below to disable rules from the `package:flutter_lints/flutter.yaml`
