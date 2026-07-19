@@ -1,0 +1,19 @@
+name: edge_core
+description: >-
+  エッヂ (eddist) / 5ch 互換掲示板のプロトコルロジック。dat / subject.txt の
+  パースと Range 差分取得。HTTP は抽象化してあり、この層自体は
+  ネットワークにも Flutter にも依存しない純 Dart。
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.9.0
+
+dependencies:
+  edge_sjis:
+    path: ../edge_sjis
+
+dev_dependencies:
+  jis0208: ^1.0.1
+  lints: ^5.0.0
+  test: ^1.25.0

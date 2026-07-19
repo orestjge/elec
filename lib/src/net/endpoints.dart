@@ -1,0 +1,36 @@
+/// エッヂのエンドポイント。board / host をここ 1 箇所に集約する。
+///
+/// PROJECT.md の「将来の 5ch 対応に向けた抽象化」方針どおり、定数を散らさず
+/// ここだけにまとめる。初期スコープでは liveedge 固定。
+class EdgeEndpoints {
+  const EdgeEndpoints({
+    this.host = 'bbs.eddibb.cc',
+    this.boardKey = 'liveedge',
+  });
+
+  final String host;
+  final String boardKey;
+
+  Uri get subjectTxt => Uri.https(host, '/$boardKey/subject.txt');
+
+  Uri get settingTxt => Uri.https(host, '/$boardKey/SETTING.TXT');
+
+  /// 現行スレの dat。
+  Uri dat(String threadKey) => Uri.https(host, '/$boardKey/dat/$threadKey.dat');
+
+  /// 過去ログ（oyster/kako）。現行 dat が 404 のときのフォールバック。
+  Uri kakoDat(String threadKey) {
+    final t4 = threadKey.substring(0, 4);
+    final t5 = threadKey.substring(0, 5);
+    return Uri.https(host, '/$boardKey/kako/$t4/$t5/$threadKey.dat');
+  }
+
+  /// 書き込み先。bbs.cgi は board を問わず共通で、body の `bbs=` で板を指定する。
+  Uri get bbsCgi => Uri.https(host, '/test/bbs.cgi');
+
+  /// 認証コード入力ページ（WebView で開く）。
+  Uri get authCode => Uri.https(host, '/auth-code');
+
+  /// クライアント設定 API。
+  Uri get clientConfig => Uri.https(host, '/api/client-config');
+}

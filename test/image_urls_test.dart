@@ -1,0 +1,56 @@
+import 'package:elec/src/ui/image_urls.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+void main() {
+  List<String> urls(String s) =>
+      imageUrlsIn(s).map((u) => u.toString()).toList();
+  List<String> videos(String s) =>
+      videoUrlsIn(s).map((u) => u.toString()).toList();
+
+  test('画像拡張子の URL を拾う', () {
+    expect(urls('見て https://i.imgur.com/abc.jpg かわいい'), [
+      'https://i.imgur.com/abc.jpg',
+    ]);
+    expect(urls('a http://x/y.PNG b http://x/z.webp'), [
+      'http://x/y.PNG',
+      'http://x/z.webp',
+    ]);
+  });
+
+  test('クエリ付きは拡張子で判定しつつ URL 全体を返す', () {
+    // パス末尾が画像拡張子なら対象。
+    expect(urls('https://h/pic.jpeg より'), ['https://h/pic.jpeg']);
+  });
+
+  test('画像でない URL は無視する', () {
+    expect(urls('https://example.com/page や https://imgur.com/abc'), isEmpty);
+    expect(urls('スレ http://bbs.eddibb.cc/liveedge/1234'), isEmpty);
+  });
+
+  test('動画拡張子の URL を拾う', () {
+    expect(videos('動画 https://example.com/a.mp4 と http://x/b.webm?dl=1'), [
+      'https://example.com/a.mp4',
+      'http://x/b.webm?dl=1',
+    ]);
+    expect(videos('画像 https://example.com/a.jpg'), isEmpty);
+  });
+
+  test('省略された https URL も拾って正規化する', () {
+    expect(urls('ttps://example.com/a.jpg tps://example.com/b.png'), [
+      'https://example.com/a.jpg',
+      'https://example.com/b.png',
+    ]);
+    expect(videos('s://example.com/c.mp4'), ['https://example.com/c.mp4']);
+  });
+
+  test('重複は除去し出現順を保つ', () {
+    expect(urls('https://x/a.png https://x/b.gif https://x/a.png'), [
+      'https://x/a.png',
+      'https://x/b.gif',
+    ]);
+  });
+
+  test('URL が無ければ空', () {
+    expect(urls('ただの本文です'), isEmpty);
+  });
+}
