@@ -419,4 +419,42 @@ void main() {
     expect(find.text('1レス'), findsOneWidget);
     expect(find.textContaining('本文', findRichText: true), findsOneWidget);
   });
+
+  testWidgets('スレ本文の文字選択中は右ドラッグで一覧に戻らない', (tester) async {
+    final fetcher = QueueFetcher([
+      subjectOk('1.dat<>選択中スレ (1)\n', 'LM1'),
+      datOk(datLine('名無し<><>2025/11/03(月) 02:14:51.907 ID:aaa<> 本文 <>選択中スレ')),
+    ]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadListScreen(
+          fetcher: fetcher,
+          pollInterval: const Duration(seconds: 15),
+          readHistory: ReadHistory(MemoryReadHistoryStorage()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('選択中スレ'));
+    await tester.pumpAndSettle();
+
+    final bodyFinder = find.byWidgetPredicate(
+      (widget) =>
+          widget is SelectableText &&
+          widget.textSpan?.toPlainText().contains('本文') == true,
+    );
+    final body = tester.widget<SelectableText>(bodyFinder);
+    body.onSelectionChanged?.call(
+      const TextSelection(baseOffset: 0, extentOffset: 2),
+      SelectionChangedCause.longPress,
+    );
+    await tester.pump();
+
+    await tester.drag(bodyFinder, const Offset(500, 0));
+    await tester.pumpAndSettle();
+
+    expect(find.text('1レス'), findsOneWidget);
+    expect(bodyFinder, findsOneWidget);
+  });
 }

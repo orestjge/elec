@@ -71,6 +71,7 @@ class ResBody extends StatefulWidget {
     required this.onTapRes,
     required this.onTapUrl,
     this.onTapResRange,
+    this.onSelectionActiveChanged,
     this.style,
   });
 
@@ -78,6 +79,7 @@ class ResBody extends StatefulWidget {
   final ValueChanged<int> onTapRes;
   final ValueChanged<List<int>>? onTapResRange;
   final ValueChanged<Uri> onTapUrl;
+  final ValueChanged<bool>? onSelectionActiveChanged;
   final TextStyle? style;
 
   @override
@@ -178,6 +180,9 @@ class _ResBodyState extends State<ResBody> {
 
     final body = SelectableText.rich(
       TextSpan(style: effectiveStyle, children: spans),
+      onSelectionChanged: (selection, cause) {
+        widget.onSelectionActiveChanged?.call(!selection.isCollapsed);
+      },
     );
     if (!isAsciiArt) return body;
 

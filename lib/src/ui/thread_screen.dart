@@ -99,6 +99,7 @@ class _ThreadScreenState extends State<ThreadScreen>
   double _horizontalDragDistance = 0;
   double _verticalDragDistance = 0;
   bool _trackingSwipe = false;
+  final _selectedBodyResNumbers = <int>{};
   Timer? _swipeStartTimer;
   static const double _swipeDistanceThreshold = 96;
   static const Duration _swipeStartTimeout = Duration(milliseconds: 450);
@@ -664,8 +665,9 @@ class _ThreadScreenState extends State<ThreadScreen>
   void _handlePointerDown(PointerDownEvent event) {
     _horizontalDragDistance = 0;
     _verticalDragDistance = 0;
-    _trackingSwipe = true;
+    _trackingSwipe = !_bodySelectionActive;
     _swipeStartTimer?.cancel();
+    if (!_trackingSwipe) return;
     _swipeStartTimer = Timer(_swipeStartTimeout, () {
       _trackingSwipe = false;
     });
@@ -681,6 +683,7 @@ class _ThreadScreenState extends State<ThreadScreen>
     _swipeStartTimer?.cancel();
     if (!_trackingSwipe) return;
     _trackingSwipe = false;
+    if (_bodySelectionActive) return;
     if (_composerFocus.hasFocus) return;
     if (_horizontalDragDistance < _swipeDistanceThreshold) return;
     if (_horizontalDragDistance < _verticalDragDistance * 1.2) return;
@@ -691,6 +694,18 @@ class _ThreadScreenState extends State<ThreadScreen>
   void _handlePointerCancel(PointerCancelEvent event) {
     _swipeStartTimer?.cancel();
     _trackingSwipe = false;
+  }
+
+  bool get _bodySelectionActive => _selectedBodyResNumbers.isNotEmpty;
+
+  void _handleBodySelectionActiveChanged(int resNumber, bool active) {
+    final changed = active
+        ? _selectedBodyResNumbers.add(resNumber)
+        : _selectedBodyResNumbers.remove(resNumber);
+    if (!changed) return;
+    setState(() {
+      if (active) _trackingSwipe = false;
+    });
   }
 
   /// スレ画面の通知は入力欄や末尾レスに重ならないよう、上部へ出す。
@@ -890,6 +905,8 @@ class _ThreadScreenState extends State<ThreadScreen>
                     replyCount: replies[item.number] ?? 0,
                     onTapReplies: _showReplies,
                     onReply: _reply,
+                    onBodySelectionActiveChanged: (active) =>
+                        _handleBodySelectionActiveChanged(item.number, active),
                     isOwn: _history.isOwnPost(widget.threadKey, item.number),
                   ),
                   const Divider(height: 1),

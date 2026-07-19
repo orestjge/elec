@@ -20,6 +20,7 @@ class PostItem extends StatelessWidget {
     this.replyCount = 0,
     this.onTapReplies,
     this.onReply,
+    this.onBodySelectionActiveChanged,
     this.isOwn = false,
   });
 
@@ -48,6 +49,9 @@ class PostItem extends StatelessWidget {
 
   /// 「このレスに返信」タップ時。コンポーザに `>>N` を入れる。
   final ValueChanged<int>? onReply;
+
+  /// 本文の文字選択状態が変わったとき。
+  final ValueChanged<bool>? onBodySelectionActiveChanged;
 
   /// このアプリから投稿したレスか。
   final bool isOwn;
@@ -99,6 +103,7 @@ class PostItem extends StatelessWidget {
               onTapRes: (n) => onTapRes?.call(n),
               onTapResRange: (numbers) => onTapResRange?.call(numbers),
               onTapUrl: (u) => onTapUrl?.call(u),
+              onSelectionActiveChanged: onBodySelectionActiveChanged,
             ),
           ],
           if (images.isNotEmpty || videos.isNotEmpty)
