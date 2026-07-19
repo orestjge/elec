@@ -13,6 +13,7 @@ class PostItem extends StatelessWidget {
     super.key,
     required this.res,
     required this.idCount,
+    required this.idOrdinal,
     required this.onTapId,
     this.onTapRes,
     this.onTapResRange,
@@ -20,6 +21,7 @@ class PostItem extends StatelessWidget {
     this.replyCount = 0,
     this.onTapReplies,
     this.onReply,
+    this.onBodySelectionActiveChanged,
     this.isOwn = false,
   });
 
@@ -27,6 +29,9 @@ class PostItem extends StatelessWidget {
 
   /// このスレでの同一 ID の総数（1 なら単発）。
   final int idCount;
+
+  /// このレスが同一 ID 内で何番目か（1 始まり）。
+  final int idOrdinal;
 
   /// ID タップ時。同一 ID のレス一覧を出す。
   final ValueChanged<String>? onTapId;
@@ -48,6 +53,9 @@ class PostItem extends StatelessWidget {
 
   /// 「このレスに返信」タップ時。コンポーザに `>>N` を入れる。
   final ValueChanged<int>? onReply;
+
+  /// 本文の文字選択状態が変わったとき。
+  final ValueChanged<bool>? onBodySelectionActiveChanged;
 
   /// このアプリから投稿したレスか。
   final bool isOwn;
@@ -87,6 +95,7 @@ class PostItem extends StatelessWidget {
             res: res,
             name: name.isEmpty ? '名無し' : name,
             idCount: idCount,
+            idOrdinal: idOrdinal,
             onTapId: onTapId,
             onReply: onReply,
             isOwn: isOwn,
@@ -99,6 +108,7 @@ class PostItem extends StatelessWidget {
               onTapRes: (n) => onTapRes?.call(n),
               onTapResRange: (numbers) => onTapResRange?.call(numbers),
               onTapUrl: (u) => onTapUrl?.call(u),
+              onSelectionActiveChanged: onBodySelectionActiveChanged,
             ),
           ],
           if (images.isNotEmpty || videos.isNotEmpty)
@@ -161,6 +171,7 @@ class _Header extends StatelessWidget {
     required this.res,
     required this.name,
     required this.idCount,
+    required this.idOrdinal,
     required this.onTapId,
     required this.onReply,
     required this.isOwn,
@@ -169,6 +180,7 @@ class _Header extends StatelessWidget {
   final Res res;
   final String name;
   final int idCount;
+  final int idOrdinal;
   final ValueChanged<String>? onTapId;
   final ValueChanged<int>? onReply;
   final bool isOwn;
@@ -196,20 +208,15 @@ class _Header extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              Flexible(
-                child: Text(
-                  name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    color: scheme.onSurface,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
+              Flexible(child: _NameLabel(name: name)),
               if (res.id != null) ...[
                 const SizedBox(width: 8),
-                _IdChip(id: res.id!, count: idCount, onTap: onTapId),
+                _IdChip(
+                  id: res.id!,
+                  count: idCount,
+                  ordinal: idOrdinal,
+                  onTap: onTapId,
+                ),
               ],
               if (isOwn) ...[
                 const SizedBox(width: 8),
@@ -237,6 +244,32 @@ class _Header extends StatelessWidget {
           ),
         ],
       ],
+    );
+  }
+}
+
+class _NameLabel extends StatelessWidget {
+  const _NameLabel({required this.name});
+  final String name;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final label = Text(
+      name,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: theme.textTheme.labelLarge?.copyWith(
+        color: theme.colorScheme.onSurface,
+        fontWeight: FontWeight.w600,
+      ),
+    );
+    if (name.isEmpty) return label;
+    return Tooltip(
+      message: name,
+      triggerMode: TooltipTriggerMode.tap,
+      preferBelow: false,
+      child: label,
     );
   }
 }
@@ -301,9 +334,15 @@ class _TimeLabel extends StatelessWidget {
 }
 
 class _IdChip extends StatelessWidget {
-  const _IdChip({required this.id, required this.count, required this.onTap});
+  const _IdChip({
+    required this.id,
+    required this.count,
+    required this.ordinal,
+    required this.onTap,
+  });
   final String id;
   final int count;
+  final int ordinal;
   final ValueChanged<String>? onTap;
 
   @override
@@ -320,7 +359,7 @@ class _IdChip extends StatelessWidget {
           borderRadius: BorderRadius.circular(6),
         ),
         child: Text(
-          count > 1 ? 'ID:$id ($count)' : 'ID:$id',
+          count > 1 ? 'ID:$id ($ordinal/$count)' : 'ID:$id',
           style: TextStyle(
             fontSize: 11,
             color: color,

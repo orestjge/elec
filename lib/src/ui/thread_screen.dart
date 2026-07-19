@@ -99,6 +99,7 @@ class _ThreadScreenState extends State<ThreadScreen>
   double _horizontalDragDistance = 0;
   double _verticalDragDistance = 0;
   bool _trackingSwipe = false;
+  final _selectedBodyResNumbers = <int>{};
   Timer? _swipeStartTimer;
   static const double _swipeDistanceThreshold = 96;
   static const Duration _swipeStartTimeout = Duration(milliseconds: 450);
@@ -363,6 +364,19 @@ class _ThreadScreenState extends State<ThreadScreen>
     return counts;
   }
 
+  Map<int, int> _idOrdinals(List<Res> res) {
+    final seenById = <String, int>{};
+    final ordinals = <int, int>{};
+    for (final r in res) {
+      final id = r.id;
+      if (id == null) continue;
+      final ordinal = (seenById[id] ?? 0) + 1;
+      seenById[id] = ordinal;
+      ordinals[r.number] = ordinal;
+    }
+    return ordinals;
+  }
+
   Future<void> _markPendingOwnPosts(List<Res> newRes) async {
     if (_pendingOwnPosts <= 0 || newRes.isEmpty) return;
     final count = _pendingOwnPosts < newRes.length
@@ -403,6 +417,7 @@ class _ThreadScreenState extends State<ThreadScreen>
   /// レス群をボトムシートで一覧表示する（同一 ID・返信一覧で共用）。
   void _showPostsSheet(String title, List<Res> posts) {
     final idCounts = _idCounts(_state.res);
+    final idOrdinals = _idOrdinals(_state.res);
     final replyCountByNumber = replyCounts(_state.res);
     showModalBottomSheet<void>(
       context: context,
@@ -433,6 +448,7 @@ class _ThreadScreenState extends State<ThreadScreen>
                 itemBuilder: (context, i) => PostItem(
                   res: posts[i],
                   idCount: idCounts[posts[i].id] ?? 1,
+                  idOrdinal: idOrdinals[posts[i].number] ?? 1,
                   onTapId: null,
                   onTapRes: (n) {
                     Navigator.pop(context);
@@ -479,6 +495,7 @@ class _ThreadScreenState extends State<ThreadScreen>
     }
     final entries = _conversationEntries(centers);
     final idCounts = _idCounts(res);
+    final idOrdinals = _idOrdinals(res);
     final replyCountByNumber = replyCounts(res);
     final title = centers.length == 1
         ? '会話 #${centers.single}'
@@ -501,6 +518,7 @@ class _ThreadScreenState extends State<ThreadScreen>
           scrollController: controller,
           focusNumber: effectiveFocusNumber,
           idCounts: idCounts,
+          idOrdinals: idOrdinals,
           replyCountByNumber: replyCountByNumber,
           onTapId: _showIdPosts,
           onTapRes: (_, target) {
@@ -664,8 +682,9 @@ class _ThreadScreenState extends State<ThreadScreen>
   void _handlePointerDown(PointerDownEvent event) {
     _horizontalDragDistance = 0;
     _verticalDragDistance = 0;
-    _trackingSwipe = true;
+    _trackingSwipe = !_bodySelectionActive;
     _swipeStartTimer?.cancel();
+    if (!_trackingSwipe) return;
     _swipeStartTimer = Timer(_swipeStartTimeout, () {
       _trackingSwipe = false;
     });
@@ -681,6 +700,7 @@ class _ThreadScreenState extends State<ThreadScreen>
     _swipeStartTimer?.cancel();
     if (!_trackingSwipe) return;
     _trackingSwipe = false;
+    if (_bodySelectionActive) return;
     if (_composerFocus.hasFocus) return;
     if (_horizontalDragDistance < _swipeDistanceThreshold) return;
     if (_horizontalDragDistance < _verticalDragDistance * 1.2) return;
@@ -691,6 +711,18 @@ class _ThreadScreenState extends State<ThreadScreen>
   void _handlePointerCancel(PointerCancelEvent event) {
     _swipeStartTimer?.cancel();
     _trackingSwipe = false;
+  }
+
+  bool get _bodySelectionActive => _selectedBodyResNumbers.isNotEmpty;
+
+  void _handleBodySelectionActiveChanged(int resNumber, bool active) {
+    final changed = active
+        ? _selectedBodyResNumbers.add(resNumber)
+        : _selectedBodyResNumbers.remove(resNumber);
+    if (!changed) return;
+    setState(() {
+      if (active) _trackingSwipe = false;
+    });
   }
 
   /// スレ画面の通知は入力欄や末尾レスに重ならないよう、上部へ出す。
@@ -847,6 +879,7 @@ class _ThreadScreenState extends State<ThreadScreen>
 
     final res = _state.res;
     final idCounts = _idCounts(res);
+    final idOrdinals = _idOrdinals(res);
     final replies = replyCounts(res);
     // 「新着」の境界（前回位置）。0 か総数以上なら新着ライン無し。
     final hasNewArrival = _openCount > 0 && _openCount < res.length;
@@ -883,6 +916,7 @@ class _ThreadScreenState extends State<ThreadScreen>
                   PostItem(
                     res: item,
                     idCount: idCounts[item.id] ?? 1,
+                    idOrdinal: idOrdinals[item.number] ?? 1,
                     onTapId: _showIdPosts,
                     onTapRes: _showResPopup,
                     onTapResRange: _showConversationRange,
@@ -890,6 +924,8 @@ class _ThreadScreenState extends State<ThreadScreen>
                     replyCount: replies[item.number] ?? 0,
                     onTapReplies: _showReplies,
                     onReply: _reply,
+                    onBodySelectionActiveChanged: (active) =>
+                        _handleBodySelectionActiveChanged(item.number, active),
                     isOwn: _history.isOwnPost(widget.threadKey, item.number),
                   ),
                   const Divider(height: 1),
@@ -1007,6 +1043,7 @@ class _ConversationSheet extends StatefulWidget {
     required this.scrollController,
     required this.focusNumber,
     required this.idCounts,
+    required this.idOrdinals,
     required this.replyCountByNumber,
     required this.onTapId,
     required this.onTapRes,
@@ -1023,6 +1060,7 @@ class _ConversationSheet extends StatefulWidget {
   final ScrollController scrollController;
   final int? focusNumber;
   final Map<String, int> idCounts;
+  final Map<int, int> idOrdinals;
   final Map<int, int> replyCountByNumber;
   final ValueChanged<String> onTapId;
   final void Function(int source, int target) onTapRes;
@@ -1135,6 +1173,7 @@ class _ConversationSheetState extends State<_ConversationSheet> {
                         child: PostItem(
                           res: entry.res,
                           idCount: widget.idCounts[entry.res.id] ?? 1,
+                          idOrdinal: widget.idOrdinals[entry.res.number] ?? 1,
                           onTapId: widget.onTapId,
                           onTapRes: (n) => widget.onTapRes(entry.res.number, n),
                           onTapResRange: (numbers) =>

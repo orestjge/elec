@@ -106,8 +106,9 @@ void main() {
 
     expect(find.text('最初のレス'), findsOneWidget);
     expect(find.textContaining('同じIDの2つ目', findRichText: true), findsOneWidget);
-    // 同一 ID はカウント付きで出る。
-    expect(find.text('ID:aaa (2)'), findsWidgets);
+    // 同一 ID は「このレスが何番目か / 合計レス数」付きで出る。
+    expect(find.text('ID:aaa (1/2)'), findsOneWidget);
+    expect(find.text('ID:aaa (2/2)'), findsOneWidget);
     // 初回は新着ライン無し。
     expect(find.text('ここから新着'), findsNothing);
   });
@@ -153,7 +154,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // aaa は 2 レス。チップをタップ。
-    await tester.tap(find.text('ID:aaa (2)').first);
+    await tester.tap(find.text('ID:aaa (1/2)').first);
     await tester.pumpAndSettle();
 
     // シート見出し。
@@ -165,6 +166,25 @@ void main() {
 
     expect(find.text('会話 #1  3件'), findsOneWidget);
     expect(find.text('ID:aaa  2レス'), findsNothing);
+  });
+
+  testWidgets('ユーザー名をタップすると全文を表示する', (tester) async {
+    final longName = 'とても長いユーザー名' * 6;
+    final f = QueueFetcher([
+      ok([
+        ...datLine(
+          '$longName<><>2025/11/03(月) 02:14:51.907 ID:aaa<> 本文 <>スレタイ',
+        ),
+      ]),
+    ]);
+
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text(longName));
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip(longName), findsOneWidget);
   });
 
   testWidgets('返信数チップから会話ビューを出す', (tester) async {
