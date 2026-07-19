@@ -278,7 +278,7 @@ class _HeaderSlot extends StatelessWidget {
   Widget build(BuildContext context) {
     return SizedBox(
       height: height,
-      child: Center(child: child),
+      child: Align(alignment: Alignment.centerLeft, child: child),
     );
   }
 }
