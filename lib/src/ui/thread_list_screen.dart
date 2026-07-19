@@ -463,8 +463,9 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   }
 
   void _handlePointerUp(PointerUpEvent event) {
-    if (_horizontalDragDistance < _swipeDistanceThreshold) return;
-    if (_horizontalDragDistance < _verticalDragDistance * 1.2) return;
+    final leftwardDistance = -_horizontalDragDistance;
+    if (leftwardDistance < _swipeDistanceThreshold) return;
+    if (leftwardDistance < _verticalDragDistance * 1.2) return;
     _openLastViewedThread();
   }
 

@@ -274,7 +274,7 @@ void main() {
     expect(find.text('野球スレ'), findsNothing);
   });
 
-  testWidgets('一覧を右に引っ張ると直近に見たスレを開く', (tester) async {
+  testWidgets('一覧を左に引っ張ると直近に見たスレを開く', (tester) async {
     final history = ReadHistory(MemoryReadHistoryStorage());
     await history.markLastViewedThread(
       const ThreadSummary(key: '1', title: '直近スレ', resCount: 1, capName: null),
@@ -295,7 +295,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.drag(find.byType(CustomScrollView), const Offset(500, 0));
+    await tester.drag(find.byType(CustomScrollView), const Offset(-500, 0));
     await tester.pumpAndSettle();
 
     expect(find.text('1レス'), findsOneWidget);
