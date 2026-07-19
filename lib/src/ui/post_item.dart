@@ -281,7 +281,7 @@ class _OwnChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 18,
+      height: 16,
       alignment: Alignment.center,
       padding: const EdgeInsets.symmetric(horizontal: 7),
       decoration: BoxDecoration(
@@ -355,7 +355,7 @@ class _IdChip extends StatelessWidget {
       onTap: onTap == null ? null : () => onTap!(id),
       borderRadius: BorderRadius.circular(6),
       child: Container(
-        height: 18,
+        height: 16,
         alignment: Alignment.center,
         padding: const EdgeInsets.symmetric(horizontal: 6),
         decoration: BoxDecoration(

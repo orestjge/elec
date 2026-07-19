@@ -209,7 +209,7 @@ class _StatusMark extends StatelessWidget {
     // 既読でも同じ幅を確保してタイトルの左端を揃える。
     return SizedBox(
       width: 9,
-      height: 21,
+      height: 17,
       child: Center(
         child: SizedBox(
           width: 9,
