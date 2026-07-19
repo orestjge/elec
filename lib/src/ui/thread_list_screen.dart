@@ -423,11 +423,8 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   }
 
   Future<void> _openThread(ThreadSummary thread) async {
-    await _history.markLastViewedThread(thread);
+    await _history.markOpenedThread(thread);
     if (!mounted) return;
-    // ここでは既読にしない。既読位置はスレ画面が「実際にスクロールで見た最大レス
-    // 番号」を離脱時に記録する（前回位置からの再開のため、開いただけで全既読に
-    // しない）。
     await Navigator.of(context).push(_threadRoute(thread));
     // 戻ってきたら既読状態が変わっているので再描画し、並び順も貼り直す
     // （既読優先ソートなどに反映）。
@@ -443,6 +440,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
         endpoints: widget.endpoints,
         readHistory: _history,
         initialStatusLabel: _statusLabel(thread),
+        initialResCount: thread.resCount,
       ),
       transitionDuration: const Duration(milliseconds: 240),
       reverseTransitionDuration: const Duration(milliseconds: 220),

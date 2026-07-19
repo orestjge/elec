@@ -302,6 +302,32 @@ void main() {
     expect(find.textContaining('本文', findRichText: true), findsOneWidget);
   });
 
+  testWidgets('一覧から開いたスレはすぐ履歴と既読扱いになる', (tester) async {
+    final history = ReadHistory(MemoryReadHistoryStorage());
+    final fetcher = QueueFetcher([
+      subjectOk('1.dat<>すぐ履歴スレ (1)\n', 'LM1'),
+      datOk(datLine('名無し<><>2025/11/03(月) 02:14:51.907 ID:aaa<> 本文 <>すぐ履歴スレ')),
+    ]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadListScreen(
+          fetcher: fetcher,
+          pollInterval: const Duration(seconds: 15),
+          readHistory: history,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('すぐ履歴スレ'));
+    await tester.pump();
+
+    expect(history.isRead('1'), isTrue);
+    expect(history.lastSeen('1'), 0);
+    expect(history.lastViewedThread?.toSummary().title, 'すぐ履歴スレ');
+  });
+
   testWidgets('スレ画面を右に引っ張ると一覧に戻る', (tester) async {
     final fetcher = QueueFetcher([
       subjectOk('1.dat<>戻れるスレ (1)\n', 'LM1'),

@@ -1,6 +1,8 @@
+import 'dart:async';
+
 import 'package:edge_core/edge_core.dart';
-import 'package:elec/src/ui/thread_screen.dart';
 import 'package:elec/src/net/read_history.dart';
+import 'package:elec/src/ui/thread_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jis0208/jis0208.dart';
@@ -22,6 +24,16 @@ class QueueFetcher implements HttpFetcher {
     calls++;
     return _responses[i];
   }
+}
+
+class PendingFetcher implements HttpFetcher {
+  final completer = Completer<FetchResponse>();
+
+  @override
+  Future<FetchResponse> get(
+    Uri url, {
+    Map<String, String> headers = const {},
+  }) => completer.future;
 }
 
 FetchResponse ok(List<int> body) =>
@@ -60,6 +72,30 @@ void main() {
       readHistory: history,
     ),
   );
+
+  testWidgets('本文取得前でも開いたスレを履歴と既読にする', (tester) async {
+    final f = PendingFetcher();
+    final history = ReadHistory(MemoryReadHistoryStorage());
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadScreen(
+          threadKey: '1762103691',
+          threadTitle: 'テストスレ',
+          fetcher: f,
+          pollInterval: const Duration(seconds: 60),
+          readHistory: history,
+          initialResCount: 12,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(history.isRead('1762103691'), isTrue);
+    expect(history.lastSeen('1762103691'), 0);
+    expect(history.lastViewedThread?.toSummary().title, 'テストスレ');
+    expect(history.lastViewedThread?.toSummary().resCount, 12);
+  });
 
   testWidgets('初回に本文を番号順で表示する', (tester) async {
     final f = QueueFetcher([

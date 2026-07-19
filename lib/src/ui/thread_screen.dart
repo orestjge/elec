@@ -28,6 +28,7 @@ class ThreadScreen extends StatefulWidget {
     this.authLauncher = const SystemBrowserLauncher(),
     this.readHistory,
     this.initialStatusLabel,
+    this.initialResCount = 0,
   });
 
   final String threadKey;
@@ -35,6 +36,7 @@ class ThreadScreen extends StatefulWidget {
   final HttpFetcher? fetcher;
   final EdgeEndpoints endpoints;
   final Duration pollInterval;
+  final int initialResCount;
 
   /// 既読履歴。離脱時に「見たレス数」を記録する。
   final ReadHistory? readHistory;
@@ -110,6 +112,16 @@ class _ThreadScreenState extends State<ThreadScreen>
     _history = widget.readHistory ?? ReadHistory.shared;
     _positions.itemPositions.addListener(_onPositions);
     WidgetsBinding.instance.addObserver(this);
+    unawaited(
+      _history.markOpenedThread(
+        ThreadSummary(
+          key: widget.threadKey,
+          title: widget.threadTitle,
+          resCount: widget.initialResCount,
+          capName: null,
+        ),
+      ),
+    );
     _initialLoad();
     _startPolling();
   }
@@ -119,7 +131,7 @@ class _ThreadScreenState extends State<ThreadScreen>
     // 離脱時に「どこまで読んだか（スクロールで見た最大レス番号）」を記録する。
     // 次に開いたときの再開位置と、一覧の新着判定に使う。markRead は下げない。
     if (_furthestRead > 0) {
-      _history.markRead(widget.threadKey, _furthestRead);
+      unawaited(_history.markRead(widget.threadKey, _furthestRead));
     }
     _positions.itemPositions.removeListener(_onPositions);
     WidgetsBinding.instance.removeObserver(this);
@@ -142,6 +154,7 @@ class _ThreadScreenState extends State<ThreadScreen>
       case AppLifecycleState.paused:
       case AppLifecycleState.hidden:
         _timer?.cancel();
+        _persistReadPosition();
       case AppLifecycleState.inactive:
       case AppLifecycleState.detached:
         break;
@@ -261,12 +274,20 @@ class _ThreadScreenState extends State<ThreadScreen>
       if (item is Res && item.number > maxRes) maxRes = item.number;
       if (p.index == lastIndex && p.itemTrailingEdge <= 1.0001) atBottom = true;
     }
+    final readAdvanced = maxRes > _furthestRead;
     if (maxRes != _furthestRead || atBottom != _atBottomNow) {
       setState(() {
         _furthestRead = maxRes;
         _atBottomNow = atBottom;
       });
     }
+    if (readAdvanced) _persistReadPosition(maxRes);
+  }
+
+  void _persistReadPosition([int? resCount]) {
+    final count = resCount ?? _furthestRead;
+    if (count <= 0) return;
+    unawaited(_history.markRead(widget.threadKey, count));
   }
 
   void _scrollToBottomSoon() {
