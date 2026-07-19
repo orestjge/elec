@@ -295,11 +295,40 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.drag(find.byType(CustomScrollView), const Offset(-500, 0));
+    final listSize = tester.getSize(find.byType(CustomScrollView));
+    final gesture = await tester.startGesture(Offset(listSize.width - 8, 320));
+    await gesture.moveBy(const Offset(-500, 0));
+    await gesture.up();
     await tester.pumpAndSettle();
 
     expect(find.text('1レス'), findsOneWidget);
     expect(find.textContaining('本文', findRichText: true), findsOneWidget);
+  });
+
+  testWidgets('一覧中央の左ドラッグでは直近スレを開かない', (tester) async {
+    final history = ReadHistory(MemoryReadHistoryStorage());
+    await history.markLastViewedThread(
+      const ThreadSummary(key: '1', title: '直近スレ', resCount: 1, capName: null),
+    );
+    final fetcher = QueueFetcher([subjectOk('1.dat<>直近スレ (1)\n', 'LM1')]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadListScreen(
+          fetcher: fetcher,
+          pollInterval: const Duration(seconds: 15),
+          readHistory: history,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.drag(find.byType(CustomScrollView), const Offset(-500, 0));
+    await tester.pumpAndSettle();
+
+    expect(find.text('エッヂ'), findsWidgets);
+    expect(find.text('直近スレ'), findsOneWidget);
+    expect(find.text('1レス'), findsNothing);
   });
 
   testWidgets('一覧から開いたスレはすぐ履歴と既読扱いになる', (tester) async {
@@ -348,14 +377,42 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('1レス'), findsOneWidget);
 
+    final gesture = await tester.startGesture(const Offset(8, 320));
+    await gesture.moveBy(const Offset(500, 0));
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(find.text('エッヂ'), findsWidgets);
+    expect(find.text('戻れるスレ'), findsOneWidget);
+    expect(find.text('1レス'), findsNothing);
+  });
+
+  testWidgets('スレ画面中央の右ドラッグでは一覧に戻らない', (tester) async {
+    final fetcher = QueueFetcher([
+      subjectOk('1.dat<>選択できるスレ (1)\n', 'LM1'),
+      datOk(datLine('名無し<><>2025/11/03(月) 02:14:51.907 ID:aaa<> 本文 <>選択できるスレ')),
+    ]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadListScreen(
+          fetcher: fetcher,
+          pollInterval: const Duration(seconds: 15),
+          readHistory: ReadHistory(MemoryReadHistoryStorage()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('選択できるスレ'));
+    await tester.pumpAndSettle();
+
     await tester.drag(
       find.textContaining('本文', findRichText: true),
       const Offset(500, 0),
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('エッヂ'), findsWidgets);
-    expect(find.text('戻れるスレ'), findsOneWidget);
-    expect(find.text('1レス'), findsNothing);
+    expect(find.text('1レス'), findsOneWidget);
+    expect(find.textContaining('本文', findRichText: true), findsOneWidget);
   });
 }

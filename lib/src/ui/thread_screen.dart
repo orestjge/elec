@@ -98,7 +98,9 @@ class _ThreadScreenState extends State<ThreadScreen>
   int _pendingOwnPosts = 0;
   double _horizontalDragDistance = 0;
   double _verticalDragDistance = 0;
+  bool _trackingSwipe = false;
   static const double _swipeDistanceThreshold = 96;
+  static const double _swipeEdgeWidth = 24;
 
   Uri get _url => widget.endpoints.dat(widget.threadKey);
 
@@ -660,19 +662,34 @@ class _ThreadScreenState extends State<ThreadScreen>
   void _handlePointerDown(PointerDownEvent event) {
     _horizontalDragDistance = 0;
     _verticalDragDistance = 0;
+    _trackingSwipe = _isLeftEdgePointer(event);
   }
 
   void _handlePointerMove(PointerMoveEvent event) {
+    if (!_trackingSwipe) return;
     _horizontalDragDistance += event.delta.dx;
     _verticalDragDistance += event.delta.dy.abs();
   }
 
   void _handlePointerUp(PointerUpEvent event) {
+    if (!_trackingSwipe) return;
+    _trackingSwipe = false;
     if (_composerFocus.hasFocus) return;
     if (_horizontalDragDistance < _swipeDistanceThreshold) return;
     if (_horizontalDragDistance < _verticalDragDistance * 1.2) return;
     final navigator = Navigator.of(context);
     if (navigator.canPop()) navigator.pop();
+  }
+
+  void _handlePointerCancel(PointerCancelEvent event) {
+    _trackingSwipe = false;
+  }
+
+  bool _isLeftEdgePointer(PointerDownEvent event) {
+    final box = context.findRenderObject();
+    if (box is! RenderBox || !box.hasSize) return false;
+    final local = box.globalToLocal(event.position);
+    return local.dx <= _swipeEdgeWidth;
   }
 
   /// スレ画面の通知は入力欄や末尾レスに重ならないよう、上部へ出す。
@@ -803,6 +820,7 @@ class _ThreadScreenState extends State<ThreadScreen>
         onPointerDown: _handlePointerDown,
         onPointerMove: _handlePointerMove,
         onPointerUp: _handlePointerUp,
+        onPointerCancel: _handlePointerCancel,
         child: Column(
           children: [
             Expanded(child: _body()),

@@ -80,7 +80,9 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   bool _searchOpen = false;
   double _horizontalDragDistance = 0;
   double _verticalDragDistance = 0;
+  bool _trackingSwipe = false;
   static const double _swipeDistanceThreshold = 96;
+  static const double _swipeEdgeWidth = 24;
 
   /// 表示中の並び順（スレキー列）の固定スナップショット。実況板では最近レス順
   /// が高頻度で入れ替わり一覧を追えないため、自動更新では並べ替えず、レス数・
@@ -471,18 +473,33 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   void _handlePointerDown(PointerDownEvent event) {
     _horizontalDragDistance = 0;
     _verticalDragDistance = 0;
+    _trackingSwipe = _isRightEdgePointer(event);
   }
 
   void _handlePointerMove(PointerMoveEvent event) {
+    if (!_trackingSwipe) return;
     _horizontalDragDistance += event.delta.dx;
     _verticalDragDistance += event.delta.dy.abs();
   }
 
   void _handlePointerUp(PointerUpEvent event) {
+    if (!_trackingSwipe) return;
+    _trackingSwipe = false;
     final leftwardDistance = -_horizontalDragDistance;
     if (leftwardDistance < _swipeDistanceThreshold) return;
     if (leftwardDistance < _verticalDragDistance * 1.2) return;
     _openLastViewedThread();
+  }
+
+  void _handlePointerCancel(PointerCancelEvent event) {
+    _trackingSwipe = false;
+  }
+
+  bool _isRightEdgePointer(PointerDownEvent event) {
+    final box = context.findRenderObject();
+    if (box is! RenderBox || !box.hasSize) return false;
+    final local = box.globalToLocal(event.position);
+    return local.dx >= box.size.width - _swipeEdgeWidth;
   }
 
   Future<void> _openNewThread() async {
@@ -541,6 +558,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
           onPointerDown: _handlePointerDown,
           onPointerMove: _handlePointerMove,
           onPointerUp: _handlePointerUp,
+          onPointerCancel: _handlePointerCancel,
           child: CustomScrollView(
             slivers: [
               SliverAppBar.large(
