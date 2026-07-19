@@ -1266,8 +1266,8 @@ class _ComposerState extends State<_Composer> {
   bool _sending = false;
 
   Future<void> _send() async {
-    final text = widget.controller.text.trim();
-    if (!widget.enabled || text.isEmpty || _sending) return;
+    final text = widget.controller.text;
+    if (!widget.enabled || text.trim().isEmpty || _sending) return;
     setState(() => _sending = true);
     try {
       final accepted = await widget.onSend(text);

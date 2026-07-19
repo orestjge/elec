@@ -71,4 +71,32 @@ void main() {
     expect(poster.lastBody, contains('&subject='));
     expect(poster.lastBody, isNot(contains('key=')));
   });
+
+  testWidgets('新規スレ本文では本文前後の空白を保持する', (tester) async {
+    final poster = RecordingPoster();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NewThreadScreen(
+          fetcher: poster,
+          authStore: AuthStore(MemoryTokenStorage()),
+          authLauncher: FakeLauncher(),
+        ),
+      ),
+    );
+
+    const aa = '　 ∧＿∧\n　（　´∀｀）\n ';
+    await tester.enterText(find.byType(TextField).at(0), 'テストスレ');
+    await tester.enterText(find.byType(TextField).at(1), aa);
+    await tester.pump();
+
+    await tester.tap(find.widgetWithText(FilledButton, '立てる'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(
+      poster.lastBody,
+      buildBbsCgiThreadBody(board: 'liveedge', title: 'テストスレ', message: aa),
+    );
+  });
 }
