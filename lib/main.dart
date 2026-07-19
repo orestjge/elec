@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'src/net/auth_store.dart';
 import 'src/net/read_history.dart';
@@ -20,6 +21,9 @@ class ElecApp extends StatelessWidget {
     return MaterialApp(
       title: 'elec',
       debugShowCheckedModeBanner: false,
+      locale: const Locale('ja', 'JP'),
+      supportedLocales: const [Locale('ja', 'JP')],
+      localizationsDelegates: GlobalMaterialLocalizations.delegates,
       theme: ElecTheme.light(),
       darkTheme: ElecTheme.dark(),
       home: const ThreadListScreen(),
