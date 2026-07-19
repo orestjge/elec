@@ -14,6 +14,14 @@ void main() {
     expect(looksLikeAsciiArt('これは普通の本文です（テスト）'), isFalse);
   });
 
+  test('記号が多いだけの本文は AA 扱いしない', () {
+    expect(looksLikeAsciiArt('これは（テスト）です。[] や () や -- が多くても普通の本文です。'), isFalse);
+    expect(
+      looksLikeAsciiArt('（1）まず本文です。\n（2）次も本文です。---- 区切りではありません。'),
+      isFalse,
+    );
+  });
+
   testWidgets('AA 本文は Monapo で横スクロール表示する', (tester) async {
     const aa = '''
 　　 ∧＿∧

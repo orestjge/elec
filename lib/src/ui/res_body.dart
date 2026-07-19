@@ -6,18 +6,76 @@ import 'link_urls.dart';
 /// AA（アスキーアート）らしい本文だけ、MS Pゴシック互換寄りの同梱フォントで
 /// 表示する。単発の顔文字まで巻き込まないよう、AA 記号を含む行数を見る。
 bool looksLikeAsciiArt(String text) {
-  final lines = text.split('\n');
-  var aaLines = 0;
-  for (final line in lines) {
-    if (_looksLikeAsciiArtLine(line)) aaLines++;
-  }
-  if (aaLines >= 2) return true;
+  final lines = text
+      .split('\n')
+      .where((line) => line.trim().isNotEmpty)
+      .toList(growable: false);
+  if (lines.isEmpty) return false;
 
-  if (lines.length == 1) {
-    final line = lines.single.trim();
-    return line.length >= 24 && _aaSymbolCount(line) >= 8;
+  final textSize = lines.fold<int>(0, (sum, line) => sum + line.runes.length);
+  final rleRate = _runLengthEncodedLength(lines) / textSize;
+  var structuralLines = 0;
+  var symbolCount = 0;
+  var spaceCount = 0;
+  var maxWidth = 0;
+  for (final line in lines) {
+    final metrics = _AsciiArtLineMetrics(line);
+    if (metrics.isStructural) structuralLines++;
+    symbolCount += metrics.symbolCount;
+    spaceCount += metrics.spaceCount;
+    if (metrics.width > maxWidth) maxWidth = metrics.width;
   }
-  return false;
+
+  final symbolRatio = symbolCount / textSize;
+  final spaceRatio = spaceCount / textSize;
+
+  if (lines.length >= 3) {
+    return structuralLines >= 2 &&
+        maxWidth >= 10 &&
+        (symbolRatio >= 0.22 || spaceRatio >= 0.18 || rleRate <= 1.72);
+  }
+
+  if (lines.length == 2) {
+    return structuralLines == 2 &&
+        maxWidth >= 12 &&
+        symbolRatio >= 0.28 &&
+        (spaceRatio >= 0.16 || rleRate <= 1.68);
+  }
+
+  final metrics = _AsciiArtLineMetrics(lines.single);
+  return metrics.width >= 32 &&
+      metrics.symbolRatio >= 0.42 &&
+      (metrics.hasRepeatedSymbol || metrics.hasWideSpacing);
+}
+
+class _AsciiArtLineMetrics {
+  _AsciiArtLineMetrics(String line)
+    : width = _visualWidth(line),
+      symbolCount = _aaSymbolCount(line),
+      spaceCount = _spaceCount(line),
+      leadingSpaces = _leadingSpaceCount(line),
+      hasFullWidthSpace = line.contains('　'),
+      hasRepeatedSymbol = _hasRepeatedAsciiArtSymbol(line),
+      hasWideSpacing = _hasWideSpacing(line);
+
+  final int width;
+  final int symbolCount;
+  final int spaceCount;
+  final int leadingSpaces;
+  final bool hasFullWidthSpace;
+  final bool hasRepeatedSymbol;
+  final bool hasWideSpacing;
+
+  double get symbolRatio => symbolCount / width;
+
+  bool get isStructural {
+    if (width < 4) return false;
+    if (symbolCount >= 4 && symbolRatio >= 0.2) return true;
+    if (hasFullWidthSpace && symbolCount >= 2) return true;
+    if (leadingSpaces >= 2 && symbolCount >= 2) return true;
+    if (hasRepeatedSymbol && symbolCount >= 3) return true;
+    return hasWideSpacing && symbolCount >= 3;
+  }
 }
 
 final _aaSymbolRunes =
@@ -27,24 +85,18 @@ final _aaSymbolRunes =
         .runes
         .toSet();
 
-bool _looksLikeAsciiArtLine(String line) {
-  final trimmed = line.trim();
-  if (trimmed.length < 4) return false;
-
-  final symbolCount = _aaSymbolCount(line);
-  final symbolRatio = symbolCount / trimmed.length;
-  final leadingSpaces = _leadingSpaceCount(line);
-  final hasFullWidthSpace = line.contains('　');
-
-  return symbolCount >= 4 && symbolRatio >= 0.18 ||
-      hasFullWidthSpace && symbolCount >= 2 ||
-      leadingSpaces >= 4 && symbolCount >= 2;
-}
-
 int _aaSymbolCount(String line) {
   var count = 0;
   for (final rune in line.runes) {
     if (_aaSymbolRunes.contains(rune)) count++;
+  }
+  return count;
+}
+
+int _spaceCount(String line) {
+  var count = 0;
+  for (final rune in line.runes) {
+    if (rune == 0x20 || rune == 0x3000 || rune == 0x09) count++;
   }
   return count;
 }
@@ -56,6 +108,60 @@ int _leadingSpaceCount(String line) {
     count++;
   }
   return count;
+}
+
+int _visualWidth(String line) {
+  var width = 0;
+  for (final rune in line.runes) {
+    width += _isHalfWidth(rune) ? 1 : 2;
+  }
+  return width;
+}
+
+bool _isHalfWidth(int rune) => rune <= 0x7E || 0xFF61 <= rune && rune <= 0xFF9F;
+
+bool _hasRepeatedAsciiArtSymbol(String line) {
+  int? previous;
+  var run = 0;
+  for (final rune in line.runes) {
+    if (!_aaSymbolRunes.contains(rune)) {
+      previous = null;
+      run = 0;
+      continue;
+    }
+    if (rune == previous) {
+      run++;
+    } else {
+      previous = rune;
+      run = 1;
+    }
+    if (run >= 3) return true;
+  }
+  return false;
+}
+
+bool _hasWideSpacing(String line) =>
+    line.contains('  ') || line.contains('\t') || line.contains('　');
+
+int _runLengthEncodedLength(List<String> lines) {
+  var length = 0;
+  for (final line in lines) {
+    int? previous;
+    var run = 0;
+    for (final rune in line.runes) {
+      if (previous == null || rune == previous) {
+        run++;
+      } else {
+        length += 1 + run.toString().length;
+        run = 1;
+      }
+      previous = rune;
+    }
+    if (previous != null) {
+      length += 1 + run.toString().length;
+    }
+  }
+  return length;
 }
 
 /// レス本文。`>>123` / `>>3-5` のレス参照と URL をタップ可能にして表示する。
