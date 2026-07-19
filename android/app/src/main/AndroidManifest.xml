@@ -1,4 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- ネットワークアクセス（BBS の取得・書き込み）に必須。デバッグ/プロファイル
+         ビルドは Flutter が自動付与するが、リリースには付かないため main で宣言する。
+         これが無いとリリースAPKで DNS 解決に失敗する
+         （Failed host lookup / No address associated with host name）。 -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="elec"
         android:name="${applicationName}"
