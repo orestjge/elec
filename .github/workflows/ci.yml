@@ -1,8 +1,7 @@
 name: CI
 
+# PR 時のマージ前ゲート。main への push 側の検証とリリースは release.yml が担当。
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
 

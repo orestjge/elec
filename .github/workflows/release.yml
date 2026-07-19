@@ -1,21 +1,28 @@
 name: Release Android
 
-# バージョンタグ（例: v1.0.0）を push すると署名済み APK をビルドし
-# GitHub Releases に添付する。
+# main に push（＝PR マージ）されるたびに、パッチ版を自動採番して署名 APK を
+# ビルドし GitHub Releases に公開する。手動実行（workflow_dispatch）も可能。
+# 直近タグ v{major}.{minor}.{patch} の patch を +1 した新タグを自動作成する。
 on:
   push:
-    tags:
-      - "v*"
+    branches: [main]
+  workflow_dispatch: {}
 
 permissions:
-  contents: write # Release 作成に必要
+  contents: write # タグ作成・Release 公開に必要
+
+concurrency:
+  group: android-release
+  cancel-in-progress: false # 連続マージ時は直列化（採番の衝突回避）
 
 jobs:
-  build-and-release:
+  release:
     name: build signed APK & publish release
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 既存タグから次バージョンを算出するため全履歴＋タグ
 
       - uses: actions/setup-java@v4
         with:
@@ -30,6 +37,24 @@ jobs:
 
       - run: flutter pub get
 
+      # 壊れたコードをリリースしないためのゲート。
+      - name: Test gate
+        run: |
+          flutter analyze
+          flutter test
+
+      - name: Compute next version
+        id: ver
+        run: |
+          git fetch --tags --force -q
+          LATEST=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' | sort -V | tail -n1)
+          LATEST=${LATEST:-v0.0.0}
+          IFS=. read -r MA MI PA <<<"${LATEST#v}"
+          TAG="v${MA}.${MI}.$((PA + 1))"
+          echo "tag=$TAG"   >> "$GITHUB_OUTPUT"
+          echo "name=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "次バージョン: $TAG (versionCode=${{ github.run_number }})"
+
       - name: Prepare release signing
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -38,7 +63,7 @@ jobs:
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
           if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "::error::Secret ANDROID_KEYSTORE_BASE64 が未設定です（リポジトリの Settings > Secrets で登録してください）"
+            echo "::error::Secret ANDROID_KEYSTORE_BASE64 が未設定です（Settings > Secrets で登録してください）"
             exit 1
           fi
           echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/elec-release.jks"
@@ -51,24 +76,26 @@ jobs:
 
       - name: Build signed APKs
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
           flutter build apk --release --split-per-abi \
-            --build-name="$VERSION" --build-number="${{ github.run_number }}"
+            --build-name="${{ steps.ver.outputs.name }}" --build-number="${{ github.run_number }}"
           flutter build apk --release \
-            --build-name="$VERSION" --build-number="${{ github.run_number }}"
+            --build-name="${{ steps.ver.outputs.name }}" --build-number="${{ github.run_number }}"
 
       - name: Collect APKs
         run: |
           mkdir -p dist
           cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
-            "dist/elec-${GITHUB_REF_NAME}-arm64-v8a.apk"
+            "dist/elec-${{ steps.ver.outputs.tag }}-arm64-v8a.apk"
           cp build/app/outputs/flutter-apk/app-release.apk \
-            "dist/elec-${GITHUB_REF_NAME}-universal.apk"
+            "dist/elec-${{ steps.ver.outputs.tag }}-universal.apk"
           ls -la dist
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: ${{ steps.ver.outputs.tag }}
+          target_commitish: ${{ github.sha }}
           files: dist/*.apk
           generate_release_notes: true
           fail_on_unmatched_files: true
