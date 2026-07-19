@@ -281,7 +281,9 @@ class _OwnChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      height: 18,
+      alignment: Alignment.center,
+      padding: const EdgeInsets.symmetric(horizontal: 7),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(6),
         border: Border.all(color: color.withValues(alpha: 0.55)),
@@ -291,6 +293,7 @@ class _OwnChip extends StatelessWidget {
         style: TextStyle(
           color: color,
           fontSize: 11,
+          height: 1,
           fontWeight: FontWeight.w700,
         ),
       ),
@@ -352,7 +355,9 @@ class _IdChip extends StatelessWidget {
       onTap: onTap == null ? null : () => onTap!(id),
       borderRadius: BorderRadius.circular(6),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        height: 18,
+        alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: 6),
         decoration: BoxDecoration(
           color: color.withValues(alpha: 0.14),
           borderRadius: BorderRadius.circular(6),
@@ -361,6 +366,7 @@ class _IdChip extends StatelessWidget {
           count > 1 ? 'ID:$id ($ordinal/$count)' : 'ID:$id',
           style: TextStyle(
             fontSize: 11,
+            height: 1,
             color: color,
             fontWeight: FontWeight.w600,
           ),

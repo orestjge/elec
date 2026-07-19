@@ -63,9 +63,9 @@ class ThreadTile extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // 左端の状態マーカー: 未読=● 既読=✓。
+                // 左端の状態マーカー。タイトル 1 行目の中央に合わせる。
                 Padding(
-                  padding: const EdgeInsets.only(top: 3, right: 10),
+                  padding: const EdgeInsets.only(right: 10),
                   child: _StatusMark(isRead: isRead),
                 ),
                 Expanded(
@@ -209,16 +209,22 @@ class _StatusMark extends StatelessWidget {
     // 既読でも同じ幅を確保してタイトルの左端を揃える。
     return SizedBox(
       width: 9,
-      height: 9,
-      child: isRead
-          ? null
-          : DecoratedBox(
-              key: const ValueKey('unread-dot'),
-              decoration: BoxDecoration(
-                color: scheme.primary,
-                shape: BoxShape.circle,
-              ),
-            ),
+      height: 21,
+      child: Center(
+        child: SizedBox(
+          width: 9,
+          height: 9,
+          child: isRead
+              ? null
+              : DecoratedBox(
+                  key: const ValueKey('unread-dot'),
+                  decoration: BoxDecoration(
+                    color: scheme.primary,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+        ),
+      ),
     );
   }
 }
