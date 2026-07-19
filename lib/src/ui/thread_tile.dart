@@ -45,6 +45,12 @@ class ThreadTile extends StatelessWidget {
     final momentumColor = isHot ? scheme.primary : metaColor;
     // 既読スレはタイトルを少し落ち着かせて未読と区別する。
     final titleColor = isRead ? scheme.onSurfaceVariant : scheme.onSurface;
+    final titleStyle = theme.textTheme.titleMedium?.copyWith(
+      fontWeight: isRead ? FontWeight.w500 : FontWeight.w600,
+      height: 1.3,
+      color: titleColor,
+    );
+    final titleLineHeight = _lineHeight(titleStyle, fallbackFontSize: 16);
 
     return Material(
       color: isOwn
@@ -66,7 +72,10 @@ class ThreadTile extends StatelessWidget {
                 // 左端の状態マーカー。タイトル 1 行目の中央に合わせる。
                 Padding(
                   padding: const EdgeInsets.only(right: 10),
-                  child: _StatusMark(isRead: isRead),
+                  child: _StatusMark(
+                    isRead: isRead,
+                    lineHeight: titleLineHeight,
+                  ),
                 ),
                 Expanded(
                   child: Column(
@@ -78,13 +87,7 @@ class ThreadTile extends StatelessWidget {
                           Expanded(
                             child: Text(
                               decodeEntities(thread.title),
-                              style: theme.textTheme.titleMedium?.copyWith(
-                                fontWeight: isRead
-                                    ? FontWeight.w500
-                                    : FontWeight.w600,
-                                height: 1.3,
-                                color: titleColor,
-                              ),
+                              style: titleStyle,
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -137,6 +140,11 @@ class ThreadTile extends StatelessWidget {
       ),
     );
   }
+}
+
+double _lineHeight(TextStyle? style, {required double fallbackFontSize}) {
+  final fontSize = style?.fontSize ?? fallbackFontSize;
+  return fontSize * (style?.height ?? 1);
 }
 
 class _StatusBadge extends StatelessWidget {
@@ -200,8 +208,9 @@ class _OwnThreadBadge extends StatelessWidget {
 /// 左端の未読マーカー。未読はアクセント色の点、既読は点なし（＝開いたことが
 /// ある）。チェックは付けない（新着が後から来るので「読み終わった」ではない）。
 class _StatusMark extends StatelessWidget {
-  const _StatusMark({required this.isRead});
+  const _StatusMark({required this.isRead, required this.lineHeight});
   final bool isRead;
+  final double lineHeight;
 
   @override
   Widget build(BuildContext context) {
@@ -209,7 +218,7 @@ class _StatusMark extends StatelessWidget {
     // 既読でも同じ幅を確保してタイトルの左端を揃える。
     return SizedBox(
       width: 9,
-      height: 17,
+      height: lineHeight,
       child: Center(
         child: SizedBox(
           width: 9,

@@ -189,6 +189,7 @@ class _Header extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final lineHeight = _headerLineHeight(theme);
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
@@ -200,27 +201,41 @@ class _Header extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Text(
-                '${res.number}',
-                style: theme.textTheme.labelMedium?.copyWith(
-                  color: scheme.primary,
-                  fontWeight: FontWeight.w700,
+              _HeaderSlot(
+                height: lineHeight,
+                child: Text(
+                  '${res.number}',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: scheme.primary,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
-              Flexible(child: _NameLabel(name: name)),
+              Flexible(
+                child: _HeaderSlot(
+                  height: lineHeight,
+                  child: _NameLabel(name: name),
+                ),
+              ),
               if (res.id != null) ...[
                 const SizedBox(width: 8),
-                _IdChip(
-                  id: res.id!,
-                  count: idCount,
-                  ordinal: idOrdinal,
-                  onTap: onTapId,
+                _HeaderSlot(
+                  height: lineHeight,
+                  child: _IdChip(
+                    id: res.id!,
+                    count: idCount,
+                    ordinal: idOrdinal,
+                    onTap: onTapId,
+                  ),
                 ),
               ],
               if (isOwn) ...[
                 const SizedBox(width: 8),
-                _OwnChip(color: scheme.secondary),
+                _HeaderSlot(
+                  height: lineHeight,
+                  child: _OwnChip(color: scheme.secondary),
+                ),
               ],
             ],
           ),
@@ -244,6 +259,26 @@ class _Header extends StatelessWidget {
           ),
         ],
       ],
+    );
+  }
+
+  double _headerLineHeight(ThemeData theme) {
+    final style = theme.textTheme.labelLarge;
+    final fontSize = style?.fontSize ?? 14;
+    return fontSize * (style?.height ?? 20 / fontSize);
+  }
+}
+
+class _HeaderSlot extends StatelessWidget {
+  const _HeaderSlot({required this.height, required this.child});
+  final double height;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: height,
+      child: Center(child: child),
     );
   }
 }
