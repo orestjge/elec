@@ -45,6 +45,29 @@ bool _isTwimgImageUri(Uri uri) {
   return format != null && _twimgFormatRe.hasMatch(format);
 }
 
+/// 既知の動画ホストの分かりやすい表示名（ドメイン → 別名）。
+const _videoSiteNames = <String, String>{
+  'twimg.com': 'Twitter', // video.twimg.com
+  'catbox.moe': 'catbox', // files.catbox.moe
+  'po-kaki-to.com': 'po-kaki-to',
+};
+
+/// 動画ファイル URL のホストから、どのサイトかが分かる短いラベルを返す。
+///
+/// 既知サイトは別名（`Twitter` 等）に、未知はドメイン（`example.com`）に落とす。
+/// 動画サムネのラベルに使う（ファイル名/ID より発信元が分かる）。
+String videoSiteLabel(Uri url) {
+  final host = url.host.toLowerCase();
+  if (host.isEmpty) {
+    return url.pathSegments.isNotEmpty ? url.pathSegments.last : url.toString();
+  }
+  final parts = host.split('.');
+  final domain = parts.length >= 2
+      ? parts.sublist(parts.length - 2).join('.')
+      : host;
+  return _videoSiteNames[domain] ?? domain;
+}
+
 List<Uri> _mediaUrlsIn(String text, bool Function(Uri) matches) {
   final seen = <String>{};
   final result = <Uri>[];
