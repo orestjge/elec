@@ -95,6 +95,45 @@ class AppendAfterPostClient implements HttpFetcher, HttpPoster {
   }
 }
 
+/// POST 応答に `x-resnum` を載せ、GET では自分の後に他人のレスも増える。
+/// 末尾ヒューリスティックなら他人のレスを誤って自分にしてしまう状況。
+class PreciseResNumClient implements HttpFetcher, HttpPoster {
+  int gets = 0;
+  int posts = 0;
+
+  @override
+  Future<FetchResponse> get(
+    Uri url, {
+    Map<String, String> headers = const {},
+  }) async {
+    gets++;
+    return FetchResponse(
+      statusCode: 200,
+      bodyBytes: gets == 1
+          ? datLine('名無し<><>2025/11/03(月) 02:14:51.907 ID:a<> 既存 <>スレタイ')
+          : [
+              ...datLine('名無し<><>2025/11/03(月) 02:14:51.907 ID:a<> 既存 <>スレタイ'),
+              ...datLine('名無し<><>2025/11/03(月) 02:20:00.000 ID:b<> 自分の投稿 <>'),
+              ...datLine('名無し<><>2025/11/03(月) 02:20:05.000 ID:c<> 他人の投稿 <>'),
+            ],
+    );
+  }
+
+  @override
+  Future<FetchResponse> post(
+    Uri url, {
+    Map<String, String> headers = const {},
+    required String body,
+  }) async {
+    posts++;
+    return FetchResponse(
+      statusCode: 200,
+      bodyBytes: successBody(),
+      headers: const {'x-resnum': '2'},
+    );
+  }
+}
+
 class StaleOnceAfterPostClient implements HttpFetcher, HttpPoster {
   int gets = 0;
   int posts = 0;
@@ -420,6 +459,36 @@ void main() {
 
     expect(history.isOwnPost('123', 2), isTrue);
     expect(find.text('自分'), findsOneWidget);
+  });
+
+  testWidgets('x-resnum があればその番号を正確に自分のレスにする（末尾ではない）', (tester) async {
+    final client = PreciseResNumClient();
+    final history = ReadHistory(MemoryReadHistoryStorage());
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadScreen(
+          threadKey: '123',
+          threadTitle: 'テスト',
+          fetcher: client,
+          authStore: AuthStore(MemoryTokenStorage()),
+          authLauncher: FakeLauncher(),
+          pollInterval: const Duration(seconds: 60),
+          readHistory: history,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField), 'こんにちは');
+    await tester.tap(find.byIcon(Icons.send));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+
+    // ヘッダの番号(2)だけが自分。末尾(3)は他人なので自分にしない。
+    expect(history.isOwnPost('123', 2), isTrue);
+    expect(history.isOwnPost('123', 3), isFalse);
   });
 
   testWidgets('投稿直後に古い dat を掴んでも再取得して自分のレスとして記録する', (tester) async {

@@ -137,6 +137,11 @@ class _ThreadScreenState extends State<ThreadScreen>
   OverlayEntry? _topSnackEntry;
   bool _fetching = false;
   int _pendingOwnPosts = 0;
+
+  /// 書き込み直後、自分のレスが一覧に現れるのを待って再取得を回している間 true。
+  /// 番号が取れる場合（[PostAccepted.resNum]）は [_pendingOwnPosts] を使わないので、
+  /// 再取得ループの継続はこのフラグで判断する。
+  bool _awaitingOwnPost = false;
   double _horizontalDragDistance = 0;
   double _verticalDragDistance = 0;
   bool _trackingSwipe = false;
@@ -305,6 +310,7 @@ class _ThreadScreenState extends State<ThreadScreen>
       final newRes = _newResSince(r.state, previousResCount);
       if (newRes.isNotEmpty) {
         await _markPendingOwnPosts(newRes);
+        _awaitingOwnPost = false; // 自分のレスが現れたので再取得ループを止める
         if (!mounted) return;
         setState(() => _state = r.state);
         // 末尾に居たなら追従する。
@@ -427,6 +433,7 @@ class _ThreadScreenState extends State<ThreadScreen>
       final newRes = _newResSince(r.state, previousResCount);
       if (newRes.isNotEmpty) {
         await _markPendingOwnPosts(newRes);
+        _awaitingOwnPost = false;
         if (!mounted) return;
       }
       setState(() {
@@ -1186,12 +1193,20 @@ class _ThreadScreenState extends State<ThreadScreen>
       postOnce: () => _postOnce(text),
       onRejected: _showSnack,
     );
-    if (accepted && mounted) {
-      _pendingOwnPosts++;
+    if (accepted != null && mounted) {
+      final resNum = accepted.resNum;
+      if (resNum != null) {
+        // サーバが番号を返したら、その番号を直接自分のレスにする（正確）。
+        unawaited(_history.markOwnPost(widget.threadKey, resNum));
+      } else {
+        // 番号が取れないサーバ向けのフォールバック（増えた末尾を自分とみなす）。
+        _pendingOwnPosts++;
+      }
+      _awaitingOwnPost = true;
       _showSnack('書き込みました');
       _pollAfterPost(); // 自分の書き込みをすぐ反映
     }
-    return accepted;
+    return accepted != null;
   }
 
   void _pollAfterPost() {
@@ -1200,13 +1215,11 @@ class _ThreadScreenState extends State<ThreadScreen>
   }
 
   Future<void> _runPostRefreshAttempt(int attempt) async {
-    if (!mounted || _pendingOwnPosts <= 0 || attempt >= _postRefreshAttempts) {
+    if (!mounted || !_awaitingOwnPost || attempt >= _postRefreshAttempts) {
       return;
     }
     await _poll(force: true);
-    if (!mounted ||
-        _pendingOwnPosts <= 0 ||
-        attempt + 1 >= _postRefreshAttempts) {
+    if (!mounted || !_awaitingOwnPost || attempt + 1 >= _postRefreshAttempts) {
       return;
     }
     _postRefreshTimer = Timer(

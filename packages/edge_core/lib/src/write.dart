@@ -99,7 +99,11 @@ sealed class BbsCgiResult {
 
 /// 書き込み成功（`<!-- 2ch_X:true -->`）。
 class PostAccepted extends BbsCgiResult {
-  const PostAccepted();
+  const PostAccepted({this.resNum});
+
+  /// 書き込んだレスの番号。サーバが `x-resnum` ヘッダで返したときのみ入る。
+  /// スレ立てや、ヘッダを返さないサーバでは null。
+  final int? resNum;
 }
 
 /// 未認証。[authCode] を [authUrl] で入力して認証する必要がある。
@@ -125,9 +129,18 @@ final _authUrlRe = RegExp(r'(https?://[^\s<]+/auth-code)');
 /// **HTTP ステータスでは判定できない**（多くが 200）。本文のマーカーで見る。
 /// - 成功: `<!-- 2ch_X:true -->`
 /// - 失敗: `<meta name="error_code" content="E-{tag}">`
-BbsCgiResult parseBbsCgiResult(int status, List<int> bodyBytes) {
+///
+/// [headers] を渡すと、成功時に `x-resnum`（サーバが返す書き込んだレス番号）を
+/// [PostAccepted.resNum] に載せる。キーは小文字で引く。
+BbsCgiResult parseBbsCgiResult(
+  int status,
+  List<int> bodyBytes, {
+  Map<String, String> headers = const {},
+}) {
   final body = decodeSjis(bodyBytes);
-  if (body.contains('2ch_X:true')) return const PostAccepted();
+  if (body.contains('2ch_X:true')) {
+    return PostAccepted(resNum: int.tryParse(headers['x-resnum'] ?? ''));
+  }
 
   final code = _errorCodeRe.firstMatch(body)?.group(1) ?? 'Unknown';
   if (code == 'Unauthenticated') {
@@ -217,7 +230,11 @@ class BbsWriter {
     };
     final resp = await poster.post(bbsCgi, headers: headers, body: body);
     return WriteResult(
-      outcome: parseBbsCgiResult(resp.statusCode, resp.bodyBytes),
+      outcome: parseBbsCgiResult(
+        resp.statusCode,
+        resp.bodyBytes,
+        headers: resp.headers,
+      ),
       tokens: tokens.updatedFrom(resp.setCookies),
     );
   }

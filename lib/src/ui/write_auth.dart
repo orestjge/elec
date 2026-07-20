@@ -4,11 +4,12 @@ import 'package:flutter/material.dart';
 import '../net/auth_launcher.dart';
 
 /// 書き込み（レス・スレ立て）の共通フロー。1 回 POST してみて、未認証なら認証
-/// ダイアログを出し、認証後の再送まで面倒を見る。受理されたら true を返す。
+/// ダイアログを出し、認証後の再送まで面倒を見る。受理されたら [PostAccepted]
+/// （レス番号を含みうる）を、受理されなければ null を返す。
 ///
 /// [postOnce] は「1 回 POST してトークンを更新し結果を返す」処理（UI 副作用なし）。
 /// レス書き込みもスレ立ても、この中身だけ差し替えて共用する。
-Future<bool> submitWithAuth({
+Future<PostAccepted?> submitWithAuth({
   required BuildContext context,
   required AuthLauncher launcher,
   required Future<BbsCgiResult> Function() postOnce,
@@ -18,7 +19,7 @@ Future<bool> submitWithAuth({
   final outcome = await postOnce();
   switch (outcome) {
     case PostAccepted():
-      return true;
+      return outcome;
     case PostRejected(:final message):
       final text = message.isEmpty ? '書き込めませんでした' : message;
       if (onRejected == null) {
@@ -26,10 +27,10 @@ Future<bool> submitWithAuth({
       } else {
         onRejected(text);
       }
-      return false;
+      return null;
     case PostNeedsAuth(:final authCode, :final authUrl):
-      if (!context.mounted) return false;
-      final ok = await showDialog<bool>(
+      if (!context.mounted) return null;
+      return showDialog<PostAccepted>(
         context: context,
         builder: (_) => AuthDialog(
           initialCode: authCode,
@@ -37,7 +38,6 @@ Future<bool> submitWithAuth({
           onRetry: postOnce,
         ),
       );
-      return ok ?? false;
   }
 }
 
@@ -88,7 +88,7 @@ class _AuthDialogState extends State<AuthDialog> {
     if (!mounted) return;
     switch (result) {
       case PostAccepted():
-        Navigator.of(context).pop(true);
+        Navigator.of(context).pop(result);
       case PostNeedsAuth(:final authCode):
         setState(() {
           _busy = false;
@@ -147,7 +147,7 @@ class _AuthDialogState extends State<AuthDialog> {
       ),
       actions: [
         TextButton(
-          onPressed: _busy ? null : () => Navigator.of(context).pop(false),
+          onPressed: _busy ? null : () => Navigator.of(context).pop(),
           child: const Text('キャンセル'),
         ),
         FilledButton(
