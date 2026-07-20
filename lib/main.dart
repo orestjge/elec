@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'src/net/auth_store.dart';
+import 'src/net/file_upload_settings.dart';
 import 'src/net/image_upload_settings.dart';
 import 'src/net/ng_store.dart';
 import 'src/net/read_history.dart';
@@ -14,6 +15,7 @@ Future<void> main() async {
   await Future.wait([
     AuthStore.shared.load(),
     ImageUploadSettings.shared.load(),
+    FileUploadSettings.shared.load(),
     ReadHistory.shared.load(),
     NgStore.shared.load(),
   ]);
