@@ -340,6 +340,27 @@ class _ThreadScreenState extends State<ThreadScreen>
     _itemScroll.jumpTo(index: 0, alignment: 0);
   }
 
+  /// ファストスクロールのつまみから任意の行へ即ジャンプする。
+  void _jumpToIndex(int index) {
+    if (!_itemScroll.isAttached || _items.isEmpty) return;
+    final clamped = index.clamp(0, _items.length - 1);
+    _itemScroll.jumpTo(index: clamped, alignment: 0);
+  }
+
+  /// つまみの吹き出しに出すレス番号。境界行に当たったら近くのレスを拾う。
+  String _resLabelForIndex(int index) {
+    if (index < 0 || index >= _items.length) return '';
+    for (var i = index; i >= 0; i--) {
+      final item = _items[i];
+      if (item is Res) return '${item.number}';
+    }
+    for (var i = index + 1; i < _items.length; i++) {
+      final item = _items[i];
+      if (item is Res) return '${item.number}';
+    }
+    return '';
+  }
+
   /// 「最新へ」ボタン・追従で末尾へスクロールする。
   void _scrollToBottom() {
     if (!_itemScroll.isAttached || _items.isEmpty) return;
@@ -1251,6 +1272,19 @@ class _ThreadScreenState extends State<ThreadScreen>
             },
           ),
         ),
+        // 長いスレでは右端のつまみで一気に移動できるようにする。
+        if (items.length > 30)
+          Positioned(
+            top: 8,
+            right: 0,
+            bottom: 8,
+            child: _FastScroller(
+              positions: _positions,
+              itemCount: items.length,
+              onJump: _jumpToIndex,
+              labelForIndex: _resLabelForIndex,
+            ),
+          ),
         if (!_atBottom)
           Positioned(
             right: 12,
@@ -1261,6 +1295,154 @@ class _ThreadScreenState extends State<ThreadScreen>
             ),
           ),
       ],
+    );
+  }
+}
+
+/// 右端のファストスクロール用つまみ。長いスレで一気に距離を移動できる。
+///
+/// [ScrollablePositionedList] はピクセル位置を持たないため、つまみの縦位置を
+/// 「見えている先頭行のインデックス / 全行数」に対応させ、ドラッグ量に応じて
+/// 目的の行へ [ItemScrollController.jumpTo] する。
+class _FastScroller extends StatefulWidget {
+  const _FastScroller({
+    required this.positions,
+    required this.itemCount,
+    required this.onJump,
+    required this.labelForIndex,
+  });
+
+  final ItemPositionsListener positions;
+  final int itemCount;
+  final void Function(int index) onJump;
+  final String Function(int index) labelForIndex;
+
+  @override
+  State<_FastScroller> createState() => _FastScrollerState();
+}
+
+class _FastScrollerState extends State<_FastScroller> {
+  static const double _handleHeight = 52;
+  static const double _handleWidth = 30;
+  bool _dragging = false;
+  double _fraction = 0;
+
+  /// 見えている先頭行から現在位置（0〜1）を求める。
+  double _currentFraction() {
+    final positions = widget.positions.itemPositions.value;
+    if (positions.isEmpty || widget.itemCount <= 1) return 0;
+    var topIndex = widget.itemCount;
+    for (final p in positions) {
+      if (p.itemTrailingEdge > 0 && p.index < topIndex) topIndex = p.index;
+    }
+    if (topIndex >= widget.itemCount) return 0;
+    return (topIndex / (widget.itemCount - 1)).clamp(0.0, 1.0);
+  }
+
+  int _indexFor(double fraction) =>
+      (fraction * (widget.itemCount - 1)).round();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return SizedBox(
+      width: _handleWidth,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final travel = constraints.maxHeight - _handleHeight;
+          return ValueListenableBuilder<Iterable<ItemPosition>>(
+            valueListenable: widget.positions.itemPositions,
+            builder: (context, _, _) {
+              final fraction = _dragging ? _fraction : _currentFraction();
+              final top = travel <= 0 ? 0.0 : fraction * travel;
+              return Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  // ドラッグ中はつまみの左にレス番号の吹き出しを出す。
+                  if (_dragging)
+                    Positioned(
+                      right: _handleWidth + 8,
+                      top: top + (_handleHeight - 32) / 2,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 7,
+                        ),
+                        decoration: BoxDecoration(
+                          color: scheme.inverseSurface,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          widget.labelForIndex(_indexFor(_fraction)),
+                          style: TextStyle(
+                            color: scheme.onInverseSurface,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 15,
+                          ),
+                        ),
+                      ),
+                    ),
+                  Positioned(
+                    right: 0,
+                    top: top,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onVerticalDragStart: (_) {
+                        setState(() {
+                          _dragging = true;
+                          _fraction = _currentFraction();
+                        });
+                      },
+                      onVerticalDragUpdate: (d) {
+                        if (travel <= 0) return;
+                        setState(() {
+                          _fraction = (_fraction + d.delta.dy / travel).clamp(
+                            0.0,
+                            1.0,
+                          );
+                        });
+                        widget.onJump(_indexFor(_fraction));
+                      },
+                      onVerticalDragEnd: (_) =>
+                          setState(() => _dragging = false),
+                      onVerticalDragCancel: () =>
+                          setState(() => _dragging = false),
+                      child: Container(
+                        width: _handleWidth,
+                        height: _handleHeight,
+                        decoration: BoxDecoration(
+                          color: _dragging
+                              ? scheme.primary
+                              : scheme.secondaryContainer.withValues(
+                                  alpha: 0.92,
+                                ),
+                          borderRadius: const BorderRadius.horizontal(
+                            left: Radius.circular(15),
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.18),
+                              blurRadius: 4,
+                              offset: const Offset(0, 1),
+                            ),
+                          ],
+                        ),
+                        child: Icon(
+                          Icons.unfold_more,
+                          size: 20,
+                          color: _dragging
+                              ? scheme.onPrimary
+                              : scheme.onSecondaryContainer,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      ),
     );
   }
 }
