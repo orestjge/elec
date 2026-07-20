@@ -13,6 +13,7 @@ abstract interface class ReadHistoryStorage {
 class ReadHistorySnapshot {
   const ReadHistorySnapshot({
     this.seen = const {},
+    this.seenAt = const {},
     this.favorites = const {},
     this.threads = const {},
     this.ownThreads = const {},
@@ -21,6 +22,9 @@ class ReadHistorySnapshot {
   });
 
   final Map<String, int> seen;
+
+  /// スレを最後に開いた時刻（エポックミリ秒）。履歴の「最後に見た順」に使う。
+  final Map<String, int> seenAt;
   final Set<String> favorites;
   final Map<String, StoredThread> threads;
   final Set<String> ownThreads;
@@ -89,12 +93,16 @@ class FileReadHistoryStorage implements ReadHistoryStorage {
           jsonDecode(await file.readAsString()) as Map<String, dynamic>;
       final seenJson = json['seen'];
       if (seenJson is Map<String, dynamic>) {
+        final seenAtJson = json['seenAt'];
         final favoritesJson = json['favorites'];
         final threadsJson = json['threads'];
         final ownThreadsJson = json['ownThreads'];
         final ownPostsJson = json['ownPosts'];
         return ReadHistorySnapshot(
           seen: seenJson.map((k, v) => MapEntry(k, (v as num).toInt())),
+          seenAt: seenAtJson is Map<String, dynamic>
+              ? seenAtJson.map((k, v) => MapEntry(k, (v as num).toInt()))
+              : const {},
           favorites: favoritesJson is List
               ? favoritesJson.whereType<String>().toSet()
               : const {},
@@ -127,6 +135,7 @@ class FileReadHistoryStorage implements ReadHistoryStorage {
     await file.writeAsString(
       jsonEncode({
         'seen': snapshot.seen,
+        'seenAt': snapshot.seenAt,
         'favorites': snapshot.favorites.toList()..sort(),
         'threads': snapshot.threads.map((k, v) => MapEntry(k, v.toJson())),
         'ownThreads': snapshot.ownThreads.toList()..sort(),
@@ -164,6 +173,7 @@ class FileReadHistoryStorage implements ReadHistoryStorage {
 
 class MemoryReadHistoryStorage implements ReadHistoryStorage {
   Map<String, int> _seen;
+  Map<String, int> _seenAt;
   Set<String> _favorites;
   Map<String, StoredThread> _threads;
   Set<String> _ownThreads;
@@ -176,7 +186,9 @@ class MemoryReadHistoryStorage implements ReadHistoryStorage {
     Set<String>? ownThreads,
     Map<String, Set<int>>? ownPosts,
     String? lastViewedThreadKey,
+    Map<String, int>? seenAt,
   ]) : _seen = seen ?? {},
+       _seenAt = seenAt ?? {},
        _favorites = favorites ?? {},
        _threads = threads ?? {},
        _ownThreads = ownThreads ?? {},
@@ -186,6 +198,7 @@ class MemoryReadHistoryStorage implements ReadHistoryStorage {
   @override
   Future<ReadHistorySnapshot> load() async => ReadHistorySnapshot(
     seen: Map.of(_seen),
+    seenAt: Map.of(_seenAt),
     favorites: Set.of(_favorites),
     threads: Map.of(_threads),
     ownThreads: Set.of(_ownThreads),
@@ -196,6 +209,7 @@ class MemoryReadHistoryStorage implements ReadHistoryStorage {
   @override
   Future<void> save(ReadHistorySnapshot snapshot) async {
     _seen = Map.of(snapshot.seen);
+    _seenAt = Map.of(snapshot.seenAt);
     _favorites = Set.of(snapshot.favorites);
     _threads = Map.of(snapshot.threads);
     _ownThreads = Set.of(snapshot.ownThreads);
@@ -208,12 +222,15 @@ class MemoryReadHistoryStorage implements ReadHistoryStorage {
 ///
 /// スレ一覧の表示切り替え・並べ替え・新着バッジに使う。
 class ReadHistory {
-  ReadHistory(this._storage);
+  ReadHistory(this._storage, {DateTime Function()? now})
+    : _now = now ?? DateTime.now;
 
   static final ReadHistory shared = ReadHistory(FileReadHistoryStorage());
 
   final ReadHistoryStorage _storage;
+  final DateTime Function() _now;
   Map<String, int> _seen = {};
+  Map<String, int> _seenAt = {};
   Set<String> _favorites = {};
   Map<String, StoredThread> _threads = {};
   Set<String> _ownThreads = {};
@@ -224,6 +241,7 @@ class ReadHistory {
   Future<void> load() async {
     final snapshot = await _storage.load();
     _seen = Map.of(snapshot.seen);
+    _seenAt = Map.of(snapshot.seenAt);
     _favorites = Set.of(snapshot.favorites);
     _threads = Map.of(snapshot.threads);
     _ownThreads = Set.of(snapshot.ownThreads);
@@ -235,6 +253,9 @@ class ReadHistory {
 
   /// 前回見たレス数。未読なら null。
   int? lastSeen(String threadKey) => _seen[threadKey];
+
+  /// スレを最後に開いた時刻（エポックミリ秒）。開いた記録が無ければ null。
+  int? lastSeenAt(String threadKey) => _seenAt[threadKey];
 
   Iterable<StoredThread> get storedThreads => _threads.values;
 
@@ -266,25 +287,19 @@ class ReadHistory {
   }
 
   Future<void> markLastViewedThread(ThreadSummary thread) async {
-    final changedThread = _rememberThreadInMemory(thread);
-    final changedLastViewed = _lastViewedThreadKey != thread.key;
-    if (changedLastViewed) _lastViewedThreadKey = thread.key;
-    if (changedThread || changedLastViewed) await _save();
+    _rememberThreadInMemory(thread);
+    _lastViewedThreadKey = thread.key;
+    _seenAt[thread.key] = _now().millisecondsSinceEpoch;
+    await _save();
   }
 
   /// スレを開いた事実をすぐ保存する。本文取得や画面離脱を待たず、履歴一覧と
   /// 「直近に見たスレ」に反映する。既読位置はまだ見えていないので 0 にする。
   Future<void> markOpenedThread(ThreadSummary thread) async {
-    var changed = _rememberThreadInMemory(thread);
-    if (_lastViewedThreadKey != thread.key) {
-      _lastViewedThreadKey = thread.key;
-      changed = true;
-    }
-    if (!_seen.containsKey(thread.key)) {
-      _seen[thread.key] = 0;
-      changed = true;
-    }
-    if (!changed) return;
+    _rememberThreadInMemory(thread);
+    _lastViewedThreadKey = thread.key;
+    _seen.putIfAbsent(thread.key, () => 0);
+    _seenAt[thread.key] = _now().millisecondsSinceEpoch;
     await _save();
   }
 
@@ -338,6 +353,7 @@ class ReadHistory {
   /// 除く。ただしお気に入りの場合は一覧に残すため保存情報は消さない。
   Future<void> forgetThread(String threadKey) async {
     var changed = _seen.remove(threadKey) != null;
+    if (_seenAt.remove(threadKey) != null) changed = true;
     if (!_favorites.contains(threadKey)) {
       if (_threads.remove(threadKey) != null) changed = true;
     }
@@ -351,6 +367,7 @@ class ReadHistory {
   Future<void> _save() async {
     final snapshot = ReadHistorySnapshot(
       seen: Map.of(_seen),
+      seenAt: Map.of(_seenAt),
       favorites: Set.of(_favorites),
       threads: Map.of(_threads),
       ownThreads: Set.of(_ownThreads),
