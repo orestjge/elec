@@ -173,7 +173,7 @@ class _StatusBadge extends StatelessWidget {
         style: TextStyle(
           color: scheme.onSurfaceVariant,
           fontSize: 11,
-          fontWeight: FontWeight.w700,
+          fontWeight: FontWeight.w500,
         ),
       ),
     );
@@ -203,7 +203,7 @@ class _OwnThreadBadge extends StatelessWidget {
             style: TextStyle(
               color: scheme.onTertiaryContainer,
               fontSize: 11,
-              fontWeight: FontWeight.w700,
+              fontWeight: FontWeight.w500,
             ),
           ),
         ],
@@ -264,7 +264,7 @@ class _NewBadge extends StatelessWidget {
         style: TextStyle(
           color: scheme.onPrimary,
           fontSize: 11,
-          fontWeight: FontWeight.w700,
+          fontWeight: FontWeight.w500,
         ),
       ),
     );
@@ -293,10 +293,7 @@ class _Metric extends StatelessWidget {
         const SizedBox(width: 3),
         Text(
           label,
-          style: TextStyle(
-            color: color,
-            fontWeight: emphasized ? FontWeight.w700 : FontWeight.w500,
-          ),
+          style: TextStyle(color: color, fontWeight: FontWeight.w500),
         ),
       ],
     );

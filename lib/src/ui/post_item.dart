@@ -236,7 +236,7 @@ class _Header extends StatelessWidget {
                   '${res.number}',
                   style: theme.textTheme.labelMedium?.copyWith(
                     color: scheme.primary,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w500,
                     leadingDistribution: TextLeadingDistribution.even,
                   ),
                 ),
@@ -361,7 +361,7 @@ class _OwnChip extends StatelessWidget {
           fontSize: 11,
           height: 1,
           leadingDistribution: TextLeadingDistribution.even,
-          fontWeight: FontWeight.w700,
+          fontWeight: FontWeight.w500,
         ),
       ),
     );

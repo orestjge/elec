@@ -1609,7 +1609,7 @@ class _NgPlaceholder extends StatelessWidget {
               '$number',
               style: Theme.of(context).textTheme.labelMedium?.copyWith(
                 color: scheme.onSurfaceVariant,
-                fontWeight: FontWeight.w700,
+                fontWeight: FontWeight.w500,
               ),
             ),
             const SizedBox(width: 8),
@@ -1653,7 +1653,7 @@ class _NewArrivalLine extends StatelessWidget {
               style: TextStyle(
                 color: color,
                 fontSize: 12,
-                fontWeight: FontWeight.w700,
+                fontWeight: FontWeight.w500,
               ),
             ),
           ),

@@ -66,10 +66,15 @@ class NgScreen extends StatelessWidget {
                     ),
                   ),
               const Divider(height: 1),
-              _SectionHeader(title: 'NG スレ主', onAdd: () => _addCreator(context)),
+              _SectionHeader(
+                title: 'NG スレ主',
+                onAdd: () => _addCreator(context),
+              ),
               if (creators.isEmpty)
-                const _EmptyHint('スレ立て人（metadent）のスレを一覧から隠します。'
-                    'スレを長押しして「このスレ主を NG」からも追加できます')
+                const _EmptyHint(
+                  'スレ立て人（metadent）のスレを一覧から隠します。'
+                  'スレを長押しして「このスレ主を NG」からも追加できます',
+                )
               else
                 for (final metadent in creators)
                   ListTile(
@@ -130,7 +135,7 @@ class _SectionHeader extends StatelessWidget {
             title,
             style: theme.textTheme.titleSmall?.copyWith(
               color: theme.colorScheme.primary,
-              fontWeight: FontWeight.w700,
+              fontWeight: FontWeight.w500,
             ),
           ),
           const Spacer(),
