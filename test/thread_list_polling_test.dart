@@ -1,5 +1,7 @@
 import 'package:edge_core/edge_core.dart';
+import 'package:elec/src/net/auth_store.dart';
 import 'package:elec/src/net/read_history.dart';
+import 'package:elec/src/net/token_storage.dart';
 import 'package:elec/src/ui/thread_list_screen.dart';
 import 'package:elec/src/ui/thread_tile.dart';
 import 'package:flutter/material.dart';
@@ -10,20 +12,36 @@ final _win31j = Windows31JCodec();
 List<int> sjis(String s) => _win31j.encode(s);
 List<int> datLine(String s) => [...sjis(s), 0x0A];
 
-/// 呼ばれるたびに次の応答を返すフェイク。使い切ったら最後の応答を返し続ける。
-class QueueFetcher implements HttpFetcher {
+List<int> successBody() =>
+    sjis('<html><!-- 2ch_X:true --><body>書きこみました</body></html>');
+
+/// 呼ばれるたびに次の GET 応答を返すフェイク。使い切ったら最後の応答を返し続ける。
+class QueueFetcher implements HttpFetcher, HttpPoster {
   QueueFetcher(this._responses);
   final List<FetchResponse> _responses;
   int calls = 0;
+  int postCalls = 0;
+  final List<Map<String, String>> getHeaders = [];
 
   @override
   Future<FetchResponse> get(
     Uri url, {
     Map<String, String> headers = const {},
   }) async {
+    getHeaders.add(Map.of(headers));
     final i = calls < _responses.length ? calls : _responses.length - 1;
     calls++;
     return _responses[i];
+  }
+
+  @override
+  Future<FetchResponse> post(
+    Uri url, {
+    Map<String, String> headers = const {},
+    required String body,
+  }) async {
+    postCalls++;
+    return FetchResponse(statusCode: 200, bodyBytes: successBody());
   }
 }
 
@@ -138,6 +156,40 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('読み込みに失敗しました'), findsNothing);
     expect(find.text('復活スレ'), findsOneWidget);
+  });
+
+  testWidgets('スレ立て後は強制更新して自分のスレとして表示する', (tester) async {
+    final history = ReadHistory(MemoryReadHistoryStorage());
+    final fetcher = QueueFetcher([
+      subjectOk('1.dat<>既存スレ (10)\n', 'LM1'),
+      subjectOk('2.dat<>立てたスレ (1)\n1.dat<>既存スレ (10)\n', 'LM2'),
+    ]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadListScreen(
+          fetcher: fetcher,
+          pollInterval: const Duration(seconds: 15),
+          readHistory: history,
+          authStore: AuthStore(MemoryTokenStorage()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('スレを立てる'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).at(0), '立てたスレ');
+    await tester.enterText(find.byType(TextField).at(1), '本文');
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, '立てる'));
+    await tester.pumpAndSettle();
+
+    expect(fetcher.postCalls, 1);
+    expect(fetcher.getHeaders[1].containsKey('If-Modified-Since'), isFalse);
+    expect(history.isOwnThread('2'), isTrue);
+    expect(find.text('立てたスレ'), findsOneWidget);
+    expect(find.text('自分'), findsOneWidget);
   });
 
   testWidgets('表示フィルタで履歴とお気に入りを切り替える', (tester) async {

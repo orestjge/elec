@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:edge_core/edge_core.dart';
 import 'package:flutter/material.dart';
 
+import '../net/auth_store.dart';
 import '../net/endpoints.dart';
 import '../net/http_fetcher.dart';
 import '../net/read_history.dart';
@@ -42,6 +43,7 @@ class ThreadListScreen extends StatefulWidget {
     this.endpoints = const EdgeEndpoints(),
     this.pollInterval = const Duration(seconds: 5),
     this.readHistory,
+    this.authStore,
   });
 
   /// 通信の実装。テストでフェイクを差せるよう注入可能。既定は本番実装。
@@ -50,6 +52,9 @@ class ThreadListScreen extends StatefulWidget {
 
   /// 既読履歴。既定はアプリ共有インスタンス（テストで差し替え可能）。
   final ReadHistory? readHistory;
+
+  /// 書き込み認証情報。既定はアプリ共有インスタンス（テストで差し替え可能）。
+  final AuthStore? authStore;
 
   /// 自動更新の間隔（フォアグラウンド時）。
   ///
@@ -189,9 +194,12 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   }
 
   /// 引っ張って更新。初回失敗からの復帰にも使う。
-  Future<void> _refresh() async {
+  Future<void> _refresh({bool force = false}) async {
     try {
-      final r = await _subject.fetch(widget.endpoints.subjectTxt, prev: _state);
+      final r = await _subject.fetch(
+        widget.endpoints.subjectTxt,
+        prev: force ? null : _state,
+      );
       if (!mounted) return;
       if (!r.notModified) await _rememberThreads(r.state.threads);
       setState(() {
@@ -507,12 +515,16 @@ class _ThreadListScreenState extends State<ThreadListScreen>
     final beforeKeys = _state?.threads.map((t) => t.key).toSet() ?? const {};
     final createdTitle = await Navigator.of(context).push<String>(
       MaterialPageRoute<String>(
-        builder: (_) => NewThreadScreen(endpoints: widget.endpoints),
+        builder: (_) => NewThreadScreen(
+          fetcher: _fetcher,
+          endpoints: widget.endpoints,
+          authStore: widget.authStore,
+        ),
       ),
     );
     // 立てたら一覧を更新して新スレを見えるようにする。
     if (createdTitle != null && mounted) {
-      await _refresh();
+      await _refresh(force: true);
       await _markOwnCreatedThread(createdTitle, beforeKeys);
     }
   }
