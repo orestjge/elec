@@ -1,9 +1,11 @@
 import 'dart:async';
 
 import 'package:edge_core/edge_core.dart';
+import 'package:elec/src/net/ng_store.dart';
 import 'package:elec/src/net/read_history.dart';
 import 'package:elec/src/ui/thread_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jis0208/jis0208.dart';
 
@@ -166,6 +168,144 @@ void main() {
 
     expect(find.text('会話 #1  3件'), findsOneWidget);
     expect(find.text('ID:aaa  2レス'), findsNothing);
+  });
+
+  testWidgets('NGワードに該当するレスは非表示になりタップで表示する', (tester) async {
+    final ng = NgStore(MemoryNgStorage());
+    await ng.load();
+    await ng.addWord(const NgWord('あとから来た'));
+
+    final f = QueueFetcher([
+      ok([...res1, ...res2, ...res3]),
+    ]);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadScreen(
+          threadKey: '1762103691',
+          threadTitle: 'テストスレ',
+          fetcher: f,
+          pollInterval: const Duration(seconds: 5),
+          readHistory: ReadHistory(MemoryReadHistoryStorage()),
+          ngStore: ng,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 該当レスは本文が隠れ、プレースホルダが出る。
+    expect(find.textContaining('あとから来た', findRichText: true), findsNothing);
+    expect(find.text('NG（タップで表示）'), findsOneWidget);
+
+    // タップすると本文が出る。
+    await tester.tap(find.text('NG（タップで表示）'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('あとから来た', findRichText: true), findsOneWidget);
+  });
+
+  testWidgets('ID シートからそのIDをNGにできる', (tester) async {
+    final ng = NgStore(MemoryNgStorage());
+    await ng.load();
+
+    final f = QueueFetcher([
+      ok([...res1, ...res2]),
+    ]);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadScreen(
+          threadKey: '1762103691',
+          threadTitle: 'テストスレ',
+          fetcher: f,
+          pollInterval: const Duration(seconds: 5),
+          readHistory: ReadHistory(MemoryReadHistoryStorage()),
+          ngStore: ng,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('ID:aaa (1/2)').first);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('IDをNG'));
+    await tester.pumpAndSettle();
+
+    // NG に登録され、シート内のレスがプレースホルダに変わる。
+    expect(ng.isNgId('aaa'), isTrue);
+    expect(find.text('NG（タップで表示）'), findsWidgets);
+    // 「NG解除」に切り替わる。
+    expect(find.text('NG解除'), findsOneWidget);
+  });
+
+  testWidgets('ID シートに必死チェッカーと ID コピーの導線が出る', (tester) async {
+    final copied = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied.add((call.arguments as Map)['text'] as String);
+        }
+        return null;
+      },
+    );
+    addTearDown(() {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      );
+    });
+
+    final f = QueueFetcher([
+      ok([...res1, ...res2]),
+    ]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('ID:aaa (1/2)').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('必死チェッカー'), findsOneWidget);
+    expect(find.text('IDをコピー'), findsOneWidget);
+
+    await tester.tap(find.text('IDをコピー'));
+    await tester.pumpAndSettle();
+    expect(copied, ['aaa']);
+  });
+
+  testWidgets('レス長押しで全体コピーのアクションが出る', (tester) async {
+    final copied = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied.add((call.arguments as Map)['text'] as String);
+        }
+        return null;
+      },
+    );
+    addTearDown(() {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      );
+    });
+
+    final f = QueueFetcher([
+      ok([...res1, ...res2]),
+    ]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    // 1 レス目のヘッダ（番号）を長押ししてアクションシートを出す。
+    await tester.longPress(find.text('1').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('レス全体をコピー'), findsOneWidget);
+
+    await tester.tap(find.text('レス全体をコピー'));
+    await tester.pumpAndSettle();
+
+    expect(copied.single, contains('ID:aaa'));
+    expect(copied.single, contains('最初のレス'));
   });
 
   testWidgets('ユーザー名をタップすると全文を表示する', (tester) async {

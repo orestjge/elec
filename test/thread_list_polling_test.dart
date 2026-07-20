@@ -441,6 +441,39 @@ void main() {
     expect(find.text('1レス'), findsNothing);
   });
 
+  testWidgets('入力欄フォーカス中でも一覧側スワイプで戻れる', (tester) async {
+    final fetcher = QueueFetcher([
+      subjectOk('1.dat<>入力中スレ (1)\n', 'LM1'),
+      datOk(datLine('名無し<><>2025/11/03(月) 02:14:51.907 ID:aaa<> 本文 <>入力中スレ')),
+    ]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadListScreen(
+          fetcher: fetcher,
+          pollInterval: const Duration(seconds: 15),
+          readHistory: ReadHistory(MemoryReadHistoryStorage()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('入力中スレ'));
+    await tester.pumpAndSettle();
+
+    // 入力欄にフォーカスを当てる（キーボード表示中を模す）。
+    await tester.tap(find.widgetWithText(TextField, 'レスを書く'));
+    await tester.pumpAndSettle();
+
+    // 一覧側（本文付近）から右スワイプすると戻れる。
+    final gesture = await tester.startGesture(const Offset(240, 200));
+    await gesture.moveBy(const Offset(500, 0));
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(find.text('エッヂ'), findsWidgets);
+    expect(find.text('1レス'), findsNothing);
+  });
+
   testWidgets('スレ画面で長押し後の右ドラッグでは一覧に戻らない', (tester) async {
     final fetcher = QueueFetcher([
       subjectOk('1.dat<>選択できるスレ (1)\n', 'LM1'),
