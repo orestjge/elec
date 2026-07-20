@@ -142,7 +142,7 @@ class _ThreadScreenState extends State<ThreadScreen>
   bool _trackingSwipe = false;
   final _selectedBodyResNumbers = <int>{};
   Timer? _swipeStartTimer;
-  static const double _swipeDistanceThreshold = 96;
+  static const double _swipeDistanceThreshold = 50;
   static const Duration _swipeStartTimeout = Duration(milliseconds: 450);
   static const int _postRefreshAttempts = 4;
   static const Duration _postRefreshRetryDelay = Duration(milliseconds: 700);
@@ -1502,8 +1502,7 @@ class _FastScrollerState extends State<_FastScroller> {
                       }),
                       onPointerMove: (e) => _applyDelta(e.delta.dy, travel),
                       onPointerUp: (_) => setState(() => _dragging = false),
-                      onPointerCancel: (_) =>
-                          setState(() => _dragging = false),
+                      onPointerCancel: (_) => setState(() => _dragging = false),
                       child: Container(
                         width: _handleWidth,
                         height: _handleHeight,
