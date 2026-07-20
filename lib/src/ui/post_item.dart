@@ -22,6 +22,7 @@ class PostItem extends StatelessWidget {
     this.onTapReplies,
     this.onReply,
     this.onBodySelectionActiveChanged,
+    this.onLongPress,
     this.isOwn = false,
   });
 
@@ -57,6 +58,10 @@ class PostItem extends StatelessWidget {
   /// 本文の文字選択状態が変わったとき。
   final ValueChanged<bool>? onBodySelectionActiveChanged;
 
+  /// レスを長押ししたとき。レス全体のコピーや ID 操作のメニューを出す。
+  /// 本文はタップで選択・リンク遷移に使うため、レス単位の操作は長押しに割り当てる。
+  final VoidCallback? onLongPress;
+
   /// このアプリから投稿したレスか。
   final bool isOwn;
 
@@ -83,7 +88,7 @@ class PostItem extends StatelessWidget {
     final images = imageUrlsIn(body);
     final videos = videoUrlsIn(body);
 
-    return Container(
+    final content = Container(
       color: isOwn
           ? scheme.secondaryContainer.withValues(alpha: 0.22)
           : Colors.transparent,
@@ -124,6 +129,15 @@ class PostItem extends StatelessWidget {
           ],
         ],
       ),
+    );
+
+    if (onLongPress == null) return content;
+    // 本文の文字選択・リンクタップは子側が受けるので、それ以外の余白・ヘッダを
+    // 長押しした場合にレス単位のメニューを出す。
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onLongPress: onLongPress,
+      child: content,
     );
   }
 }

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:edge_core/edge_core.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../net/auth_launcher.dart';
@@ -403,7 +404,105 @@ class _ThreadScreenState extends State<ThreadScreen>
 
   void _showIdPosts(String id) {
     final posts = _state.res.where((r) => r.id == id).toList();
-    _showPostsSheet('ID:$id  ${posts.length}レス', posts);
+    _showPostsSheet('ID:$id  ${posts.length}レス', posts, id: id);
+  }
+
+  /// テキストをクリップボードへコピーし、上部通知で知らせる。
+  Future<void> _copyText(String text, String message) async {
+    await Clipboard.setData(ClipboardData(text: text));
+    if (mounted) _showSnack(message);
+  }
+
+  /// このレスの全体（番号・名前・日時・ID・本文）を貼り付け向けに整形する。
+  String _rawResText(Res res) {
+    final name = htmlToText(res.name).trim();
+    final body = htmlToText(res.body).trimRight();
+    final header = StringBuffer('${res.number}: ')
+      ..write(name.isEmpty ? '名無し' : name);
+    final date = res.dateText.trim();
+    if (date.isNotEmpty) header.write(' $date');
+    if (res.id != null) header.write(' ID:${res.id}');
+    return body.isEmpty ? header.toString() : '$header\n$body';
+  }
+
+  /// 必死チェッカー（kyodemo）でこの ID の投稿経路を開く。
+  void _openHissi(String id) {
+    _openUrl(widget.endpoints.hissi(id));
+  }
+
+  /// レスの長押しで出すアクション。対象レスの内容を上部に出し、その下に
+  /// 全体コピー・本文コピー・ID コピー・必死の操作を並べる。
+  void _showResActions(Res res) {
+    final id = res.id;
+    final idCount = _idCounts(_state.res)[id] ?? 1;
+    final idOrdinal = _idOrdinals(_state.res)[res.number] ?? 1;
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.85,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // 対象レスの内容。長い本文はここだけスクロールする。
+              Flexible(
+                child: SingleChildScrollView(
+                  child: PostItem(
+                    res: res,
+                    idCount: idCount,
+                    idOrdinal: idOrdinal,
+                    onTapId: null,
+                    onTapUrl: _openUrl,
+                    isOwn: _history.isOwnPost(widget.threadKey, res.number),
+                  ),
+                ),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.copy_all),
+                title: const Text('レス全体をコピー'),
+                subtitle: const Text('番号・名前・ID・日時・本文'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _copyText(_rawResText(res), 'レスをコピーしました');
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.notes),
+                title: const Text('本文をコピー'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _copyText(htmlToText(res.body).trim(), '本文をコピーしました');
+                },
+              ),
+              if (id != null) ...[
+                ListTile(
+                  leading: const Icon(Icons.badge_outlined),
+                  title: Text('ID:$id をコピー'),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _copyText(id, 'IDをコピーしました');
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.travel_explore),
+                  title: const Text('必死チェッカーで開く'),
+                  subtitle: const Text('kyodemo でこの ID の今日の他の書き込みを見る'),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _openHissi(id);
+                  },
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   /// レス番号 [number] を中心に、親レス・対象レス・返信ツリーをまとめて出す。
@@ -428,7 +527,8 @@ class _ThreadScreenState extends State<ThreadScreen>
   }
 
   /// レス群をボトムシートで一覧表示する（同一 ID・返信一覧で共用）。
-  void _showPostsSheet(String title, List<Res> posts) {
+  /// [id] を渡すと、必死チェッカー導線と ID コピーの操作行を上部に出す。
+  void _showPostsSheet(String title, List<Res> posts, {String? id}) {
     final idCounts = _idCounts(_state.res);
     final idOrdinals = _idOrdinals(_state.res);
     final replyCountByNumber = replyCounts(_state.res);
@@ -452,6 +552,25 @@ class _ThreadScreenState extends State<ThreadScreen>
                 ),
               ),
             ),
+            if (id != null)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+                child: Row(
+                  children: [
+                    TextButton.icon(
+                      onPressed: () => _openHissi(id),
+                      icon: const Icon(Icons.travel_explore, size: 18),
+                      label: const Text('必死チェッカー'),
+                    ),
+                    const SizedBox(width: 4),
+                    TextButton.icon(
+                      onPressed: () => _copyText(id, 'IDをコピーしました'),
+                      icon: const Icon(Icons.copy, size: 18),
+                      label: const Text('IDをコピー'),
+                    ),
+                  ],
+                ),
+              ),
             const Divider(height: 1),
             Expanded(
               child: ListView.separated(
@@ -478,6 +597,7 @@ class _ThreadScreenState extends State<ThreadScreen>
                     _showConversation(n);
                   },
                   onReply: _reply,
+                  onLongPress: () => _showResActions(posts[i]),
                   isOwn: _history.isOwnPost(widget.threadKey, posts[i].number),
                 ),
               ),
@@ -548,6 +668,7 @@ class _ThreadScreenState extends State<ThreadScreen>
           },
           onTapUrl: _openUrl,
           onSend: _submit,
+          onShowActions: _showResActions,
           isOwnPost: (n) => _history.isOwnPost(widget.threadKey, n),
           enabled: !_isStopped,
         ),
@@ -962,6 +1083,7 @@ class _ThreadScreenState extends State<ThreadScreen>
                     onReply: _reply,
                     onBodySelectionActiveChanged: (active) =>
                         _handleBodySelectionActiveChanged(item.number, active),
+                    onLongPress: () => _showResActions(item),
                     isOwn: _history.isOwnPost(widget.threadKey, item.number),
                   ),
                   const Divider(height: 1),
@@ -1087,6 +1209,7 @@ class _ConversationSheet extends StatefulWidget {
     required this.onTapReplies,
     required this.onTapUrl,
     required this.onSend,
+    required this.onShowActions,
     required this.isOwnPost,
     required this.enabled,
   });
@@ -1106,6 +1229,9 @@ class _ConversationSheet extends StatefulWidget {
 
   /// 会話シート内の入力欄から直接送信する投稿関数（受理で true）。
   final Future<bool> Function(String) onSend;
+
+  /// レス長押しでアクションメニューを出す。
+  final ValueChanged<Res> onShowActions;
   final bool Function(int number) isOwnPost;
 
   /// 入力欄を有効にするか（停止スレでは false）。
@@ -1219,6 +1345,7 @@ class _ConversationSheetState extends State<_ConversationSheet> {
                               widget.replyCountByNumber[entry.res.number] ?? 0,
                           onTapReplies: widget.onTapReplies,
                           onReply: _replyLocal,
+                          onLongPress: () => widget.onShowActions(entry.res),
                           isOwn: widget.isOwnPost(entry.res.number),
                         ),
                       ),

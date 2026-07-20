@@ -4,6 +4,7 @@ import 'package:edge_core/edge_core.dart';
 import 'package:elec/src/net/read_history.dart';
 import 'package:elec/src/ui/thread_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jis0208/jis0208.dart';
 
@@ -166,6 +167,78 @@ void main() {
 
     expect(find.text('会話 #1  3件'), findsOneWidget);
     expect(find.text('ID:aaa  2レス'), findsNothing);
+  });
+
+  testWidgets('ID シートに必死チェッカーと ID コピーの導線が出る', (tester) async {
+    final copied = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied.add((call.arguments as Map)['text'] as String);
+        }
+        return null;
+      },
+    );
+    addTearDown(() {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      );
+    });
+
+    final f = QueueFetcher([
+      ok([...res1, ...res2]),
+    ]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('ID:aaa (1/2)').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('必死チェッカー'), findsOneWidget);
+    expect(find.text('IDをコピー'), findsOneWidget);
+
+    await tester.tap(find.text('IDをコピー'));
+    await tester.pumpAndSettle();
+    expect(copied, ['aaa']);
+  });
+
+  testWidgets('レス長押しで全体コピーのアクションが出る', (tester) async {
+    final copied = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied.add((call.arguments as Map)['text'] as String);
+        }
+        return null;
+      },
+    );
+    addTearDown(() {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      );
+    });
+
+    final f = QueueFetcher([
+      ok([...res1, ...res2]),
+    ]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    // 1 レス目のヘッダ（番号）を長押ししてアクションシートを出す。
+    await tester.longPress(find.text('1').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('レス全体をコピー'), findsOneWidget);
+
+    await tester.tap(find.text('レス全体をコピー'));
+    await tester.pumpAndSettle();
+
+    expect(copied.single, contains('ID:aaa'));
+    expect(copied.single, contains('最初のレス'));
   });
 
   testWidgets('ユーザー名をタップすると全文を表示する', (tester) async {

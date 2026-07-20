@@ -6,10 +6,18 @@ class EdgeEndpoints {
   const EdgeEndpoints({
     this.host = 'bbs.eddibb.cc',
     this.boardKey = 'liveedge',
+    this.hissiHost = 'www.kyodemo.net',
+    this.hissiBoardKey = 'e_e_liveedge',
   });
 
   final String host;
   final String boardKey;
+
+  /// 必死チェッカー（kyodemo）のホスト。ID の投稿経路を外部で参照する。
+  final String hissiHost;
+
+  /// 必死チェッカー側の板キー。kyodemo は eddibb の板を `e_e_` 接頭辞で持つ。
+  final String hissiBoardKey;
 
   Uri get subjectTxt => Uri.https(host, '/$boardKey/subject.txt');
 
@@ -33,4 +41,11 @@ class EdgeEndpoints {
 
   /// クライアント設定 API。
   Uri get clientConfig => Uri.https(host, '/api/client-config');
+
+  /// 必死チェッカー（kyodemo）で、ある ID の「今日の他の書き込み」を開く URL。
+  /// `k` にはレスに書かれる ID ハッシュをそのまま渡す。
+  Uri hissi(String id) => Uri.https(hissiHost, '/sdemo/b/$hissiBoardKey/', {
+    'bs': 'hi',
+    'k': id,
+  });
 }
