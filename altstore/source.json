@@ -1,0 +1,17 @@
+{
+  "name": "Elec (orestjge)",
+  "identifier": "io.github.orestjge.elec.altsource",
+  "apps": [
+    {
+      "name": "Elec",
+      "bundleIdentifier": "io.github.orestjge.elec",
+      "developerName": "orestjge",
+      "subtitle": "エッヂ掲示板ビューア",
+      "localizedDescription": "エッヂ掲示板ビューア elec。GitHub Actions で自動ビルドした無署名 IPA を AltStore / SideStore が端末上で再署名してインストールします。",
+      "iconURL": "https://raw.githubusercontent.com/orestjge/elec/main/elec_icon.png",
+      "tintColor": "1E88E5",
+      "category": "utilities",
+      "versions": []
+    }
+  ]
+}
