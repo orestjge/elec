@@ -1342,12 +1342,11 @@ class _FastScrollerState extends State<_FastScroller> {
   int _indexFor(double fraction) =>
       (fraction * (widget.itemCount - 1)).round();
 
-  /// トラック内のローカル Y から位置を決め、その行へジャンプする。つまみ中心が
-  /// 指の位置に来るよう `_handleHeight / 2` を引く。
-  void _applyLocalY(double localY, double travel) {
-    final fraction = travel <= 0
-        ? 0.0
-        : ((localY - _handleHeight / 2) / travel).clamp(0.0, 1.0);
+  /// つまみのドラッグ量 [dy] だけ位置を進め、その行へジャンプする。つまみ自体を
+  /// つかんだ時だけ動かすので、トラック上の返信ボタン等のタップは邪魔しない。
+  void _applyDelta(double dy, double travel) {
+    if (travel <= 0) return;
+    final fraction = (_fraction + dy / travel).clamp(0.0, 1.0);
     setState(() => _fraction = fraction);
     widget.onJump(_indexFor(fraction));
   }
@@ -1360,32 +1359,23 @@ class _FastScrollerState extends State<_FastScroller> {
       child: LayoutBuilder(
         builder: (context, constraints) {
           final travel = constraints.maxHeight - _handleHeight;
-          // ジェスチャ領域はトラック全体で固定。つまみが動いても指の下から
-          // 外れないので、最初の押下からそのままドラッグできる。
-          return GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onVerticalDragDown: (d) {
-              setState(() => _dragging = true);
-              _applyLocalY(d.localPosition.dy, travel);
-            },
-            onVerticalDragUpdate: (d) =>
-                _applyLocalY(d.localPosition.dy, travel),
-            onVerticalDragEnd: (_) => setState(() => _dragging = false),
-            onVerticalDragCancel: () => setState(() => _dragging = false),
-            child: ValueListenableBuilder<Iterable<ItemPosition>>(
-              valueListenable: widget.positions.itemPositions,
-              builder: (context, _, _) {
-                final fraction = _dragging ? _fraction : _currentFraction();
-                final top = travel <= 0 ? 0.0 : fraction * travel;
-                return Stack(
-                  fit: StackFit.expand,
-                  clipBehavior: Clip.none,
-                  children: [
-                    // ドラッグ中はつまみの左にレス番号の吹き出しを出す。
-                    if (_dragging)
-                      Positioned(
-                        right: _handleWidth + 8,
-                        top: top + (_handleHeight - 32) / 2,
+          return ValueListenableBuilder<Iterable<ItemPosition>>(
+            valueListenable: widget.positions.itemPositions,
+            builder: (context, _, _) {
+              final fraction = _dragging ? _fraction : _currentFraction();
+              final top = travel <= 0 ? 0.0 : fraction * travel;
+              // つまみ以外の場所は素通しにして、トラック上に重なる返信ボタン
+              // などのタップを邪魔しないようにする（ジェスチャはつまみ限定）。
+              return Stack(
+                fit: StackFit.expand,
+                clipBehavior: Clip.none,
+                children: [
+                  // ドラッグ中はつまみの左にレス番号の吹き出しを出す。
+                  if (_dragging)
+                    Positioned(
+                      right: _handleWidth + 8,
+                      top: top + (_handleHeight - 32) / 2,
+                      child: IgnorePointer(
                         child: Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 12,
@@ -1405,44 +1395,57 @@ class _FastScrollerState extends State<_FastScroller> {
                           ),
                         ),
                       ),
-                    Positioned(
-                      right: 0,
-                      top: top,
-                      child: IgnorePointer(
-                        child: Container(
-                          width: _handleWidth,
-                          height: _handleHeight,
-                          decoration: BoxDecoration(
-                            color: _dragging
-                                ? scheme.primary
-                                : scheme.secondaryContainer.withValues(
-                                    alpha: 0.92,
-                                  ),
-                            borderRadius: const BorderRadius.horizontal(
-                              left: Radius.circular(15),
+                    ),
+                  Positioned(
+                    right: 0,
+                    top: top,
+                    // ジェスチャーアリーナを介さない Listener で、押した瞬間から
+                    // ポインタを掴む。親リストの縦スクロールと取り合わないので
+                    // 「一度タップしてからでないと動かせない」問題が起きない。
+                    // 掴んだ位置からの相対移動なので飛びもない。
+                    child: Listener(
+                      behavior: HitTestBehavior.opaque,
+                      onPointerDown: (_) => setState(() {
+                        _dragging = true;
+                        _fraction = _currentFraction();
+                      }),
+                      onPointerMove: (e) => _applyDelta(e.delta.dy, travel),
+                      onPointerUp: (_) => setState(() => _dragging = false),
+                      onPointerCancel: (_) =>
+                          setState(() => _dragging = false),
+                      child: Container(
+                        width: _handleWidth,
+                        height: _handleHeight,
+                        decoration: BoxDecoration(
+                          color: _dragging
+                              ? scheme.primary
+                              : scheme.secondaryContainer.withValues(
+                                  alpha: 0.92,
+                                ),
+                          borderRadius: const BorderRadius.horizontal(
+                            left: Radius.circular(15),
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.18),
+                              blurRadius: 4,
+                              offset: const Offset(0, 1),
                             ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.18),
-                                blurRadius: 4,
-                                offset: const Offset(0, 1),
-                              ),
-                            ],
-                          ),
-                          child: Icon(
-                            Icons.unfold_more,
-                            size: 20,
-                            color: _dragging
-                                ? scheme.onPrimary
-                                : scheme.onSecondaryContainer,
-                          ),
+                          ],
+                        ),
+                        child: Icon(
+                          Icons.unfold_more,
+                          size: 20,
+                          color: _dragging
+                              ? scheme.onPrimary
+                              : scheme.onSecondaryContainer,
                         ),
                       ),
                     ),
-                  ],
-                );
-              },
-            ),
+                  ),
+                ],
+              );
+            },
           );
         },
       ),
