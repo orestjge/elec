@@ -26,6 +26,7 @@ class NgScreen extends StatelessWidget {
         builder: (context, _) {
           final words = store.words;
           final ids = store.ids;
+          final creators = store.creators;
           return ListView(
             children: [
               _SectionHeader(title: 'NGワード', onAdd: () => _addWord(context)),
@@ -64,6 +65,25 @@ class NgScreen extends StatelessWidget {
                       onPressed: () => store.removeId(id),
                     ),
                   ),
+              const Divider(height: 1),
+              _SectionHeader(title: 'NG スレ主', onAdd: () => _addCreator(context)),
+              if (creators.isEmpty)
+                const _EmptyHint('スレ立て人（metadent）のスレを一覧から隠します。'
+                    'スレを長押しして「このスレ主を NG」からも追加できます')
+              else
+                for (final metadent in creators)
+                  ListTile(
+                    leading: Icon(
+                      Icons.person_off_outlined,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                    title: Text('[$metadent★]'),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.delete_outline),
+                      tooltip: '削除',
+                      onPressed: () => store.removeCreator(metadent),
+                    ),
+                  ),
               const SizedBox(height: 24),
             ],
           );
@@ -83,6 +103,14 @@ class NgScreen extends StatelessWidget {
       builder: (context) => const _AddIdDialog(),
     );
     if (id != null) await store.addId(id);
+  }
+
+  Future<void> _addCreator(BuildContext context) async {
+    final metadent = await showDialog<String>(
+      context: context,
+      builder: (context) => const _AddCreatorDialog(),
+    );
+    if (metadent != null) await store.addCreator(metadent);
   }
 }
 
@@ -249,6 +277,64 @@ class _AddIdDialogState extends State<_AddIdDialog> {
         decoration: InputDecoration(
           hintText: '例: bdwCNFndK',
           prefixText: 'ID:',
+          errorText: _error,
+        ),
+        onChanged: (_) {
+          if (_error != null) setState(() => _error = null);
+        },
+        onSubmitted: (_) => _submit(),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('キャンセル'),
+        ),
+        FilledButton(onPressed: _submit, child: const Text('追加')),
+      ],
+    );
+  }
+}
+
+/// NG スレ主（metadent）追加ダイアログ。`[xxx★]` で貼られても受け付ける。
+class _AddCreatorDialog extends StatefulWidget {
+  const _AddCreatorDialog();
+
+  @override
+  State<_AddCreatorDialog> createState() => _AddCreatorDialogState();
+}
+
+class _AddCreatorDialogState extends State<_AddCreatorDialog> {
+  final _controller = TextEditingController();
+  String? _error;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    // 「[xxx★]」の飾りを外して metadent 本体だけにする。
+    var metadent = _controller.text.trim();
+    if (metadent.startsWith('[')) metadent = metadent.substring(1);
+    metadent = metadent.replaceAll('★', '').replaceAll(']', '').trim();
+    if (metadent.isEmpty) {
+      setState(() => _error = 'metadent を入力してください');
+      return;
+    }
+    Navigator.pop(context, metadent);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('NG スレ主を追加'),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        decoration: InputDecoration(
+          hintText: '例: B3YfDSAP',
+          helperText: 'スレ一覧の [xxx★] の中身（metadent）',
           errorText: _error,
         ),
         onChanged: (_) {

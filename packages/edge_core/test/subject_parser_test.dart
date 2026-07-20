@@ -20,6 +20,19 @@ void main() {
       expect(e.title, 'テストやで');
       expect(e.capName, 'bo0x/BWQ');
       expect(e.resCount, 5);
+      expect(e.metadent, isNull);
+    });
+
+    test('metadent モードでは [xxx★] を metadent に入れ cap は空にする', () {
+      final e = parseSubjectLine(
+        '1784518182.dat<>あるスレ [B3YfDSAP★] (3)',
+        metadent: true,
+      )!;
+      expect(e.key, '1784518182');
+      expect(e.title, 'あるスレ');
+      expect(e.resCount, 3);
+      expect(e.metadent, 'B3YfDSAP');
+      expect(e.capName, isNull);
     });
 
     test('タイトルに丸括弧が含まれても末尾のレス数を取る', () {

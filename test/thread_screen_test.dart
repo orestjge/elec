@@ -411,6 +411,99 @@ void main() {
     expect(find.text('お気に入りを解除'), findsOneWidget);
   });
 
+  testWidgets('スレタイシートからスレ主をNGできる', (tester) async {
+    final ng = NgStore(MemoryNgStorage());
+    await ng.load();
+    final f = QueueFetcher([
+      ok([...res1, ...res2]),
+    ]);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadScreen(
+          threadKey: '1762103691',
+          threadTitle: 'テストスレ',
+          fetcher: f,
+          pollInterval: const Duration(seconds: 5),
+          readHistory: ReadHistory(MemoryReadHistoryStorage()),
+          ngStore: ng,
+          creatorMetadent: 'B3YfDSAP',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('テストスレ').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('このスレ主をNG'));
+    await tester.pumpAndSettle();
+
+    expect(ng.isNgCreator('B3YfDSAP'), isTrue);
+
+    // 再度開くと解除メニューになる。
+    await tester.tap(find.text('テストスレ').first);
+    await tester.pumpAndSettle();
+    expect(find.text('このスレ主のNGを解除'), findsOneWidget);
+  });
+
+  testWidgets('metadent 不明ならスレ主NGメニューは出ない', (tester) async {
+    final f = QueueFetcher([ok(res1)]);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadScreen(
+          threadKey: '1762103691',
+          threadTitle: 'テストスレ',
+          fetcher: f,
+          pollInterval: const Duration(seconds: 5),
+          readHistory: ReadHistory(MemoryReadHistoryStorage()),
+          ngStore: NgStore(MemoryNgStorage()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('テストスレ').first);
+    await tester.pumpAndSettle();
+    expect(find.text('このスレ主をNG'), findsNothing);
+  });
+
+  List<int> manyRes(int n) {
+    final bytes = <int>[];
+    for (var i = 1; i <= n; i++) {
+      bytes.addAll(
+        datLine(
+          '名無し<><>2025/11/03(月) 02:14:51.907 ID:aaa<> レス$i <>'
+          '${i == 1 ? 'スレタイ' : ''}',
+        ),
+      );
+    }
+    return bytes;
+  }
+
+  testWidgets('長いスレでは右端にファストスクロールのつまみを出す', (tester) async {
+    await tester.pumpWidget(app(QueueFetcher([ok(manyRes(40))])));
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.unfold_more), findsOneWidget);
+  });
+
+  testWidgets('短いスレではファストスクロールのつまみを出さない', (tester) async {
+    await tester.pumpWidget(app(QueueFetcher([ok(manyRes(5))])));
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.unfold_more), findsNothing);
+  });
+
+  testWidgets('つまみを下へドラッグすると大きく移動する', (tester) async {
+    await tester.pumpWidget(app(QueueFetcher([ok(manyRes(60))])));
+    await tester.pumpAndSettle();
+    // 最初は先頭のレスが見えている。
+    expect(find.text('レス1'), findsOneWidget);
+
+    await tester.drag(find.byIcon(Icons.unfold_more), const Offset(0, 3000));
+    await tester.pumpAndSettle();
+
+    // 先頭は画面外へ、後方のレスが見えるようになる。
+    expect(find.text('レス1'), findsNothing);
+  });
+
   testWidgets('スレタイは AppBar 内で複数行表示する', (tester) async {
     const title = 'これはかなり長いスレッドタイトルで省略せずに複数行で読みたいテスト用のタイトルです';
     final f = QueueFetcher([ok(res1)]);

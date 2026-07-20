@@ -74,6 +74,7 @@ class ThreadSummary {
     required this.title,
     required this.resCount,
     required this.capName,
+    this.metadent,
   });
 
   /// スレッドキー（UNIX 時刻由来の数値文字列）。dat 取得の URL に使う。
@@ -88,6 +89,12 @@ class ThreadSummary {
   /// スレ立て時の cap 名。`title [xxx★] (n)` の `xxx`。無ければ null。
   /// eddist の `thread_list.rs:40` が cap 付きスレに付与する。
   final String? capName;
+
+  /// スレ立て人の metadent（`subject-metadent.txt` 取得時のみ）。8 文字で、
+  /// 前半 4=書き込み環境、後半 4=スレ主 ID シード由来（= 表示 ID の先頭 3
+  /// ＋末尾 1）。通常の subject.txt からは得られないので null。
+  /// eddist の `metadent_thread_list_service.rs` が全スレに付与する。
+  final String? metadent;
 
   /// スレッドキーを int で。
   int get keyAsInt => int.parse(key);

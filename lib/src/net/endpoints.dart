@@ -21,6 +21,11 @@ class EdgeEndpoints {
 
   Uri get subjectTxt => Uri.https(host, '/$boardKey/subject.txt');
 
+  /// スレ一覧＋スレ立て人の metadent 付き。subject.txt と同形式で、全スレに
+  /// `[metadent★]` が付く。スレ主 NG の判定に使う。
+  Uri get subjectMetadentTxt =>
+      Uri.https(host, '/$boardKey/subject-metadent.txt');
+
   Uri get settingTxt => Uri.https(host, '/$boardKey/SETTING.TXT');
 
   /// 現行スレの dat。

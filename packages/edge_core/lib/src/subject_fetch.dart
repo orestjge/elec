@@ -33,7 +33,13 @@ class SubjectFetcher {
 
   final HttpFetcher http;
 
-  Future<SubjectFetchResult> fetch(Uri url, {SubjectState? prev}) async {
+  /// [metadent] が true なら `subject-metadent.txt` としてパースし、各スレの
+  /// [ThreadSummary.metadent]（スレ立て人の識別子）を埋める。
+  Future<SubjectFetchResult> fetch(
+    Uri url, {
+    SubjectState? prev,
+    bool metadent = false,
+  }) async {
     final headers = <String, String>{
       if (prev?.lastModified != null) 'If-Modified-Since': prev!.lastModified!,
     };
@@ -47,7 +53,7 @@ class SubjectFetcher {
     }
     return SubjectFetchResult(
       state: SubjectState(
-        threads: parseSubject(resp.bodyBytes),
+        threads: parseSubject(resp.bodyBytes, metadent: metadent),
         lastModified: resp.header('last-modified'),
       ),
       notModified: false,

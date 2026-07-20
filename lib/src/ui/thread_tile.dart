@@ -10,6 +10,7 @@ class ThreadTile extends StatelessWidget {
     super.key,
     required this.thread,
     required this.onTap,
+    this.onLongPress,
     this.isRead = false,
     this.newCount = 0,
     this.statusLabel,
@@ -18,6 +19,9 @@ class ThreadTile extends StatelessWidget {
 
   final ThreadSummary thread;
   final VoidCallback onTap;
+
+  /// 長押し（スレ主 NG などのメニュー用）。
+  final VoidCallback? onLongPress;
 
   /// 開いたことがあるスレか（タイトルの色を落として区別する）。
   final bool isRead;
@@ -58,6 +62,7 @@ class ThreadTile extends StatelessWidget {
           : Colors.transparent,
       child: InkWell(
         onTap: onTap,
+        onLongPress: onLongPress,
         child: DecoratedBox(
           decoration: BoxDecoration(
             border: isOwn
