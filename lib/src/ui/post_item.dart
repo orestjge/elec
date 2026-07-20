@@ -208,6 +208,7 @@ class _Header extends StatelessWidget {
                   style: theme.textTheme.labelMedium?.copyWith(
                     color: scheme.primary,
                     fontWeight: FontWeight.w700,
+                    leadingDistribution: TextLeadingDistribution.even,
                   ),
                 ),
               ),
@@ -297,6 +298,7 @@ class _NameLabel extends StatelessWidget {
       style: theme.textTheme.labelLarge?.copyWith(
         color: theme.colorScheme.onSurface,
         fontWeight: FontWeight.w600,
+        leadingDistribution: TextLeadingDistribution.even,
       ),
     );
     if (name.isEmpty) return label;
@@ -329,6 +331,7 @@ class _OwnChip extends StatelessWidget {
           color: color,
           fontSize: 11,
           height: 1,
+          leadingDistribution: TextLeadingDistribution.even,
           fontWeight: FontWeight.w700,
         ),
       ),
@@ -347,6 +350,7 @@ class _TimeLabel extends StatelessWidget {
     final theme = Theme.of(context);
     final style = theme.textTheme.labelMedium?.copyWith(
       color: theme.colorScheme.onSurfaceVariant,
+      leadingDistribution: TextLeadingDistribution.even,
     );
     final full = res.dateText.trim();
     final label = Padding(
@@ -402,6 +406,7 @@ class _IdChip extends StatelessWidget {
           style: TextStyle(
             fontSize: 11,
             height: 1,
+            leadingDistribution: TextLeadingDistribution.even,
             color: color,
             fontWeight: FontWeight.w600,
           ),
