@@ -189,6 +189,7 @@ class _Header extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final lineHeight = _headerLineHeight(theme);
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
@@ -200,27 +201,41 @@ class _Header extends StatelessWidget {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Text(
-                '${res.number}',
-                style: theme.textTheme.labelMedium?.copyWith(
-                  color: scheme.primary,
-                  fontWeight: FontWeight.w700,
+              _HeaderSlot(
+                height: lineHeight,
+                child: Text(
+                  '${res.number}',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: scheme.primary,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
-              Flexible(child: _NameLabel(name: name)),
+              Flexible(
+                child: _HeaderSlot(
+                  height: lineHeight,
+                  child: _NameLabel(name: name),
+                ),
+              ),
               if (res.id != null) ...[
                 const SizedBox(width: 8),
-                _IdChip(
-                  id: res.id!,
-                  count: idCount,
-                  ordinal: idOrdinal,
-                  onTap: onTapId,
+                _HeaderSlot(
+                  height: lineHeight,
+                  child: _IdChip(
+                    id: res.id!,
+                    count: idCount,
+                    ordinal: idOrdinal,
+                    onTap: onTapId,
+                  ),
                 ),
               ],
               if (isOwn) ...[
                 const SizedBox(width: 8),
-                _OwnChip(color: scheme.secondary),
+                _HeaderSlot(
+                  height: lineHeight,
+                  child: _OwnChip(color: scheme.secondary),
+                ),
               ],
             ],
           ),
@@ -244,6 +259,26 @@ class _Header extends StatelessWidget {
           ),
         ],
       ],
+    );
+  }
+
+  double _headerLineHeight(ThemeData theme) {
+    final style = theme.textTheme.labelLarge;
+    final fontSize = style?.fontSize ?? 14;
+    return fontSize * (style?.height ?? 20 / fontSize);
+  }
+}
+
+class _HeaderSlot extends StatelessWidget {
+  const _HeaderSlot({required this.height, required this.child});
+  final double height;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: height,
+      child: Align(alignment: Alignment.centerLeft, child: child),
     );
   }
 }
@@ -281,7 +316,9 @@ class _OwnChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      height: 16,
+      alignment: Alignment.center,
+      padding: const EdgeInsets.symmetric(horizontal: 7),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(6),
         border: Border.all(color: color.withValues(alpha: 0.55)),
@@ -291,6 +328,7 @@ class _OwnChip extends StatelessWidget {
         style: TextStyle(
           color: color,
           fontSize: 11,
+          height: 1,
           fontWeight: FontWeight.w700,
         ),
       ),
@@ -352,7 +390,9 @@ class _IdChip extends StatelessWidget {
       onTap: onTap == null ? null : () => onTap!(id),
       borderRadius: BorderRadius.circular(6),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        height: 16,
+        alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: 6),
         decoration: BoxDecoration(
           color: color.withValues(alpha: 0.14),
           borderRadius: BorderRadius.circular(6),
@@ -361,6 +401,7 @@ class _IdChip extends StatelessWidget {
           count > 1 ? 'ID:$id ($ordinal/$count)' : 'ID:$id',
           style: TextStyle(
             fontSize: 11,
+            height: 1,
             color: color,
             fontWeight: FontWeight.w600,
           ),
