@@ -1342,6 +1342,16 @@ class _FastScrollerState extends State<_FastScroller> {
   int _indexFor(double fraction) =>
       (fraction * (widget.itemCount - 1)).round();
 
+  /// トラック内のローカル Y から位置を決め、その行へジャンプする。つまみ中心が
+  /// 指の位置に来るよう `_handleHeight / 2` を引く。
+  void _applyLocalY(double localY, double travel) {
+    final fraction = travel <= 0
+        ? 0.0
+        : ((localY - _handleHeight / 2) / travel).clamp(0.0, 1.0);
+    setState(() => _fraction = fraction);
+    widget.onJump(_indexFor(fraction));
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -1350,96 +1360,89 @@ class _FastScrollerState extends State<_FastScroller> {
       child: LayoutBuilder(
         builder: (context, constraints) {
           final travel = constraints.maxHeight - _handleHeight;
-          return ValueListenableBuilder<Iterable<ItemPosition>>(
-            valueListenable: widget.positions.itemPositions,
-            builder: (context, _, _) {
-              final fraction = _dragging ? _fraction : _currentFraction();
-              final top = travel <= 0 ? 0.0 : fraction * travel;
-              return Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  // ドラッグ中はつまみの左にレス番号の吹き出しを出す。
-                  if (_dragging)
-                    Positioned(
-                      right: _handleWidth + 8,
-                      top: top + (_handleHeight - 32) / 2,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 7,
-                        ),
-                        decoration: BoxDecoration(
-                          color: scheme.inverseSurface,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          widget.labelForIndex(_indexFor(_fraction)),
-                          style: TextStyle(
-                            color: scheme.onInverseSurface,
-                            fontWeight: FontWeight.w700,
-                            fontSize: 15,
-                          ),
-                        ),
-                      ),
-                    ),
-                  Positioned(
-                    right: 0,
-                    top: top,
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onVerticalDragStart: (_) {
-                        setState(() {
-                          _dragging = true;
-                          _fraction = _currentFraction();
-                        });
-                      },
-                      onVerticalDragUpdate: (d) {
-                        if (travel <= 0) return;
-                        setState(() {
-                          _fraction = (_fraction + d.delta.dy / travel).clamp(
-                            0.0,
-                            1.0,
-                          );
-                        });
-                        widget.onJump(_indexFor(_fraction));
-                      },
-                      onVerticalDragEnd: (_) =>
-                          setState(() => _dragging = false),
-                      onVerticalDragCancel: () =>
-                          setState(() => _dragging = false),
-                      child: Container(
-                        width: _handleWidth,
-                        height: _handleHeight,
-                        decoration: BoxDecoration(
-                          color: _dragging
-                              ? scheme.primary
-                              : scheme.secondaryContainer.withValues(
-                                  alpha: 0.92,
-                                ),
-                          borderRadius: const BorderRadius.horizontal(
-                            left: Radius.circular(15),
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.18),
-                              blurRadius: 4,
-                              offset: const Offset(0, 1),
-                            ),
-                          ],
-                        ),
-                        child: Icon(
-                          Icons.unfold_more,
-                          size: 20,
-                          color: _dragging
-                              ? scheme.onPrimary
-                              : scheme.onSecondaryContainer,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              );
+          // ジェスチャ領域はトラック全体で固定。つまみが動いても指の下から
+          // 外れないので、最初の押下からそのままドラッグできる。
+          return GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onVerticalDragDown: (d) {
+              setState(() => _dragging = true);
+              _applyLocalY(d.localPosition.dy, travel);
             },
+            onVerticalDragUpdate: (d) =>
+                _applyLocalY(d.localPosition.dy, travel),
+            onVerticalDragEnd: (_) => setState(() => _dragging = false),
+            onVerticalDragCancel: () => setState(() => _dragging = false),
+            child: ValueListenableBuilder<Iterable<ItemPosition>>(
+              valueListenable: widget.positions.itemPositions,
+              builder: (context, _, _) {
+                final fraction = _dragging ? _fraction : _currentFraction();
+                final top = travel <= 0 ? 0.0 : fraction * travel;
+                return Stack(
+                  fit: StackFit.expand,
+                  clipBehavior: Clip.none,
+                  children: [
+                    // ドラッグ中はつまみの左にレス番号の吹き出しを出す。
+                    if (_dragging)
+                      Positioned(
+                        right: _handleWidth + 8,
+                        top: top + (_handleHeight - 32) / 2,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 7,
+                          ),
+                          decoration: BoxDecoration(
+                            color: scheme.inverseSurface,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            widget.labelForIndex(_indexFor(_fraction)),
+                            style: TextStyle(
+                              color: scheme.onInverseSurface,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 15,
+                            ),
+                          ),
+                        ),
+                      ),
+                    Positioned(
+                      right: 0,
+                      top: top,
+                      child: IgnorePointer(
+                        child: Container(
+                          width: _handleWidth,
+                          height: _handleHeight,
+                          decoration: BoxDecoration(
+                            color: _dragging
+                                ? scheme.primary
+                                : scheme.secondaryContainer.withValues(
+                                    alpha: 0.92,
+                                  ),
+                            borderRadius: const BorderRadius.horizontal(
+                              left: Radius.circular(15),
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.18),
+                                blurRadius: 4,
+                                offset: const Offset(0, 1),
+                              ),
+                            ],
+                          ),
+                          child: Icon(
+                            Icons.unfold_more,
+                            size: 20,
+                            color: _dragging
+                                ? scheme.onPrimary
+                                : scheme.onSecondaryContainer,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
+            ),
           );
         },
       ),
