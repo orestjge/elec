@@ -13,4 +13,5 @@ export 'src/models.dart';
 export 'src/replies.dart';
 export 'src/subject_fetch.dart';
 export 'src/subject_parser.dart';
+export 'src/thread_url.dart';
 export 'src/write.dart';

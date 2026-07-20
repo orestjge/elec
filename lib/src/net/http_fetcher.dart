@@ -104,10 +104,14 @@ class HttpClientFetcher implements HttpFetcher, HttpPoster {
     Map<String, String> headers = const {},
   }) {
     return _withFallback(() async {
-      final resp = await _client.get(
-        url,
-        headers: {'User-Agent': userAgent, ...headers},
-      );
+      // 3xx を自動で追わない（HttpFetcher の規約）。dat落ち時の過去ログ
+      // リダイレクトは DatFetcher 側で Location を見て辿るので、ここで
+      // 潰さず 30x と Location をそのまま返す。
+      final req = http.Request('GET', url)
+        ..followRedirects = false
+        ..headers.addAll({'User-Agent': userAgent, ...headers});
+      final streamed = await _client.send(req);
+      final resp = await http.Response.fromStream(streamed);
       return FetchResponse(
         statusCode: resp.statusCode,
         bodyBytes: resp.bodyBytes,
