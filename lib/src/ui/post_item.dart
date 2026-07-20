@@ -1,6 +1,7 @@
 import 'package:edge_core/edge_core.dart';
 import 'package:flutter/material.dart';
 
+import 'embed_urls.dart';
 import 'id_color.dart';
 import 'image_urls.dart';
 import 'post_images.dart';
@@ -24,6 +25,7 @@ class PostItem extends StatelessWidget {
     this.onBodySelectionActiveChanged,
     this.onLongPress,
     this.isOwn = false,
+    this.blurImages = false,
   });
 
   final Res res;
@@ -65,6 +67,9 @@ class PostItem extends StatelessWidget {
   /// このアプリから投稿したレスか。
   final bool isOwn;
 
+  /// この画像に「グロ」注意が付いており、サムネイルへモザイクを掛けるか。
+  final bool blurImages;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -89,6 +94,7 @@ class PostItem extends StatelessWidget {
     final body = trimUnlessAsciiArt(htmlToText(res.body));
     final images = imageUrlsIn(body);
     final videos = videoUrlsIn(body);
+    final embeds = embedVideosIn(body);
 
     final content = Container(
       color: isOwn
@@ -118,8 +124,15 @@ class PostItem extends StatelessWidget {
               onSelectionActiveChanged: onBodySelectionActiveChanged,
             ),
           ],
-          if (images.isNotEmpty || videos.isNotEmpty)
-            PostImages(urls: images, videoUrls: videos, onTapVideo: onTapUrl),
+          if (images.isNotEmpty || videos.isNotEmpty || embeds.isNotEmpty)
+            PostImages(
+              urls: images,
+              videoUrls: videos,
+              embedVideos: embeds,
+              onTapVideo: onTapUrl,
+              onTapEmbed: onTapUrl,
+              blurImages: blurImages,
+            ),
           if (replyCount > 0) ...[
             const SizedBox(height: 8),
             _ReplyCountChip(

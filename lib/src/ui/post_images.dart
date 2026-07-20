@@ -1,6 +1,12 @@
 import 'dart:math' as math;
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+
+import 'embed_urls.dart';
+import 'nico_thumbnail.dart';
+import 'video_thumbnail.dart';
 
 /// レス本文に含まれる画像 URL のサムネイル群。タップで全画面表示。
 class PostImages extends StatelessWidget {
@@ -8,12 +14,23 @@ class PostImages extends StatelessWidget {
     super.key,
     required this.urls,
     this.videoUrls = const [],
+    this.embedVideos = const [],
     this.onTapVideo,
+    this.onTapEmbed,
+    this.blurImages = false,
   });
 
   final List<Uri> urls;
   final List<Uri> videoUrls;
+
+  /// YouTube / ニコニコ動画のリンク。タップで外部プレーヤーを開く。
+  final List<EmbedVideo> embedVideos;
+
   final ValueChanged<Uri>? onTapVideo;
+  final ValueChanged<Uri>? onTapEmbed;
+
+  /// このレスの画像に「グロ」注意が付いており、サムネイルへモザイクを掛けるか。
+  final bool blurImages;
 
   @override
   Widget build(BuildContext context) {
@@ -23,11 +40,17 @@ class PostImages extends StatelessWidget {
         spacing: 8,
         runSpacing: 8,
         children: [
-          for (var i = 0; i < urls.length; i++) _Thumb(urls: urls, index: i),
+          for (var i = 0; i < urls.length; i++)
+            _Thumb(urls: urls, index: i, blurred: blurImages),
           for (final url in videoUrls)
             _VideoThumb(
               url: url,
               onTap: onTapVideo == null ? null : () => onTapVideo!(url),
+            ),
+          for (final video in embedVideos)
+            _EmbedThumb(
+              video: video,
+              onTap: onTapEmbed == null ? null : () => onTapEmbed!(video.url),
             ),
         ],
       ),
@@ -35,43 +58,103 @@ class PostImages extends StatelessWidget {
   }
 }
 
-class _Thumb extends StatelessWidget {
-  const _Thumb({required this.urls, required this.index});
+class _Thumb extends StatefulWidget {
+  const _Thumb({required this.urls, required this.index, this.blurred = false});
   final List<Uri> urls;
   final int index;
 
-  Uri get url => urls[index];
+  /// 「グロ」注意が付いた画像で、初期表示をモザイクにするか。
+  final bool blurred;
+
+  @override
+  State<_Thumb> createState() => _ThumbState();
+}
+
+class _ThumbState extends State<_Thumb> {
+  /// モザイクを一度タップで解除したか。解除後は通常どおりタップで全画面表示。
+  bool _revealed = false;
+
+  Uri get _url => widget.urls[widget.index];
+
+  void _openViewer() => Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      fullscreenDialog: true,
+      builder: (_) =>
+          _ImageViewer(urls: widget.urls, initialIndex: widget.index),
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    // グロ指定があり、まだ解除していない間だけモザイクを掛ける。最初のタップは
+    // 全画面を開かず解除に使い、不意にグロ画像を大きく表示しないようにする。
+    final masked = widget.blurred && !_revealed;
     return GestureDetector(
-      onTap: () => Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          fullscreenDialog: true,
-          builder: (_) => _ImageViewer(urls: urls, initialIndex: index),
-        ),
-      ),
+      onTap: masked ? () => setState(() => _revealed = true) : _openViewer,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(10),
-        child: Image.network(
-          url.toString(),
-          height: 160,
-          width: 160,
-          fit: BoxFit.cover,
-          loadingBuilder: (context, child, progress) {
-            if (progress == null) return child;
-            return _Placeholder(
-              color: scheme.surfaceContainerHighest,
-              child: const CircularProgressIndicator(strokeWidth: 2),
-            );
-          },
-          errorBuilder: (context, error, stack) => _Placeholder(
-            color: scheme.surfaceContainerHighest,
-            child: Icon(
-              Icons.broken_image_outlined,
-              color: scheme.onSurfaceVariant,
+        child: Stack(
+          children: [
+            Image.network(
+              _url.toString(),
+              height: 160,
+              width: 160,
+              fit: BoxFit.cover,
+              loadingBuilder: (context, child, progress) {
+                if (progress == null) return child;
+                return _Placeholder(
+                  color: scheme.surfaceContainerHighest,
+                  child: const CircularProgressIndicator(strokeWidth: 2),
+                );
+              },
+              errorBuilder: (context, error, stack) => _Placeholder(
+                color: scheme.surfaceContainerHighest,
+                child: Icon(
+                  Icons.broken_image_outlined,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
             ),
+            if (masked) const Positioned.fill(child: _GuroMask()),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// グロ画像のサムネイルに重ねるモザイク（ぼかし）と注意ラベル。
+class _GuroMask extends StatelessWidget {
+  const _GuroMask();
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRect(
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+        child: Container(
+          alignment: Alignment.center,
+          color: Colors.black.withValues(alpha: 0.35),
+          child: const Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.visibility_off, color: Colors.white, size: 26),
+              SizedBox(height: 4),
+              Text(
+                'グロ',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              SizedBox(height: 2),
+              Text(
+                'タップで表示',
+                style: TextStyle(color: Colors.white70, fontSize: 11),
+              ),
+            ],
           ),
         ),
       ),
@@ -86,6 +169,16 @@ class _VideoThumb extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Android/iOS では先頭フレームをサムネイル生成して敷く。生成前・失敗・非対応
+    // プラットフォーム（macOS 等）では無地の再生カードにフォールバックする。
+    if (!VideoThumbnails.isSupported) return _card(context, frame: null);
+    return FutureBuilder<Uint8List?>(
+      future: VideoThumbnails.resolve(url),
+      builder: (context, snapshot) => _card(context, frame: snapshot.data),
+    );
+  }
+
+  Widget _card(BuildContext context, {required Uint8List? frame}) {
     final scheme = Theme.of(context).colorScheme;
     return InkWell(
       onTap: onTap,
@@ -102,11 +195,22 @@ class _VideoThumb extends StatelessWidget {
         child: Stack(
           fit: StackFit.expand,
           children: [
+            if (frame != null)
+              Image.memory(
+                frame,
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stack) => const SizedBox(),
+              ),
+            // サムネイルの上に薄い暗幕を敷き、再生アイコンとファイル名を読みやすく。
+            if (frame != null)
+              const DecoratedBox(
+                decoration: BoxDecoration(color: Colors.black26),
+              ),
             Center(
               child: Icon(
                 Icons.play_circle_fill,
                 size: 52,
-                color: scheme.primary,
+                color: frame != null ? Colors.white : scheme.primary,
               ),
             ),
             Positioned(
@@ -125,6 +229,99 @@ class _VideoThumb extends StatelessWidget {
                   ),
                   child: Text(
                     _mediaFileName(url),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: scheme.onSurface,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// YouTube / ニコニコ動画のサムネイルカード。タップで外部プレーヤーを開く。
+/// サムネイル画像が取れる場合（YouTube）は背景に敷き、無い場合（ニコニコ）は
+/// 無地の再生カードにする。
+class _EmbedThumb extends StatelessWidget {
+  const _EmbedThumb({required this.video, required this.onTap});
+  final EmbedVideo video;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    // YouTube は静的サムネ URL を持つ。ニコニコは getthumbinfo API で解決してから
+    // 敷く（解決前・失敗時は無地の再生カード）。
+    final direct = video.thumbnailUrl;
+    if (direct != null) return _card(context, thumbnailUrl: direct);
+    if (video.kind == EmbedKind.niconico) {
+      return FutureBuilder<Uri?>(
+        future: NicoThumbnails.resolve(video.id),
+        builder: (context, snapshot) =>
+            _card(context, thumbnailUrl: snapshot.data?.toString()),
+      );
+    }
+    return _card(context, thumbnailUrl: null);
+  }
+
+  Widget _card(BuildContext context, {required String? thumbnailUrl}) {
+    final scheme = Theme.of(context).colorScheme;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        height: 160,
+        width: 200,
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: scheme.outlineVariant),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (thumbnailUrl != null)
+              Image.network(
+                thumbnailUrl,
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stack) => const SizedBox(),
+              ),
+            // サムネイルの上に薄い暗幕を敷き、再生アイコンと見出しを読みやすく。
+            if (thumbnailUrl != null)
+              const DecoratedBox(
+                decoration: BoxDecoration(color: Colors.black26),
+              ),
+            Center(
+              child: Icon(
+                Icons.play_circle_fill,
+                size: 52,
+                color: thumbnailUrl != null ? Colors.white : scheme.primary,
+              ),
+            ),
+            Positioned(
+              left: 8,
+              right: 8,
+              bottom: 8,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: scheme.surface.withValues(alpha: 0.88),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 7,
+                    vertical: 4,
+                  ),
+                  child: Text(
+                    video.label,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
