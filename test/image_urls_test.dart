@@ -6,6 +6,8 @@ void main() {
       imageUrlsIn(s).map((u) => u.toString()).toList();
   List<String> videos(String s) =>
       videoUrlsIn(s).map((u) => u.toString()).toList();
+  List<String> audios(String s) =>
+      audioUrlsIn(s).map((u) => u.toString()).toList();
 
   test('画像拡張子の URL を拾う', () {
     expect(urls('見て https://i.imgur.com/abc.jpg かわいい'), [
@@ -33,6 +35,19 @@ void main() {
       'http://x/b.webm?dl=1',
     ]);
     expect(videos('画像 https://example.com/a.jpg'), isEmpty);
+  });
+
+  test('音声拡張子の URL を拾う', () {
+    expect(
+      audios('曲 https://files.catbox.moe/a.mp3 と http://x/b.m4a?dl=1'),
+      ['https://files.catbox.moe/a.mp3', 'http://x/b.m4a?dl=1'],
+    );
+    expect(audios('a http://x/c.OGG b http://x/d.flac'), [
+      'http://x/c.OGG',
+      'http://x/d.flac',
+    ]);
+    // 画像・動画は音声として拾わない。
+    expect(audios('https://x/a.jpg https://x/b.mp4'), isEmpty);
   });
 
   test('省略された https URL も拾って正規化する', () {

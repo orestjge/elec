@@ -1,4 +1,4 @@
-/// レス本文から画像/動画 URL を抜き出す。
+/// レス本文から画像/動画/音声 URL を抜き出す。
 ///
 /// 基本は拡張子で判定する（`.jpg/.jpeg/.png/.gif/.webp/.bmp`、クエリ付きも可）。
 /// ページ URL（imgur のページ等、拡張子なし）は対象外。ただし拡張子を持たず
@@ -13,6 +13,10 @@ final _imageExtRe = RegExp(
   caseSensitive: false,
 );
 final _videoExtRe = RegExp(r'\.(mp4|webm|mov|m4v)$', caseSensitive: false);
+final _audioExtRe = RegExp(
+  r'\.(mp3|m4a|aac|ogg|oga|opus|wav|flac)$',
+  caseSensitive: false,
+);
 
 /// pbs.twimg.com の画像 URL は拡張子を持たず、`format=jpg` 等のクエリで
 /// 種別が決まる（例: `https://pbs.twimg.com/media/XXXX?format=jpg&name=large`）。
@@ -29,6 +33,11 @@ List<Uri> imageUrlsIn(String text) {
 /// [text] 中の動画 URL を出現順・重複除去で返す。
 List<Uri> videoUrlsIn(String text) {
   return _mediaUrlsIn(text, (uri) => _videoExtRe.hasMatch(uri.path));
+}
+
+/// [text] 中の音声 URL を出現順・重複除去で返す。
+List<Uri> audioUrlsIn(String text) {
+  return _mediaUrlsIn(text, (uri) => _audioExtRe.hasMatch(uri.path));
 }
 
 bool _isImageUri(Uri uri) {
