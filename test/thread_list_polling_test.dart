@@ -253,6 +253,34 @@ void main() {
     expect(history.isRead('1'), isFalse);
   });
 
+  testWidgets('長押しメニューからお気に入りを追加・解除できる', (tester) async {
+    final history = ReadHistory(MemoryReadHistoryStorage());
+    final fetcher = QueueFetcher([subjectOk('1.dat<>対象スレ (10)\n', 'LM1')]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadListScreen(
+          fetcher: fetcher,
+          pollInterval: const Duration(seconds: 15),
+          readHistory: history,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.longPress(find.text('対象スレ'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('お気に入りに追加'));
+    await tester.pumpAndSettle();
+    expect(history.isFavorite('1'), isTrue);
+
+    await tester.longPress(find.text('対象スレ'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('お気に入りを解除'));
+    await tester.pumpAndSettle();
+    expect(history.isFavorite('1'), isFalse);
+  });
+
   testWidgets('未読スレの長押しには履歴削除を出さない', (tester) async {
     final fetcher = QueueFetcher([subjectOk('1.dat<>未読スレ (10)\n', 'LM1')]);
 

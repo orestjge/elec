@@ -462,14 +462,16 @@ class _ThreadListScreenState extends State<ThreadListScreen>
     );
   }
 
-  /// スレを長押ししたときの操作シート。スレ主 NG と、既読スレの履歴削除。
+  /// スレを長押ししたときの操作シート。スレ主 NG・お気に入り・履歴削除。
   Future<void> _showThreadActions(ThreadSummary thread) async {
     final metadent = thread.metadent;
     final isRead = _history.isRead(thread.key);
+    final isFavorite = _history.isFavorite(thread.key);
     final action = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
       builder: (sheetContext) {
+        final scheme = Theme.of(sheetContext).colorScheme;
         return SafeArea(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -483,6 +485,14 @@ class _ThreadListScreenState extends State<ThreadListScreen>
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(sheetContext).textTheme.titleSmall,
                 ),
+              ),
+              ListTile(
+                leading: Icon(
+                  isFavorite ? Icons.star : Icons.star_border,
+                  color: isFavorite ? scheme.tertiary : null,
+                ),
+                title: Text(isFavorite ? 'お気に入りを解除' : 'お気に入りに追加'),
+                onTap: () => Navigator.pop(sheetContext, 'fav'),
               ),
               if (metadent == null)
                 const Padding(
@@ -509,7 +519,18 @@ class _ThreadListScreenState extends State<ThreadListScreen>
         );
       },
     );
-    if (action == 'ng' && metadent != null) {
+    if (action == 'fav') {
+      await _history.toggleFavorite(thread.key);
+      if (!mounted) return;
+      setState(_reorder);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _history.isFavorite(thread.key) ? 'お気に入りに追加しました' : 'お気に入りを解除しました',
+          ),
+        ),
+      );
+    } else if (action == 'ng' && metadent != null) {
       await _ng.addCreator(metadent);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
