@@ -535,6 +535,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
         readHistory: _history,
         initialStatusLabel: _statusLabel(thread),
         initialResCount: thread.resCount,
+        creatorMetadent: thread.metadent,
       ),
       transitionDuration: const Duration(milliseconds: 240),
       reverseTransitionDuration: const Duration(milliseconds: 220),

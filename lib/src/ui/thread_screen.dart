@@ -33,6 +33,7 @@ class ThreadScreen extends StatefulWidget {
     this.ngStore,
     this.initialStatusLabel,
     this.initialResCount = 0,
+    this.creatorMetadent,
   });
 
   final String threadKey;
@@ -41,6 +42,11 @@ class ThreadScreen extends StatefulWidget {
   final EdgeEndpoints endpoints;
   final Duration pollInterval;
   final int initialResCount;
+
+  /// スレ立て人の metadent（`subject-metadent.txt` 由来）。一覧から開いた場合に
+  /// 渡され、スレタイのメニューから「このスレ主を NG」できるようにする。
+  /// 直接キーで開いた等で不明なら null。
+  final String? creatorMetadent;
 
   /// NG（あぼーん）設定。既定はアプリ共有インスタンス（テストで差し替え可能）。
   final NgStore? ngStore;
@@ -853,6 +859,8 @@ class _ThreadScreenState extends State<ThreadScreen>
       showDragHandle: true,
       builder: (context) {
         final isFavorite = _history.isFavorite(widget.threadKey);
+        final metadent = widget.creatorMetadent;
+        final isNgCreator = metadent != null && _ng.creators.contains(metadent);
         return SafeArea(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
@@ -879,12 +887,43 @@ class _ThreadScreenState extends State<ThreadScreen>
                     await _toggleFavorite();
                   },
                 ),
+                if (metadent != null)
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(
+                      isNgCreator
+                          ? Icons.person_outline
+                          : Icons.person_off_outlined,
+                    ),
+                    title: Text(isNgCreator ? 'このスレ主のNGを解除' : 'このスレ主をNG'),
+                    subtitle: Text(
+                      isNgCreator
+                          ? 'スレ主 [$metadent★] のスレを再び表示します'
+                          : 'スレ主 [$metadent★] のスレを一覧から隠します',
+                    ),
+                    onTap: () async {
+                      Navigator.pop(context);
+                      await _toggleNgCreator(metadent);
+                    },
+                  ),
               ],
             ),
           ),
         );
       },
     );
+  }
+
+  Future<void> _toggleNgCreator(String metadent) async {
+    final wasNg = _ng.creators.contains(metadent);
+    if (wasNg) {
+      await _ng.removeCreator(metadent);
+    } else {
+      await _ng.addCreator(metadent);
+    }
+    if (mounted) {
+      _showSnack(wasNg ? 'スレ主のNGを解除しました' : 'このスレ主をNGにしました');
+    }
   }
 
   Future<void> _toggleFavorite() async {
