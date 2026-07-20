@@ -234,7 +234,7 @@ class _VideoThumb extends StatelessWidget {
                     style: TextStyle(
                       color: scheme.onSurface,
                       fontSize: 12,
-                      fontWeight: FontWeight.w600,
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
                 ),
@@ -327,7 +327,7 @@ class _EmbedThumb extends StatelessWidget {
                     style: TextStyle(
                       color: scheme.onSurface,
                       fontSize: 12,
-                      fontWeight: FontWeight.w600,
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
                 ),
@@ -469,9 +469,7 @@ class _ZoomableImageState extends State<_ZoomableImage> {
   }
 
   void _resolveImageSize() {
-    final stream = NetworkImage(
-      widget.url,
-    ).resolve(const ImageConfiguration());
+    final stream = NetworkImage(widget.url).resolve(const ImageConfiguration());
     final listener = ImageStreamListener((info, _) {
       if (!mounted) return;
       setState(() {

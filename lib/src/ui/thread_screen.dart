@@ -1236,7 +1236,7 @@ class _ThreadScreenState extends State<ThreadScreen>
                   maxLines: 2,
                   style: const TextStyle(
                     fontSize: 16,
-                    fontWeight: FontWeight.w600,
+                    fontWeight: FontWeight.w500,
                     height: 1.22,
                   ),
                 ),
@@ -1502,8 +1502,7 @@ class _FastScrollerState extends State<_FastScroller> {
                       }),
                       onPointerMove: (e) => _applyDelta(e.delta.dy, travel),
                       onPointerUp: (_) => setState(() => _dragging = false),
-                      onPointerCancel: (_) =>
-                          setState(() => _dragging = false),
+                      onPointerCancel: (_) => setState(() => _dragging = false),
                       child: Container(
                         width: _handleWidth,
                         height: _handleHeight,
@@ -1572,7 +1571,7 @@ class _JumpToLatestButton extends StatelessWidget {
                 unread > 0 ? '未読 $unread' : '最新へ',
                 style: TextStyle(
                   color: scheme.onPrimary,
-                  fontWeight: FontWeight.w600,
+                  fontWeight: FontWeight.w500,
                   fontSize: 13,
                 ),
               ),
@@ -1953,7 +1952,7 @@ class _ConversationPost extends StatelessWidget {
                       '返信先 ${refs.map((n) => '>>$n').join(' ')}',
                       style: Theme.of(context).textTheme.labelSmall?.copyWith(
                         color: scheme.onSurfaceVariant,
-                        fontWeight: FontWeight.w600,
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
                   ),

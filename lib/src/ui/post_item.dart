@@ -185,7 +185,7 @@ class _ReplyCountChip extends StatelessWidget {
               style: TextStyle(
                 fontSize: 12,
                 color: scheme.onSecondaryContainer,
-                fontWeight: FontWeight.w600,
+                fontWeight: FontWeight.w500,
               ),
             ),
           ],
@@ -326,7 +326,7 @@ class _NameLabel extends StatelessWidget {
       overflow: TextOverflow.ellipsis,
       style: theme.textTheme.labelLarge?.copyWith(
         color: theme.colorScheme.onSurface,
-        fontWeight: FontWeight.w600,
+        fontWeight: FontWeight.w500,
         leadingDistribution: TextLeadingDistribution.even,
       ),
     );
@@ -437,7 +437,7 @@ class _IdChip extends StatelessWidget {
             height: 1,
             leadingDistribution: TextLeadingDistribution.even,
             color: color,
-            fontWeight: FontWeight.w600,
+            fontWeight: FontWeight.w500,
           ),
         ),
       ),
