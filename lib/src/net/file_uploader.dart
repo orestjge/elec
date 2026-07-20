@@ -12,8 +12,8 @@ abstract interface class FileUploader {
 
 /// catbox.moe の匿名アップロード API へファイルを投稿する。
 ///
-/// 保存は永続的で、成功時のレスポンスは本文にファイル URL が 1 行入る
-/// プレーンテキスト。
+/// 匿名アップロードは最終アクセスから 2 年で削除される（アカウント連携なら
+/// 永続）。成功時のレスポンスは本文にファイル URL が 1 行入るプレーンテキスト。
 class CatboxUploader implements FileUploader {
   const CatboxUploader({
     http.Client? client,

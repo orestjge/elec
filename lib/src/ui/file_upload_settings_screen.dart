@@ -96,7 +96,7 @@ class _FileUploadSettingsScreenState extends State<FileUploadSettingsScreen> {
 
   String _description(FileUploadProvider provider) => switch (provider) {
     FileUploadProvider.catbox =>
-      '永続保存。上限 200MB。一部の実行ファイル形式は不可。',
+      '匿名アップロードは最終アクセスから2年で削除。上限 200MB。一部の実行ファイル形式は不可。',
     FileUploadProvider.uguu => '一時保存（数時間〜数日で消える）。上限 128MB。',
   };
 }

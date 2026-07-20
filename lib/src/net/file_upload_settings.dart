@@ -9,7 +9,7 @@ enum FileUploadProvider {
   uguu;
 
   String get label => switch (this) {
-    FileUploadProvider.catbox => 'catbox.moe（永続）',
+    FileUploadProvider.catbox => 'catbox.moe（長期）',
     FileUploadProvider.uguu => 'uguu.se（一時）',
   };
 }
