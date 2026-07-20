@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 
 import 'embed_urls.dart';
+import 'image_urls.dart';
 import 'nico_thumbnail.dart';
 import 'video_thumbnail.dart';
 
@@ -192,6 +193,8 @@ class _VideoThumb extends StatelessWidget {
           border: Border.all(color: scheme.outlineVariant),
         ),
         clipBehavior: Clip.antiAlias,
+        // 読取前（無地）と読取後（フレーム画像）で同じ構図にする。暗幕は敷かず、
+        // 左下に「▶ サイト名」の小さなバッジだけを出す。
         child: Stack(
           fit: StackFit.expand,
           children: [
@@ -201,42 +204,51 @@ class _VideoThumb extends StatelessWidget {
                 fit: BoxFit.cover,
                 errorBuilder: (context, error, stack) => const SizedBox(),
               ),
-            // サムネイルの上に薄い暗幕を敷き、再生アイコンとファイル名を読みやすく。
-            if (frame != null)
-              const DecoratedBox(
-                decoration: BoxDecoration(color: Colors.black26),
-              ),
-            Center(
-              child: Icon(
-                Icons.play_circle_fill,
-                size: 52,
-                color: frame != null ? Colors.white : scheme.primary,
-              ),
-            ),
             Positioned(
               left: 8,
               right: 8,
               bottom: 8,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: scheme.surface.withValues(alpha: 0.88),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 7,
-                    vertical: 4,
-                  ),
-                  child: Text(
-                    _mediaFileName(url),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: scheme.onSurface,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: _VideoBadge(label: videoSiteLabel(url)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 動画サムネ左下の「▶ サイト名」バッジ。
+class _VideoBadge extends StatelessWidget {
+  const _VideoBadge({required this.label});
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surface.withValues(alpha: 0.88),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.play_arrow_rounded, size: 16, color: scheme.onSurface),
+            const SizedBox(width: 3),
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: scheme.onSurface,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
             ),

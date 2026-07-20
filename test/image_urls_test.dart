@@ -72,4 +72,19 @@ void main() {
   test('URL が無ければ空', () {
     expect(urls('ただの本文です'), isEmpty);
   });
+
+  group('videoSiteLabel', () {
+    String label(String url) => videoSiteLabel(Uri.parse(url));
+
+    test('既知サイトは別名にする', () {
+      expect(label('https://video.twimg.com/abc/vid.mp4'), 'Twitter');
+      expect(label('https://files.catbox.moe/abcd.mp4'), 'catbox');
+    });
+
+    test('未知サイトはドメインに落とす', () {
+      expect(label('https://example.com/path/movie.mp4'), 'example.com');
+      // サブドメインは畳んで発信元ドメインを見せる。
+      expect(label('https://cdn.poka-kit.com/x.mp4'), 'poka-kit.com');
+    });
+  });
 }

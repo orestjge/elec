@@ -73,8 +73,9 @@ void main() {
       ),
     );
 
-    expect(find.byIcon(Icons.play_circle_fill), findsOneWidget);
-    expect(find.text('movie.mp4'), findsOneWidget);
+    expect(find.byIcon(Icons.play_arrow_rounded), findsOneWidget);
+    // ファイル名(id)ではなくサイト（ここでは未知ホストなのでドメイン）を出す。
+    expect(find.text('example.com'), findsOneWidget);
     expect(find.byType(Image), findsNothing);
   });
 
@@ -99,10 +100,10 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // 生成フレームを Image.memory で敷きつつ、再生アイコンとファイル名は残す。
+    // 生成フレームを Image.memory で敷きつつ、左下バッジ（▶＋サイト名）は残す。
     expect(find.byType(Image), findsOneWidget);
-    expect(find.byIcon(Icons.play_circle_fill), findsOneWidget);
-    expect(find.text('movie.mp4'), findsOneWidget);
+    expect(find.byIcon(Icons.play_arrow_rounded), findsOneWidget);
+    expect(find.text('example.com'), findsOneWidget);
   });
 
   testWidgets('YouTube/ニコニコは再生サムネイルとして表示しタップで外部を開く', (tester) async {
