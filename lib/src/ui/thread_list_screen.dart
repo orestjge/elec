@@ -462,9 +462,10 @@ class _ThreadListScreenState extends State<ThreadListScreen>
     );
   }
 
-  /// スレを長押ししたときの操作シート。今はスレ主 NG のみ。
+  /// スレを長押ししたときの操作シート。スレ主 NG と、既読スレの履歴削除。
   Future<void> _showThreadActions(ThreadSummary thread) async {
     final metadent = thread.metadent;
+    final isRead = _history.isRead(thread.key);
     final action = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
@@ -485,7 +486,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
               ),
               if (metadent == null)
                 const Padding(
-                  padding: EdgeInsets.fromLTRB(20, 4, 20, 16),
+                  padding: EdgeInsets.fromLTRB(20, 4, 20, 8),
                   child: Text('このスレはスレ主情報を取得できませんでした'),
                 )
               else
@@ -494,6 +495,13 @@ class _ThreadListScreenState extends State<ThreadListScreen>
                   title: const Text('このスレ主を NG'),
                   subtitle: Text('スレ主 [$metadent★] のスレを一覧から隠します'),
                   onTap: () => Navigator.pop(sheetContext, 'ng'),
+                ),
+              if (isRead)
+                ListTile(
+                  leading: const Icon(Icons.history_toggle_off),
+                  title: const Text('履歴から消す'),
+                  subtitle: const Text('既読の記録を消して未読に戻します'),
+                  onTap: () => Navigator.pop(sheetContext, 'forget'),
                 ),
               const SizedBox(height: 8),
             ],
@@ -513,6 +521,13 @@ class _ThreadListScreenState extends State<ThreadListScreen>
           ),
         ),
       );
+    } else if (action == 'forget') {
+      await _history.forgetThread(thread.key);
+      if (!mounted) return;
+      setState(_reorder);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('履歴から消しました')));
     }
   }
 

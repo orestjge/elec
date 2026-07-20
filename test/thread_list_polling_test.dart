@@ -228,6 +228,50 @@ void main() {
     expect(find.text('お気に入りスレ'), findsNothing);
   });
 
+  testWidgets('既読スレを長押しして履歴から消せる', (tester) async {
+    final history = ReadHistory(MemoryReadHistoryStorage());
+    await history.markRead('1', 10);
+    final fetcher = QueueFetcher([subjectOk('1.dat<>既読スレ (10)\n', 'LM1')]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadListScreen(
+          fetcher: fetcher,
+          pollInterval: const Duration(seconds: 15),
+          readHistory: history,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(history.isRead('1'), isTrue);
+
+    await tester.longPress(find.text('既読スレ'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('履歴から消す'));
+    await tester.pumpAndSettle();
+
+    expect(history.isRead('1'), isFalse);
+  });
+
+  testWidgets('未読スレの長押しには履歴削除を出さない', (tester) async {
+    final fetcher = QueueFetcher([subjectOk('1.dat<>未読スレ (10)\n', 'LM1')]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadListScreen(
+          fetcher: fetcher,
+          pollInterval: const Duration(seconds: 15),
+          readHistory: ReadHistory(MemoryReadHistoryStorage()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.longPress(find.text('未読スレ'));
+    await tester.pumpAndSettle();
+    expect(find.text('履歴から消す'), findsNothing);
+  });
+
   testWidgets('履歴とお気に入りでは subject に無い保存済みスレも表示する', (tester) async {
     final history = ReadHistory(MemoryReadHistoryStorage());
     await history.rememberThread(

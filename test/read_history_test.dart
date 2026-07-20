@@ -81,6 +81,44 @@ void main() {
       expect(h.storedThreads.single.toSummary().title, '開いたスレ');
     });
 
+    test('forgetThread で既読も保存情報も消える', () async {
+      final h = ReadHistory(MemoryReadHistoryStorage());
+      const thread = ThreadSummary(
+        key: '123',
+        title: '消すスレ',
+        resCount: 50,
+        capName: null,
+      );
+      await h.markOpenedThread(thread);
+      expect(h.isRead('123'), isTrue);
+
+      await h.forgetThread('123');
+
+      expect(h.isRead('123'), isFalse);
+      expect(h.lastSeen('123'), isNull);
+      expect(h.storedThreads, isEmpty);
+      expect(h.lastViewedThread, isNull);
+    });
+
+    test('forgetThread してもお気に入りなら保存情報は残す', () async {
+      final h = ReadHistory(MemoryReadHistoryStorage());
+      const thread = ThreadSummary(
+        key: '123',
+        title: 'お気に入りスレ',
+        resCount: 50,
+        capName: null,
+      );
+      await h.markOpenedThread(thread);
+      await h.setFavorite('123', true);
+
+      await h.forgetThread('123');
+
+      expect(h.isRead('123'), isFalse);
+      expect(h.isFavorite('123'), isTrue);
+      // お気に入り一覧で見せられるよう保存情報は残す。
+      expect(h.storedThreads.single.toSummary().title, 'お気に入りスレ');
+    });
+
     test('空データを load した直後でもスレ情報を保存できる', () async {
       final h = ReadHistory(MemoryReadHistoryStorage());
       await h.load();

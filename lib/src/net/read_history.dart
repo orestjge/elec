@@ -334,6 +334,20 @@ class ReadHistory {
   Future<void> toggleFavorite(String threadKey) =>
       setFavorite(threadKey, !isFavorite(threadKey));
 
+  /// スレを既読履歴から消す。既読状態を落として未読に戻し、保存済みスレ情報も
+  /// 除く。ただしお気に入りの場合は一覧に残すため保存情報は消さない。
+  Future<void> forgetThread(String threadKey) async {
+    var changed = _seen.remove(threadKey) != null;
+    if (!_favorites.contains(threadKey)) {
+      if (_threads.remove(threadKey) != null) changed = true;
+    }
+    if (_lastViewedThreadKey == threadKey) {
+      _lastViewedThreadKey = null;
+      changed = true;
+    }
+    if (changed) await _save();
+  }
+
   Future<void> _save() async {
     final snapshot = ReadHistorySnapshot(
       seen: Map.of(_seen),
