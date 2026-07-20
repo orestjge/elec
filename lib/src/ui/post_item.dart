@@ -94,6 +94,7 @@ class PostItem extends StatelessWidget {
     final body = trimUnlessAsciiArt(htmlToText(res.body));
     final images = imageUrlsIn(body);
     final videos = videoUrlsIn(body);
+    final audios = audioUrlsIn(body);
     final embeds = embedVideosIn(body);
 
     final content = Container(
@@ -124,10 +125,14 @@ class PostItem extends StatelessWidget {
               onSelectionActiveChanged: onBodySelectionActiveChanged,
             ),
           ],
-          if (images.isNotEmpty || videos.isNotEmpty || embeds.isNotEmpty)
+          if (images.isNotEmpty ||
+              videos.isNotEmpty ||
+              audios.isNotEmpty ||
+              embeds.isNotEmpty)
             PostImages(
               urls: images,
               videoUrls: videos,
+              audioUrls: audios,
               embedVideos: embeds,
               onTapVideo: onTapUrl,
               onTapEmbed: onTapUrl,

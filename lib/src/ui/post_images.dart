@@ -4,6 +4,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
+import 'audio_player_widget.dart';
 import 'embed_urls.dart';
 import 'image_urls.dart';
 import 'nico_thumbnail.dart';
@@ -15,6 +16,7 @@ class PostImages extends StatelessWidget {
     super.key,
     required this.urls,
     this.videoUrls = const [],
+    this.audioUrls = const [],
     this.embedVideos = const [],
     this.onTapVideo,
     this.onTapEmbed,
@@ -23,6 +25,9 @@ class PostImages extends StatelessWidget {
 
   final List<Uri> urls;
   final List<Uri> videoUrls;
+
+  /// 本文中の音声 URL。インラインのミニプレーヤーで再生する。
+  final List<Uri> audioUrls;
 
   /// YouTube / ニコニコ動画のリンク。タップで外部プレーヤーを開く。
   final List<EmbedVideo> embedVideos;
@@ -35,23 +40,38 @@ class PostImages extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hasThumbs =
+        urls.isNotEmpty || videoUrls.isNotEmpty || embedVideos.isNotEmpty;
     return Padding(
       padding: const EdgeInsets.only(top: 8),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          for (var i = 0; i < urls.length; i++)
-            _Thumb(urls: urls, index: i, blurred: blurImages),
-          for (final url in videoUrls)
-            _VideoThumb(
-              url: url,
-              onTap: onTapVideo == null ? null : () => onTapVideo!(url),
+          if (hasThumbs)
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (var i = 0; i < urls.length; i++)
+                  _Thumb(urls: urls, index: i, blurred: blurImages),
+                for (final url in videoUrls)
+                  _VideoThumb(
+                    url: url,
+                    onTap: onTapVideo == null ? null : () => onTapVideo!(url),
+                  ),
+                for (final video in embedVideos)
+                  _EmbedThumb(
+                    video: video,
+                    onTap: onTapEmbed == null
+                        ? null
+                        : () => onTapEmbed!(video.url),
+                  ),
+              ],
             ),
-          for (final video in embedVideos)
-            _EmbedThumb(
-              video: video,
-              onTap: onTapEmbed == null ? null : () => onTapEmbed!(video.url),
+          for (var i = 0; i < audioUrls.length; i++)
+            Padding(
+              padding: EdgeInsets.only(top: (hasThumbs || i > 0) ? 8 : 0),
+              child: AudioPlayerTile(url: audioUrls[i]),
             ),
         ],
       ),
