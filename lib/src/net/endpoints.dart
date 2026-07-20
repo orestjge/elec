@@ -31,6 +31,9 @@ class EdgeEndpoints {
   /// 現行スレの dat。
   Uri dat(String threadKey) => Uri.https(host, '/$boardKey/dat/$threadKey.dat');
 
+  /// ブラウザで開けるスレッド URL。
+  Uri thread(String threadKey) => Uri.https(host, '/$boardKey/$threadKey');
+
   /// 過去ログ（oyster/kako）。現行 dat が 404 のときのフォールバック。
   Uri kakoDat(String threadKey) {
     final t4 = threadKey.substring(0, 4);
@@ -49,8 +52,6 @@ class EdgeEndpoints {
 
   /// 必死チェッカー（kyodemo）で、ある ID の「今日の他の書き込み」を開く URL。
   /// `k` にはレスに書かれる ID ハッシュをそのまま渡す。
-  Uri hissi(String id) => Uri.https(hissiHost, '/sdemo/b/$hissiBoardKey/', {
-    'bs': 'hi',
-    'k': id,
-  });
+  Uri hissi(String id) =>
+      Uri.https(hissiHost, '/sdemo/b/$hissiBoardKey/', {'bs': 'hi', 'k': id});
 }
