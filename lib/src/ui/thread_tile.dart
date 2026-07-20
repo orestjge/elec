@@ -50,7 +50,9 @@ class ThreadTile extends StatelessWidget {
     // 既読スレはタイトルを少し落ち着かせて未読と区別する。
     final titleColor = isRead ? scheme.onSurfaceVariant : scheme.onSurface;
     final titleStyle = theme.textTheme.titleMedium?.copyWith(
-      fontWeight: isRead ? FontWeight.w500 : FontWeight.w600,
+      // 同梱ウェイトは 400/500/700。未読は Medium(500)、既読は Regular(400)。
+      // w600 だと 700(Bold) に丸められて太くなりすぎるため 500 を上限にする。
+      fontWeight: isRead ? FontWeight.w400 : FontWeight.w500,
       height: 1.3,
       color: titleColor,
     );
