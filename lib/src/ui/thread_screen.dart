@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:edge_core/edge_core.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -9,6 +10,8 @@ import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import '../net/auth_launcher.dart';
 import '../net/auth_store.dart';
 import '../net/endpoints.dart';
+import '../net/file_upload_settings.dart';
+import '../net/file_uploader.dart';
 import '../net/image_upload_settings.dart';
 import '../net/http_fetcher.dart';
 import '../net/imgur_uploader.dart';
@@ -37,7 +40,9 @@ class ThreadScreen extends StatefulWidget {
     this.imagePicker,
     this.imgurUploader,
     this.imageUploadSettings,
+    this.fileUploadSettings,
     this.pickAndUploadImage,
+    this.pickAndUploadFile,
     this.initialStatusLabel,
     this.initialResCount = 0,
     this.creatorMetadent,
@@ -82,8 +87,14 @@ class ThreadScreen extends StatefulWidget {
   /// 画像アップロード先の利用者設定。
   final ImageUploadSettings? imageUploadSettings;
 
+  /// 任意ファイルのアップロード先の利用者設定。
+  final FileUploadSettings? fileUploadSettings;
+
   /// 画像選択からアップロードまでを丸ごと差し替えるためのフック。
   final Future<Uri?> Function()? pickAndUploadImage;
+
+  /// ファイル選択からアップロードまでを丸ごと差し替えるためのフック。
+  final Future<Uri?> Function()? pickAndUploadFile;
 
   @override
   State<ThreadScreen> createState() => _ThreadScreenState();
@@ -100,6 +111,7 @@ class _ThreadScreenState extends State<ThreadScreen>
   late final ImagePicker _imagePicker;
   late final ImgurUploader _imgurUploader;
   late final ImageUploadSettings _imageUploadSettings;
+  late final FileUploadSettings _fileUploadSettings;
 
   /// NG 判定されたが、タップで一時的に表示したレス番号。
   final _revealedNg = <int>{};
@@ -180,6 +192,8 @@ class _ThreadScreenState extends State<ThreadScreen>
         );
     _imageUploadSettings =
         widget.imageUploadSettings ?? ImageUploadSettings.shared;
+    _fileUploadSettings =
+        widget.fileUploadSettings ?? FileUploadSettings.shared;
     _ng.addListener(_onNgChanged);
     _positions.itemPositions.addListener(_onPositions);
     WidgetsBinding.instance.addObserver(this);
@@ -878,6 +892,7 @@ class _ThreadScreenState extends State<ThreadScreen>
           onTapUrl: _openUrl,
           onSend: _submit,
           onPickAndUploadImage: _pickAndUploadImage,
+          onPickAndUploadFile: _pickAndUploadFile,
           onShowActions: _showResActions,
           isOwnPost: (n) => _history.isOwnPost(widget.threadKey, n),
           ng: _ng,
@@ -1262,6 +1277,41 @@ class _ThreadScreenState extends State<ThreadScreen>
     };
   }
 
+  Future<Uri?> _pickAndUploadFile() async {
+    final injected = widget.pickAndUploadFile;
+    if (injected != null) return injected();
+
+    final picked = await FilePicker.pickFiles(withData: true);
+    final file = picked?.files.firstOrNull;
+    if (file == null) return null;
+
+    final bytes = file.bytes;
+    if (bytes == null) {
+      _showSnack('ファイルを読み込めませんでした');
+      return null;
+    }
+
+    _showSnack('ファイルをアップロード中...');
+    try {
+      final url = await _fileUploader().upload(bytes: bytes, filename: file.name);
+      if (mounted) _showSnack('ファイルURLを挿入しました');
+      return url;
+    } on FileUploadException catch (e) {
+      if (mounted) _showSnack(e.message);
+      return null;
+    } catch (e) {
+      if (mounted) _showSnack('ファイルのアップロードに失敗しました: $e');
+      return null;
+    }
+  }
+
+  FileUploader _fileUploader() {
+    return switch (_fileUploadSettings.snapshot.provider) {
+      FileUploadProvider.catbox => const CatboxUploader(),
+      FileUploadProvider.uguu => const UguuUploader(),
+    };
+  }
+
   /// 1 回だけ POST し、トークンを更新して結果を返す（UI 副作用なし）。
   Future<BbsCgiResult> _postOnce(String text) async {
     final fetcher = _fetcher;
@@ -1388,6 +1438,7 @@ class _ThreadScreenState extends State<ThreadScreen>
               focusNode: _composerFocus,
               onSend: _submit,
               onPickAndUploadImage: _pickAndUploadImage,
+              onPickAndUploadFile: _pickAndUploadFile,
               enabled: !_isStopped,
             ),
           ],
@@ -1810,6 +1861,7 @@ class _ConversationSheet extends StatefulWidget {
     required this.onTapUrl,
     required this.onSend,
     required this.onPickAndUploadImage,
+    required this.onPickAndUploadFile,
     required this.onShowActions,
     required this.isOwnPost,
     required this.ng,
@@ -1838,6 +1890,9 @@ class _ConversationSheet extends StatefulWidget {
 
   /// 画像選択とアップロード。成功時はレス本文へ挿入する URL を返す。
   final Future<Uri?> Function() onPickAndUploadImage;
+
+  /// ファイル選択とアップロード。成功時はレス本文へ挿入する URL を返す。
+  final Future<Uri?> Function() onPickAndUploadFile;
 
   /// レス長押しでアクションメニューを出す。
   final ValueChanged<Res> onShowActions;
@@ -2006,6 +2061,7 @@ class _ConversationSheetState extends State<_ConversationSheet> {
                   focusNode: _focus,
                   onSend: _handleSend,
                   onPickAndUploadImage: widget.onPickAndUploadImage,
+                  onPickAndUploadFile: widget.onPickAndUploadFile,
                   enabled: widget.enabled,
                 ),
               ],
@@ -2127,6 +2183,7 @@ class _Composer extends StatefulWidget {
     required this.focusNode,
     required this.onSend,
     required this.onPickAndUploadImage,
+    required this.onPickAndUploadFile,
     required this.enabled,
   });
 
@@ -2136,6 +2193,7 @@ class _Composer extends StatefulWidget {
   /// 送信。受理されたら true を返す（入力欄をクリアする）。
   final Future<bool> Function(String) onSend;
   final Future<Uri?> Function() onPickAndUploadImage;
+  final Future<Uri?> Function() onPickAndUploadFile;
   final bool enabled;
 
   @override
@@ -2145,10 +2203,15 @@ class _Composer extends StatefulWidget {
 class _ComposerState extends State<_Composer> {
   bool _sending = false;
   bool _uploadingImage = false;
+  bool _uploadingFile = false;
 
   Future<void> _send() async {
     final text = widget.controller.text;
-    if (!widget.enabled || text.trim().isEmpty || _sending || _uploadingImage) {
+    if (!widget.enabled ||
+        text.trim().isEmpty ||
+        _sending ||
+        _uploadingImage ||
+        _uploadingFile) {
       return;
     }
     setState(() => _sending = true);
@@ -2161,13 +2224,24 @@ class _ComposerState extends State<_Composer> {
   }
 
   Future<void> _attachImage() async {
-    if (!widget.enabled || _sending || _uploadingImage) return;
+    if (!widget.enabled || _sending || _uploadingImage || _uploadingFile) return;
     setState(() => _uploadingImage = true);
     try {
       final url = await widget.onPickAndUploadImage();
       if (url != null) _insertUrl(url.toString());
     } finally {
       if (mounted) setState(() => _uploadingImage = false);
+    }
+  }
+
+  Future<void> _attachFile() async {
+    if (!widget.enabled || _sending || _uploadingImage || _uploadingFile) return;
+    setState(() => _uploadingFile = true);
+    try {
+      final url = await widget.onPickAndUploadFile();
+      if (url != null) _insertUrl(url.toString());
+    } finally {
+      if (mounted) setState(() => _uploadingFile = false);
     }
   }
 
@@ -2240,7 +2314,11 @@ class _ComposerState extends State<_Composer> {
               child: IconButton(
                 padding: EdgeInsets.zero,
                 tooltip: '画像を追加',
-                onPressed: !widget.enabled || _sending || _uploadingImage
+                onPressed:
+                    !widget.enabled ||
+                        _sending ||
+                        _uploadingImage ||
+                        _uploadingFile
                     ? null
                     : _attachImage,
                 icon: _uploadingImage
@@ -2250,6 +2328,28 @@ class _ComposerState extends State<_Composer> {
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.image_outlined, size: 22),
+              ),
+            ),
+            SizedBox(
+              width: 44,
+              height: 44,
+              child: IconButton(
+                padding: EdgeInsets.zero,
+                tooltip: 'ファイルを添付',
+                onPressed:
+                    !widget.enabled ||
+                        _sending ||
+                        _uploadingImage ||
+                        _uploadingFile
+                    ? null
+                    : _attachFile,
+                icon: _uploadingFile
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.attach_file, size: 22),
               ),
             ),
             const SizedBox(width: 4),

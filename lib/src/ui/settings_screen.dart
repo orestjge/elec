@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../net/file_upload_settings.dart';
 import '../net/image_upload_settings.dart';
 import '../net/ng_store.dart';
+import 'file_upload_settings_screen.dart';
 import 'image_upload_settings_screen.dart';
 import 'ng_screen.dart';
 
@@ -23,6 +25,20 @@ class SettingsScreen extends StatelessWidget {
                 MaterialPageRoute<void>(
                   builder: (_) => ImageUploadSettingsScreen(
                     store: ImageUploadSettings.shared,
+                  ),
+                ),
+              );
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.attach_file),
+            title: const Text('ファイルアップロード設定'),
+            subtitle: const Text('catbox.moe / uguu.se の任意ファイル送信先'),
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => FileUploadSettingsScreen(
+                    store: FileUploadSettings.shared,
                   ),
                 ),
               );
