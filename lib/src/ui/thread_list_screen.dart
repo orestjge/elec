@@ -6,8 +6,10 @@ import 'package:flutter/material.dart';
 import '../net/auth_store.dart';
 import '../net/endpoints.dart';
 import '../net/http_fetcher.dart';
+import '../net/ng_store.dart';
 import '../net/read_history.dart';
 import 'new_thread_screen.dart';
+import 'ng_screen.dart';
 import 'thread_screen.dart';
 import 'thread_tile.dart';
 
@@ -434,6 +436,12 @@ class _ThreadListScreenState extends State<ThreadListScreen>
     });
   }
 
+  void _openNgSettings() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => NgScreen(store: NgStore.shared)),
+    );
+  }
+
   Future<void> _openThread(ThreadSummary thread) async {
     await _history.markOpenedThread(thread);
     if (!mounted) return;
@@ -591,6 +599,11 @@ class _ThreadListScreenState extends State<ThreadListScreen>
                   _SearchButton(active: _searchOpen, onPressed: _toggleSearch),
                   _FilterButton(filter: _filter, onPressed: _pickFilter),
                   _SortButton(sort: _sort, onPressed: _pickSort),
+                  IconButton(
+                    icon: const Icon(Icons.block),
+                    tooltip: 'NG設定',
+                    onPressed: _openNgSettings,
+                  ),
                   const SizedBox(width: 4),
                 ],
               ),

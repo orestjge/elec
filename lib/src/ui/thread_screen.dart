@@ -9,7 +9,9 @@ import '../net/auth_launcher.dart';
 import '../net/auth_store.dart';
 import '../net/endpoints.dart';
 import '../net/http_fetcher.dart';
+import '../net/ng_store.dart';
 import '../net/read_history.dart';
+import 'ng_screen.dart';
 import 'post_item.dart';
 import 'write_auth.dart';
 
@@ -28,6 +30,7 @@ class ThreadScreen extends StatefulWidget {
     this.authStore,
     this.authLauncher = const SystemBrowserLauncher(),
     this.readHistory,
+    this.ngStore,
     this.initialStatusLabel,
     this.initialResCount = 0,
   });
@@ -38,6 +41,9 @@ class ThreadScreen extends StatefulWidget {
   final EdgeEndpoints endpoints;
   final Duration pollInterval;
   final int initialResCount;
+
+  /// NG（あぼーん）設定。既定はアプリ共有インスタンス（テストで差し替え可能）。
+  final NgStore? ngStore;
 
   /// 既読履歴。離脱時に「見たレス数」を記録する。
   final ReadHistory? readHistory;
@@ -65,6 +71,10 @@ class _ThreadScreenState extends State<ThreadScreen>
   late final DatFetcher _dat;
   late final AuthStore _authStore;
   late final ReadHistory _history;
+  late final NgStore _ng;
+
+  /// NG 判定されたが、タップで一時的に表示したレス番号。
+  final _revealedNg = <int>{};
   final _itemScroll = ItemScrollController();
   final _positions = ItemPositionsListener.create();
   final _composer = TextEditingController();
@@ -118,6 +128,8 @@ class _ThreadScreenState extends State<ThreadScreen>
     _dat = DatFetcher(_fetcher);
     _authStore = widget.authStore ?? AuthStore.shared;
     _history = widget.readHistory ?? ReadHistory.shared;
+    _ng = widget.ngStore ?? NgStore.shared;
+    _ng.addListener(_onNgChanged);
     _positions.itemPositions.addListener(_onPositions);
     WidgetsBinding.instance.addObserver(this);
     unawaited(
@@ -141,6 +153,7 @@ class _ThreadScreenState extends State<ThreadScreen>
     if (_furthestRead > 0) {
       unawaited(_history.markRead(widget.threadKey, _furthestRead));
     }
+    _ng.removeListener(_onNgChanged);
     _positions.itemPositions.removeListener(_onPositions);
     WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
@@ -407,6 +420,21 @@ class _ThreadScreenState extends State<ThreadScreen>
     _showPostsSheet('ID:$id  ${posts.length}レス', posts, id: id);
   }
 
+  /// NG 設定が変わったら再描画する。以前タップで表示したレスの一時表示は解除して、
+  /// 新しいルールで判定し直す。
+  void _onNgChanged() {
+    if (!mounted) return;
+    setState(_revealedNg.clear);
+  }
+
+  /// NG ワード追加ダイアログを出し、追加されたら反映する。
+  Future<void> _addNgWord() async {
+    final word = await showAddNgWordDialog(context);
+    if (word == null) return;
+    await _ng.addWord(word);
+    if (mounted) _showSnack('NGワードを追加しました');
+  }
+
   /// テキストをクリップボードへコピーし、上部通知で知らせる。
   Future<void> _copyText(String text, String message) async {
     await Clipboard.setData(ClipboardData(text: text));
@@ -497,7 +525,36 @@ class _ThreadScreenState extends State<ThreadScreen>
                     _openHissi(id);
                   },
                 ),
+                if (_ng.isNgId(id))
+                  ListTile(
+                    leading: const Icon(Icons.check_circle_outline),
+                    title: Text('ID:$id のNGを解除'),
+                    onTap: () {
+                      Navigator.pop(sheetContext);
+                      _ng.removeId(id);
+                      _showSnack('IDのNGを解除しました');
+                    },
+                  )
+                else
+                  ListTile(
+                    leading: const Icon(Icons.block),
+                    title: Text('ID:$id をNGにする'),
+                    subtitle: const Text('この ID の書き込みを非表示にする'),
+                    onTap: () {
+                      Navigator.pop(sheetContext);
+                      _ng.addId(id);
+                      _showSnack('IDをNGにしました');
+                    },
+                  ),
               ],
+              ListTile(
+                leading: const Icon(Icons.playlist_add),
+                title: const Text('NGワードを追加…'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _addNgWord();
+                },
+              ),
             ],
           ),
         ),
@@ -540,69 +597,106 @@ class _ThreadScreenState extends State<ThreadScreen>
         expand: false,
         initialChildSize: 0.6,
         maxChildSize: 0.9,
-        builder: (context, controller) => Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  title,
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-              ),
-            ),
-            if (id != null)
+        builder: (context, controller) => StatefulBuilder(
+          builder: (context, setSheetState) => Column(
+            children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
-                child: Row(
-                  children: [
-                    TextButton.icon(
-                      onPressed: () => _openHissi(id),
-                      icon: const Icon(Icons.travel_explore, size: 18),
-                      label: const Text('必死チェッカー'),
-                    ),
-                    const SizedBox(width: 4),
-                    TextButton.icon(
-                      onPressed: () => _copyText(id, 'IDをコピーしました'),
-                      icon: const Icon(Icons.copy, size: 18),
-                      label: const Text('IDをコピー'),
-                    ),
-                  ],
+                padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    title,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
                 ),
               ),
-            const Divider(height: 1),
-            Expanded(
-              child: ListView.separated(
-                controller: controller,
-                itemCount: posts.length,
-                separatorBuilder: (_, _) => const Divider(height: 1),
-                itemBuilder: (context, i) => PostItem(
-                  res: posts[i],
-                  idCount: idCounts[posts[i].id] ?? 1,
-                  idOrdinal: idOrdinals[posts[i].number] ?? 1,
-                  onTapId: null,
-                  onTapRes: (n) {
-                    Navigator.pop(context);
-                    _showConversation(n);
+              if (id != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+                  child: Wrap(
+                    spacing: 4,
+                    children: [
+                      TextButton.icon(
+                        onPressed: () => _openHissi(id),
+                        icon: const Icon(Icons.travel_explore, size: 18),
+                        label: const Text('必死チェッカー'),
+                      ),
+                      TextButton.icon(
+                        onPressed: () => _copyText(id, 'IDをコピーしました'),
+                        icon: const Icon(Icons.copy, size: 18),
+                        label: const Text('IDをコピー'),
+                      ),
+                      if (_ng.isNgId(id))
+                        TextButton.icon(
+                          onPressed: () {
+                            _ng.removeId(id);
+                            setSheetState(() {});
+                            _showSnack('IDのNGを解除しました');
+                          },
+                          icon: const Icon(
+                            Icons.check_circle_outline,
+                            size: 18,
+                          ),
+                          label: const Text('NG解除'),
+                        )
+                      else
+                        TextButton.icon(
+                          onPressed: () {
+                            _ng.addId(id);
+                            setSheetState(() {});
+                            _showSnack('IDをNGにしました');
+                          },
+                          icon: const Icon(Icons.block, size: 18),
+                          label: const Text('IDをNG'),
+                        ),
+                    ],
+                  ),
+                ),
+              const Divider(height: 1),
+              Expanded(
+                child: ListView.separated(
+                  controller: controller,
+                  itemCount: posts.length,
+                  separatorBuilder: (_, _) => const Divider(height: 1),
+                  itemBuilder: (context, i) {
+                    final post = posts[i];
+                    if (_ng.matches(post) &&
+                        !_revealedNg.contains(post.number)) {
+                      return _NgPlaceholder(
+                        number: post.number,
+                        onReveal: () =>
+                            setSheetState(() => _revealedNg.add(post.number)),
+                        onLongPress: () => _showResActions(post),
+                      );
+                    }
+                    return PostItem(
+                      res: post,
+                      idCount: idCounts[post.id] ?? 1,
+                      idOrdinal: idOrdinals[post.number] ?? 1,
+                      onTapId: null,
+                      onTapRes: (n) {
+                        Navigator.pop(context);
+                        _showConversation(n);
+                      },
+                      onTapResRange: (numbers) {
+                        Navigator.pop(context);
+                        _showConversationRange(numbers);
+                      },
+                      onTapUrl: _openUrl,
+                      replyCount: replyCountByNumber[post.number] ?? 0,
+                      onTapReplies: (n) {
+                        Navigator.pop(context);
+                        _showConversation(n);
+                      },
+                      onReply: _reply,
+                      onLongPress: () => _showResActions(post),
+                      isOwn: _history.isOwnPost(widget.threadKey, post.number),
+                    );
                   },
-                  onTapResRange: (numbers) {
-                    Navigator.pop(context);
-                    _showConversationRange(numbers);
-                  },
-                  onTapUrl: _openUrl,
-                  replyCount: replyCountByNumber[posts[i].number] ?? 0,
-                  onTapReplies: (n) {
-                    Navigator.pop(context);
-                    _showConversation(n);
-                  },
-                  onReply: _reply,
-                  onLongPress: () => _showResActions(posts[i]),
-                  isOwn: _history.isOwnPost(widget.threadKey, posts[i].number),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -670,6 +764,8 @@ class _ThreadScreenState extends State<ThreadScreen>
           onSend: _submit,
           onShowActions: _showResActions,
           isOwnPost: (n) => _history.isOwnPost(widget.threadKey, n),
+          ng: _ng,
+          revealedNg: _revealedNg,
           enabled: !_isStopped,
         ),
       ),
@@ -1067,25 +1163,38 @@ class _ThreadScreenState extends State<ThreadScreen>
             itemBuilder: (context, i) {
               final item = items[i];
               if (item is! Res) return const _NewArrivalLine();
+              final ngHidden =
+                  _ng.matches(item) && !_revealedNg.contains(item.number);
               return Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  PostItem(
-                    res: item,
-                    idCount: idCounts[item.id] ?? 1,
-                    idOrdinal: idOrdinals[item.number] ?? 1,
-                    onTapId: _showIdPosts,
-                    onTapRes: _showResPopup,
-                    onTapResRange: _showConversationRange,
-                    onTapUrl: _openUrl,
-                    replyCount: replies[item.number] ?? 0,
-                    onTapReplies: _showReplies,
-                    onReply: _reply,
-                    onBodySelectionActiveChanged: (active) =>
-                        _handleBodySelectionActiveChanged(item.number, active),
-                    onLongPress: () => _showResActions(item),
-                    isOwn: _history.isOwnPost(widget.threadKey, item.number),
-                  ),
+                  if (ngHidden)
+                    _NgPlaceholder(
+                      number: item.number,
+                      onReveal: () =>
+                          setState(() => _revealedNg.add(item.number)),
+                      onLongPress: () => _showResActions(item),
+                    )
+                  else
+                    PostItem(
+                      res: item,
+                      idCount: idCounts[item.id] ?? 1,
+                      idOrdinal: idOrdinals[item.number] ?? 1,
+                      onTapId: _showIdPosts,
+                      onTapRes: _showResPopup,
+                      onTapResRange: _showConversationRange,
+                      onTapUrl: _openUrl,
+                      replyCount: replies[item.number] ?? 0,
+                      onTapReplies: _showReplies,
+                      onReply: _reply,
+                      onBodySelectionActiveChanged: (active) =>
+                          _handleBodySelectionActiveChanged(
+                            item.number,
+                            active,
+                          ),
+                      onLongPress: () => _showResActions(item),
+                      isOwn: _history.isOwnPost(widget.threadKey, item.number),
+                    ),
                   const Divider(height: 1),
                 ],
               );
@@ -1140,6 +1249,52 @@ class _JumpToLatestButton extends StatelessWidget {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// NG 判定されたレスの代わりに出す薄い行。タップで一時表示、長押しでメニュー
+/// （ID の NG 解除など）を出す。
+class _NgPlaceholder extends StatelessWidget {
+  const _NgPlaceholder({
+    required this.number,
+    required this.onReveal,
+    required this.onLongPress,
+  });
+  final int number;
+  final VoidCallback onReveal;
+  final VoidCallback onLongPress;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return InkWell(
+      onTap: onReveal,
+      onLongPress: onLongPress,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          children: [
+            Text(
+              '$number',
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: scheme.onSurfaceVariant,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Icon(Icons.block, size: 14, color: scheme.onSurfaceVariant),
+            const SizedBox(width: 6),
+            Text(
+              'NG（タップで表示）',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: scheme.onSurfaceVariant,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -1211,6 +1366,8 @@ class _ConversationSheet extends StatefulWidget {
     required this.onSend,
     required this.onShowActions,
     required this.isOwnPost,
+    required this.ng,
+    required this.revealedNg,
     required this.enabled,
   });
 
@@ -1233,6 +1390,10 @@ class _ConversationSheet extends StatefulWidget {
   /// レス長押しでアクションメニューを出す。
   final ValueChanged<Res> onShowActions;
   final bool Function(int number) isOwnPost;
+
+  /// NG 判定に使う設定と、タップで一時表示にしたレス番号の集合（画面と共有）。
+  final NgStore ng;
+  final Set<int> revealedNg;
 
   /// 入力欄を有効にするか（停止スレでは false）。
   final bool enabled;
@@ -1325,6 +1486,9 @@ class _ConversationSheetState extends State<_ConversationSheet> {
                 Builder(
                   builder: (context) {
                     final entry = widget.entries[i];
+                    final ngHidden =
+                        widget.ng.matches(entry.res) &&
+                        !widget.revealedNg.contains(entry.res.number);
                     return KeyedSubtree(
                       key: _keys[entry.res.number],
                       child: _ConversationPost(
@@ -1332,22 +1496,37 @@ class _ConversationSheetState extends State<_ConversationSheet> {
                         depth: entry.depth,
                         refs: entry.refs,
                         showDivider: i < widget.entries.length - 1,
-                        child: PostItem(
-                          res: entry.res,
-                          idCount: widget.idCounts[entry.res.id] ?? 1,
-                          idOrdinal: widget.idOrdinals[entry.res.number] ?? 1,
-                          onTapId: widget.onTapId,
-                          onTapRes: (n) => widget.onTapRes(entry.res.number, n),
-                          onTapResRange: (numbers) =>
-                              widget.onTapResRange(entry.res.number, numbers),
-                          onTapUrl: widget.onTapUrl,
-                          replyCount:
-                              widget.replyCountByNumber[entry.res.number] ?? 0,
-                          onTapReplies: widget.onTapReplies,
-                          onReply: _replyLocal,
-                          onLongPress: () => widget.onShowActions(entry.res),
-                          isOwn: widget.isOwnPost(entry.res.number),
-                        ),
+                        child: ngHidden
+                            ? _NgPlaceholder(
+                                number: entry.res.number,
+                                onReveal: () => setState(
+                                  () => widget.revealedNg.add(entry.res.number),
+                                ),
+                                onLongPress: () =>
+                                    widget.onShowActions(entry.res),
+                              )
+                            : PostItem(
+                                res: entry.res,
+                                idCount: widget.idCounts[entry.res.id] ?? 1,
+                                idOrdinal:
+                                    widget.idOrdinals[entry.res.number] ?? 1,
+                                onTapId: widget.onTapId,
+                                onTapRes: (n) =>
+                                    widget.onTapRes(entry.res.number, n),
+                                onTapResRange: (numbers) => widget
+                                    .onTapResRange(entry.res.number, numbers),
+                                onTapUrl: widget.onTapUrl,
+                                replyCount:
+                                    widget.replyCountByNumber[entry
+                                        .res
+                                        .number] ??
+                                    0,
+                                onTapReplies: widget.onTapReplies,
+                                onReply: _replyLocal,
+                                onLongPress: () =>
+                                    widget.onShowActions(entry.res),
+                                isOwn: widget.isOwnPost(entry.res.number),
+                              ),
                       ),
                     );
                   },
