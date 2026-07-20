@@ -49,6 +49,7 @@ bool _isTwimgImageUri(Uri uri) {
 const _videoSiteNames = <String, String>{
   'twimg.com': 'Twitter', // video.twimg.com
   'catbox.moe': 'catbox', // files.catbox.moe
+  'po-kaki-to.com': 'po-kaki-to',
 };
 
 /// 動画ファイル URL のホストから、どのサイトかが分かる短いラベルを返す。

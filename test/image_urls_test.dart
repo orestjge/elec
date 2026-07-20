@@ -79,6 +79,7 @@ void main() {
     test('既知サイトは別名にする', () {
       expect(label('https://video.twimg.com/abc/vid.mp4'), 'Twitter');
       expect(label('https://files.catbox.moe/abcd.mp4'), 'catbox');
+      expect(label('https://po-kaki-to.com/abcd.mp4'), 'po-kaki-to');
     });
 
     test('未知サイトはドメインに落とす', () {
