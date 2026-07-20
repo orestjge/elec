@@ -79,6 +79,7 @@ class _ThreadScreenState extends State<ThreadScreen>
   final _positions = ItemPositionsListener.create();
   final _composer = TextEditingController();
   final _composerFocus = FocusNode();
+  final _composerKey = GlobalKey();
 
   /// 一覧の各行。Res（レス）か [_NewArrivalLine]（新着境界）のどちらか。
   List<Object> _items = const [];
@@ -912,12 +913,22 @@ class _ThreadScreenState extends State<ThreadScreen>
   void _handlePointerDown(PointerDownEvent event) {
     _horizontalDragDistance = 0;
     _verticalDragDistance = 0;
-    _trackingSwipe = !_bodySelectionActive;
+    // 入力欄の上で始まったドラッグはカーソル移動・文字選択なので戻る操作にしない。
+    // 一覧側で始まったスワイプは入力中（キーボード表示中）でも戻れるようにする。
+    _trackingSwipe = !_bodySelectionActive && !_isOnComposer(event.position);
     _swipeStartTimer?.cancel();
     if (!_trackingSwipe) return;
     _swipeStartTimer = Timer(_swipeStartTimeout, () {
       _trackingSwipe = false;
     });
+  }
+
+  /// グローバル座標 [globalPosition] が入力欄の矩形内か。
+  bool _isOnComposer(Offset globalPosition) {
+    final box = _composerKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return false;
+    final rect = box.localToGlobal(Offset.zero) & box.size;
+    return rect.contains(globalPosition);
   }
 
   void _handlePointerMove(PointerMoveEvent event) {
@@ -931,7 +942,6 @@ class _ThreadScreenState extends State<ThreadScreen>
     if (!_trackingSwipe) return;
     _trackingSwipe = false;
     if (_bodySelectionActive) return;
-    if (_composerFocus.hasFocus) return;
     if (_horizontalDragDistance < _swipeDistanceThreshold) return;
     if (_horizontalDragDistance < _verticalDragDistance * 1.2) return;
     final navigator = Navigator.of(context);
@@ -1111,6 +1121,7 @@ class _ThreadScreenState extends State<ThreadScreen>
           children: [
             Expanded(child: _body()),
             _Composer(
+              key: _composerKey,
               controller: _composer,
               focusNode: _composerFocus,
               onSend: _submit,
@@ -1666,6 +1677,7 @@ class _ReplyBar extends StatelessWidget {
 
 class _Composer extends StatefulWidget {
   const _Composer({
+    super.key,
     required this.controller,
     required this.focusNode,
     required this.onSend,
