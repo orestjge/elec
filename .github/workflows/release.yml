@@ -1,7 +1,9 @@
-name: Release Android
+name: Release
 
-# main に push（＝PR マージ）されるたびに、パッチ版を自動採番して署名 APK を
-# ビルドし GitHub Releases に公開する。手動実行（workflow_dispatch）も可能。
+# main に push（＝PR マージ）されるたびに、パッチ版を自動採番して
+#  - Android: 署名 APK を GitHub Releases に公開
+#  - iOS:     無署名 IPA を同じ Release に添付し、AltStore ソースを更新
+# する。手動実行（workflow_dispatch）も可能。
 # 直近タグ v{major}.{minor}.{patch} の patch を +1 した新タグを自動作成する。
 on:
   push:
@@ -9,16 +11,19 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  contents: write # タグ作成・Release 公開に必要
+  contents: write # タグ作成・Release 公開・altstore ブランチ更新に必要
 
 concurrency:
-  group: android-release
+  group: release
   cancel-in-progress: false # 連続マージ時は直列化（採番の衝突回避）
 
 jobs:
   release:
     name: build signed APK & publish release
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.ver.outputs.tag }}
+      name: ${{ steps.ver.outputs.name }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -99,3 +104,93 @@ jobs:
           files: dist/*.apk
           generate_release_notes: true
           fail_on_unmatched_files: true
+
+  ios:
+    name: build unsigned IPA & update AltStore source
+    needs: release # Android ジョブが作った Release に IPA を後追いで添付する
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.35.5
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+
+      # AltStore はインストール時にユーザーの Apple ID で再署名するため、
+      # CI 側は証明書なしの無署名ビルドで良い（有料 Developer アカウント不要）。
+      - name: Build unsigned iOS
+        run: |
+          flutter build ios --release --no-codesign \
+            --build-name="${{ needs.release.outputs.name }}" --build-number="${{ github.run_number }}"
+
+      # Runner.app を Payload/ に入れて zip すると IPA になる。
+      - name: Package IPA
+        id: ipa
+        run: |
+          cd build/ios/iphoneos
+          mkdir -p Payload
+          cp -R Runner.app Payload/Runner.app
+          IPA="elec-${{ needs.release.outputs.tag }}.ipa"
+          zip -qry "$IPA" Payload
+          echo "path=$(pwd)/$IPA" >> "$GITHUB_OUTPUT"
+          echo "size=$(stat -f%z "$IPA")" >> "$GITHUB_OUTPUT"
+
+      - name: Attach IPA to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.release.outputs.tag }}
+          files: ${{ steps.ipa.outputs.path }}
+          fail_on_unmatched_files: true
+
+      # source.json は専用の altstore ブランチに publish する。
+      # raw URL: https://raw.githubusercontent.com/${{ github.repository }}/altstore/source.json
+      - name: Update AltStore source (altstore branch)
+        env:
+          TAG: ${{ needs.release.outputs.tag }}
+          NAME: ${{ needs.release.outputs.name }}
+          SIZE: ${{ steps.ipa.outputs.size }}
+        run: |
+          set -euo pipefail
+          REPO="${{ github.repository }}"
+          URL="https://github.com/${REPO}/releases/download/${TAG}/elec-${TAG}.ipa"
+          DATE="$(date -u +%F)"
+
+          # 既存の source.json（altstore ブランチ）を土台にする。無ければリポジトリ内テンプレ。
+          git fetch origin altstore --depth=1 || true
+          if git cat-file -e origin/altstore:source.json 2>/dev/null; then
+            git show origin/altstore:source.json > source.json
+          else
+            cp altstore/source.json source.json
+          fi
+
+          NEW=$(jq -n --arg v "$NAME" --arg d "$DATE" \
+            --arg desc "リリース ${TAG}" --arg url "$URL" --argjson size "$SIZE" \
+            '{version:$v,date:$d,localizedDescription:$desc,downloadURL:$url,size:$size,minOSVersion:"13.0"}')
+
+          # 新バージョンを先頭に追加（同名バージョンは置換）。旧 AltStore 互換の
+          # app 直下フィールドも最新版で更新しておく。
+          jq --argjson nv "$NEW" '
+            .apps[0].versions = ([$nv] + ((.apps[0].versions // []) | map(select(.version != $nv.version))))
+            | .apps[0].version = $nv.version
+            | .apps[0].versionDate = $nv.date
+            | .apps[0].versionDescription = $nv.localizedDescription
+            | .apps[0].downloadURL = $nv.downloadURL
+            | .apps[0].size = $nv.size
+          ' source.json > source.json.tmp && mv source.json.tmp source.json
+
+          # source.json だけを持つ使い捨てブランチとして force-push。
+          # （版の履歴は JSON の versions 配列側に保持されるため git 履歴は不要）
+          TMP="$(mktemp -d)"
+          cp source.json "$TMP/source.json"
+          cd "$TMP"
+          git init -q
+          git checkout -q -b altstore
+          git add source.json
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -q -m "AltStore source: ${TAG}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${REPO}.git" altstore
