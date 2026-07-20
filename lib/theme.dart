@@ -19,6 +19,11 @@ class ElecTheme {
     return ThemeData(
       colorScheme: scheme,
       useMaterial3: true,
+      // 既定フォントを NotoSansJP に統一。英数と日本語を1フォントで賄うことで、
+      // IME変換中の下線が英数/かな漢字でガタつく問題（フォントフォールバックで
+      // メトリクスが混ざるのが原因）を解消する。
+      // AA 表示（res_body.dart）は個別に Monapo を指定しているため影響しない。
+      fontFamily: 'NotoSansJP',
       scaffoldBackgroundColor: scheme.surface,
       // 大きめ・折りたたみ式のヘッダを既定に。
       appBarTheme: AppBarTheme(

@@ -91,6 +91,7 @@ flutter:
     - assets/fonts/Monapo-README
     - assets/fonts/Mona-README-ttf.txt
     - assets/fonts/IPA_Font_License_Agreement_v1.0.txt
+    - assets/fonts/NotoSansJP-OFL.txt
 
   # To add assets to your application, add an assets section, like this:
   # assets:
@@ -126,3 +127,11 @@ flutter:
     - family: Monapo
       fonts:
         - asset: assets/fonts/monapo.ttf
+    # 既定フォント。可変フォント(wght軸)は既定が極細(100)になるため、
+    # Regular(400)/Bold(700) の静的インスタンスを書き出して同梱している。
+    - family: NotoSansJP
+      fonts:
+        - asset: assets/fonts/NotoSansJP-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/NotoSansJP-Bold.ttf
+          weight: 700
