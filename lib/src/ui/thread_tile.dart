@@ -130,6 +130,16 @@ class ThreadTile extends StatelessWidget {
                               label: formatCompact(thread.resCount),
                               color: metaColor,
                             ),
+                            if (thread.metadent != null) ...[
+                              const SizedBox(width: 14),
+                              Flexible(
+                                child: Text(
+                                  'ID:${thread.metadent}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
                             const Spacer(),
                             Text(formatAge(thread.createdAt)),
                           ],

@@ -59,4 +59,21 @@ void main() {
     expect(find.text('自分'), findsOneWidget);
     expect(find.byIcon(Icons.edit_note), findsOneWidget);
   });
+
+  testWidgets('metadent があればスレ主IDを出す', (tester) async {
+    const t = ThreadSummary(
+      key: '1700000000',
+      title: 'テストスレ',
+      resCount: 100,
+      capName: null,
+      metadent: 'B3YfDSAP',
+    );
+    await tester.pumpWidget(wrap(ThreadTile(thread: t, onTap: () {})));
+    expect(find.text('ID:B3YfDSAP'), findsOneWidget);
+  });
+
+  testWidgets('metadent が無ければスレ主IDは出ない', (tester) async {
+    await tester.pumpWidget(wrap(ThreadTile(thread: thread(), onTap: () {})));
+    expect(find.textContaining('ID:'), findsNothing);
+  });
 }
