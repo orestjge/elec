@@ -76,6 +76,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   late final bool _ownsFetcher;
   late final SubjectFetcher _subject;
   late final ReadHistory _history;
+  final NgStore _ng = NgStore.shared;
 
   SubjectState? _state; // 初回成功まで null
   Object? _error; // 初回失敗時のみ全画面エラーに使う
@@ -108,13 +109,19 @@ class _ThreadListScreenState extends State<ThreadListScreen>
     _fetcher = widget.fetcher ?? HttpClientFetcher();
     _subject = SubjectFetcher(_fetcher);
     _history = widget.readHistory ?? ReadHistory.shared;
+    _ng.addListener(_onNgChanged);
     WidgetsBinding.instance.addObserver(this);
     _initialLoad();
     _startPolling();
   }
 
+  void _onNgChanged() {
+    if (mounted) setState(() {});
+  }
+
   @override
   void dispose() {
+    _ng.removeListener(_onNgChanged);
     WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
     _swipeStartTimer?.cancel();
@@ -152,7 +159,10 @@ class _ThreadListScreenState extends State<ThreadListScreen>
 
   Future<void> _initialLoad() async {
     try {
-      final r = await _subject.fetch(widget.endpoints.subjectTxt);
+      final r = await _subject.fetch(
+        widget.endpoints.subjectMetadentTxt,
+        metadent: true,
+      );
       if (!mounted) return;
       await _rememberThreads(r.state.threads);
       setState(() {
@@ -176,7 +186,11 @@ class _ThreadListScreenState extends State<ThreadListScreen>
     _fetching = true;
     setState(() => _polling = true);
     try {
-      final r = await _subject.fetch(widget.endpoints.subjectTxt, prev: _state);
+      final r = await _subject.fetch(
+        widget.endpoints.subjectMetadentTxt,
+        prev: _state,
+        metadent: true,
+      );
       if (!mounted) return;
       if (!r.notModified) {
         await _rememberThreads(r.state.threads);
@@ -199,8 +213,9 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   Future<void> _refresh({bool force = false}) async {
     try {
       final r = await _subject.fetch(
-        widget.endpoints.subjectTxt,
+        widget.endpoints.subjectMetadentTxt,
         prev: force ? null : _state,
+        metadent: true,
       );
       if (!mounted) return;
       if (!r.notModified) await _rememberThreads(r.state.threads);
@@ -259,9 +274,14 @@ class _ThreadListScreenState extends State<ThreadListScreen>
         (key) => _history.isFavorite(key),
       ),
     };
+    // スレ主 NG は全表示で効かせる（履歴・お気に入りの保存分は metadent を
+    // 持たないので対象外＝そのまま残る）。
+    final visible = filtered
+        .where((t) => !_ng.isNgCreator(t.metadent))
+        .toList();
     final query = _search.text.trim().toLowerCase();
-    if (query.isEmpty) return filtered;
-    return filtered
+    if (query.isEmpty) return visible;
+    return visible
         .where((t) => t.title.toLowerCase().contains(query))
         .toList();
   }
@@ -440,6 +460,60 @@ class _ThreadListScreenState extends State<ThreadListScreen>
     Navigator.of(context).push(
       MaterialPageRoute<void>(builder: (_) => NgScreen(store: NgStore.shared)),
     );
+  }
+
+  /// スレを長押ししたときの操作シート。今はスレ主 NG のみ。
+  Future<void> _showThreadActions(ThreadSummary thread) async {
+    final metadent = thread.metadent;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+                child: Text(
+                  thread.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(sheetContext).textTheme.titleSmall,
+                ),
+              ),
+              if (metadent == null)
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(20, 4, 20, 16),
+                  child: Text('このスレはスレ主情報を取得できませんでした'),
+                )
+              else
+                ListTile(
+                  leading: const Icon(Icons.person_off_outlined),
+                  title: const Text('このスレ主を NG'),
+                  subtitle: Text('スレ主 [$metadent★] のスレを一覧から隠します'),
+                  onTap: () => Navigator.pop(sheetContext, 'ng'),
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+    if (action == 'ng' && metadent != null) {
+      await _ng.addCreator(metadent);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('スレ主 [$metadent★] を NG にしました'),
+          action: SnackBarAction(
+            label: '取り消す',
+            onPressed: () => _ng.removeCreator(metadent),
+          ),
+        ),
+      );
+    }
   }
 
   Future<void> _openThread(ThreadSummary thread) async {
@@ -645,6 +719,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
         statusLabel: _statusLabel(threads[i]),
         isOwn: _history.isOwnThread(threads[i].key),
         onTap: () => _openThread(threads[i]),
+        onLongPress: () => _showThreadActions(threads[i]),
       ),
     );
   }

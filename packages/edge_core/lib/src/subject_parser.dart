@@ -12,19 +12,28 @@ final _tailRe = RegExp(r'^(.*?)(?:\s\[([^\]]*)★\])?\s\((\d+)\)$');
 /// 各行の形式（`eddist-server/src/domain/thread_list.rs`）:
 /// - 通常: `{key}.dat<>{title} ({resCount})`
 /// - cap 付き: `{key}.dat<>{title} [{cap}★] ({resCount})`
-List<ThreadSummary> parseSubject(List<int> subjectBytes) {
+///
+/// [metadent] が true のときは `subject-metadent.txt` を想定し、`[xxx★]` を
+/// cap 名ではなくスレ立て人の metadent として [ThreadSummary.metadent] に入れる
+/// （このファイルでは全スレに metadent が付き、cap 名は出力されない）。
+List<ThreadSummary> parseSubject(
+  List<int> subjectBytes, {
+  bool metadent = false,
+}) {
   final text = decodeSjis(subjectBytes);
   final result = <ThreadSummary>[];
   for (final line in text.split('\n')) {
     if (line.isEmpty) continue;
-    final entry = parseSubjectLine(line);
+    final entry = parseSubjectLine(line, metadent: metadent);
     if (entry != null) result.add(entry);
   }
   return result;
 }
 
 /// subject.txt の 1 行をパースする。形式に合わなければ null。
-ThreadSummary? parseSubjectLine(String line) {
+///
+/// [metadent] については [parseSubject] を参照。
+ThreadSummary? parseSubjectLine(String line, {bool metadent = false}) {
   final sep = line.indexOf('<>');
   if (sep < 0) return null;
 
@@ -39,10 +48,12 @@ ThreadSummary? parseSubjectLine(String line) {
     // `(n)` が無い異常系。タイトルだけ拾い、レス数 0 で通す。
     return ThreadSummary(key: key, title: right, resCount: 0, capName: null);
   }
+  final tag = m.group(2);
   return ThreadSummary(
     key: key,
     title: m.group(1)!,
     resCount: int.parse(m.group(3)!),
-    capName: m.group(2),
+    capName: metadent ? null : tag,
+    metadent: metadent ? tag : null,
   );
 }
