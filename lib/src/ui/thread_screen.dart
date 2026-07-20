@@ -92,6 +92,7 @@ class _ThreadScreenState extends State<ThreadScreen>
   int _openCount = 0;
 
   Timer? _timer;
+  Timer? _postRefreshTimer;
   Timer? _topSnackTimer;
   OverlayEntry? _topSnackEntry;
   bool _fetching = false;
@@ -103,6 +104,8 @@ class _ThreadScreenState extends State<ThreadScreen>
   Timer? _swipeStartTimer;
   static const double _swipeDistanceThreshold = 96;
   static const Duration _swipeStartTimeout = Duration(milliseconds: 450);
+  static const int _postRefreshAttempts = 4;
+  static const Duration _postRefreshRetryDelay = Duration(milliseconds: 700);
 
   Uri get _url => widget.endpoints.dat(widget.threadKey);
 
@@ -140,6 +143,7 @@ class _ThreadScreenState extends State<ThreadScreen>
     _positions.itemPositions.removeListener(_onPositions);
     WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
+    _postRefreshTimer?.cancel();
     _swipeStartTimer?.cancel();
     _topSnackTimer?.cancel();
     _topSnackEntry?.remove();
@@ -237,17 +241,19 @@ class _ThreadScreenState extends State<ThreadScreen>
     }
   }
 
-  Future<void> _poll() async {
+  Future<void> _poll({bool force = false}) async {
     if (_fetching || !mounted) return;
     _fetching = true;
     setState(() => _polling = true);
     try {
       final wasAtBottom = _atBottom;
       final wasShortContent = _contentFitsViewport();
-      final r = await _dat.fetch(_url, prev: _state);
+      final previousResCount = _state.res.length;
+      final r = await _dat.fetch(_url, prev: force ? DatState.empty : _state);
       if (!mounted) return;
-      if (r.newRes.isNotEmpty) {
-        await _markPendingOwnPosts(r.newRes);
+      final newRes = _newResSince(r.state, previousResCount);
+      if (newRes.isNotEmpty) {
+        await _markPendingOwnPosts(newRes);
         if (!mounted) return;
         setState(() => _state = r.state);
         // 末尾に居たなら追従する。
@@ -263,6 +269,11 @@ class _ThreadScreenState extends State<ThreadScreen>
       _fetching = false;
       if (mounted) setState(() => _polling = false);
     }
+  }
+
+  List<Res> _newResSince(DatState state, int previousResCount) {
+    if (state.res.length <= previousResCount) return const [];
+    return state.res.skip(previousResCount).toList();
   }
 
   /// 可視レスから既読位置（最大レス番号）と末尾到達を更新する。
@@ -338,10 +349,12 @@ class _ThreadScreenState extends State<ThreadScreen>
 
   Future<void> _refresh() async {
     try {
+      final previousResCount = _state.res.length;
       final r = await _dat.fetch(_url, prev: _state);
       if (!mounted) return;
-      if (r.newRes.isNotEmpty) {
-        await _markPendingOwnPosts(r.newRes);
+      final newRes = _newResSince(r.state, previousResCount);
+      if (newRes.isNotEmpty) {
+        await _markPendingOwnPosts(newRes);
         if (!mounted) return;
       }
       setState(() {
@@ -800,9 +813,30 @@ class _ThreadScreenState extends State<ThreadScreen>
     if (accepted && mounted) {
       _pendingOwnPosts++;
       _showSnack('書き込みました');
-      _poll(); // 自分の書き込みをすぐ反映
+      _pollAfterPost(); // 自分の書き込みをすぐ反映
     }
     return accepted;
+  }
+
+  void _pollAfterPost() {
+    _postRefreshTimer?.cancel();
+    unawaited(_runPostRefreshAttempt(0));
+  }
+
+  Future<void> _runPostRefreshAttempt(int attempt) async {
+    if (!mounted || _pendingOwnPosts <= 0 || attempt >= _postRefreshAttempts) {
+      return;
+    }
+    await _poll(force: true);
+    if (!mounted ||
+        _pendingOwnPosts <= 0 ||
+        attempt + 1 >= _postRefreshAttempts) {
+      return;
+    }
+    _postRefreshTimer = Timer(
+      _postRefreshRetryDelay,
+      () => unawaited(_runPostRefreshAttempt(attempt + 1)),
+    );
   }
 
   @override

@@ -95,6 +95,43 @@ class AppendAfterPostClient implements HttpFetcher, HttpPoster {
   }
 }
 
+class StaleOnceAfterPostClient implements HttpFetcher, HttpPoster {
+  int gets = 0;
+  int posts = 0;
+  final List<Map<String, String>> getHeaders = [];
+
+  List<int> get _oldDat =>
+      datLine('名無し<><>2025/11/03(月) 02:14:51.907 ID:a<> 既存 <>スレタイ');
+
+  List<int> get _newDat => [
+    ..._oldDat,
+    ...datLine('名無し<><>2025/11/03(月) 02:20:00.000 ID:b<> 自分の投稿 <>'),
+  ];
+
+  @override
+  Future<FetchResponse> get(
+    Uri url, {
+    Map<String, String> headers = const {},
+  }) async {
+    getHeaders.add(Map.of(headers));
+    gets++;
+    return FetchResponse(
+      statusCode: 200,
+      bodyBytes: gets < 3 ? _oldDat : _newDat,
+    );
+  }
+
+  @override
+  Future<FetchResponse> post(
+    Uri url, {
+    Map<String, String> headers = const {},
+    required String body,
+  }) async {
+    posts++;
+    return FetchResponse(statusCode: 200, bodyBytes: successBody());
+  }
+}
+
 void main() {
   testWidgets('未認証→コード表示→認証後の再送で成功する', (tester) async {
     final client = ScriptedClient([
@@ -338,6 +375,44 @@ void main() {
     await tester.pump(const Duration(milliseconds: 400));
     await tester.pumpAndSettle();
 
+    expect(history.isOwnPost('123', 2), isTrue);
+    expect(find.text('自分'), findsOneWidget);
+  });
+
+  testWidgets('投稿直後に古い dat を掴んでも再取得して自分のレスとして記録する', (tester) async {
+    final client = StaleOnceAfterPostClient();
+    final history = ReadHistory(MemoryReadHistoryStorage());
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadScreen(
+          threadKey: '123',
+          threadTitle: 'テスト',
+          fetcher: client,
+          authStore: AuthStore(MemoryTokenStorage()),
+          authLauncher: FakeLauncher(),
+          pollInterval: const Duration(seconds: 60),
+          readHistory: history,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField), 'こんにちは');
+    await tester.tap(find.byIcon(Icons.send));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(history.isOwnPost('123', 1), isFalse);
+    expect(history.isOwnPost('123', 2), isFalse);
+    expect(client.getHeaders[1].containsKey('Range'), isFalse);
+    expect(client.getHeaders[1].containsKey('If-Modified-Since'), isFalse);
+
+    await tester.pump(const Duration(milliseconds: 800));
+    await tester.pumpAndSettle();
+
+    expect(client.posts, 1);
+    expect(history.isOwnPost('123', 1), isFalse);
     expect(history.isOwnPost('123', 2), isTrue);
     expect(find.text('自分'), findsOneWidget);
   });
