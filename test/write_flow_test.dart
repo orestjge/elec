@@ -235,6 +235,49 @@ void main() {
     );
   });
 
+  testWidgets('画像アップロード後に Imgur URL をレス本文へ挿入する', (tester) async {
+    final client = ScriptedClient([
+      FetchResponse(statusCode: 200, bodyBytes: successBody()),
+    ]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadScreen(
+          threadKey: '123',
+          threadTitle: 'テスト',
+          fetcher: client,
+          authStore: AuthStore(MemoryTokenStorage()),
+          authLauncher: FakeLauncher(),
+          pollInterval: const Duration(seconds: 60),
+          readHistory: ReadHistory(MemoryReadHistoryStorage()),
+          pickAndUploadImage: () async =>
+              Uri.parse('https://i.imgur.com/example.jpg'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField), '本文');
+    await tester.tap(find.byIcon(Icons.image_outlined));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.text('本文\nhttps://i.imgur.com/example.jpg'), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.send));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(
+      client.lastBody,
+      buildBbsCgiBody(
+        board: 'liveedge',
+        threadKey: '123',
+        message: '本文\nhttps://i.imgur.com/example.jpg',
+      ),
+    );
+  });
+
   testWidgets('期限切れで再送すると新しいコードに更新される', (tester) async {
     final client = ScriptedClient([
       // 1 回目: 未認証（コード 111111）

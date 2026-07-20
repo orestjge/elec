@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'src/net/auth_store.dart';
+import 'src/net/image_upload_settings.dart';
 import 'src/net/ng_store.dart';
 import 'src/net/read_history.dart';
 import 'src/ui/thread_list_screen.dart';
@@ -12,6 +13,7 @@ Future<void> main() async {
   // 保存済みの認証トークン・既読履歴・NG 設定を読み込む。
   await Future.wait([
     AuthStore.shared.load(),
+    ImageUploadSettings.shared.load(),
     ReadHistory.shared.load(),
     NgStore.shared.load(),
   ]);

@@ -55,6 +55,13 @@ dependencies:
   # レスのインデックス指定スクロール（前回位置から開く・最新へ）と可視レス追跡。
   scrollable_positioned_list: ^0.3.8
 
+  # mp4 直リンクの先頭フレームをサムネイル生成する（Android/iOS のみ。macOS は
+  # 未対応なので再生カードにフォールバックする）。
+  video_thumbnail: ^0.5.3
+
+  # レス投稿欄から端末内の画像を選択して Imgur にアップロードする。
+  image_picker: ^1.1.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

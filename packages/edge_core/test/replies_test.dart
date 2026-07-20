@@ -84,4 +84,40 @@ void main() {
       expect(repliesTo(res, 2).map((e) => e.number), [4]);
     });
   });
+
+  group('guroMaskedResNumbers', () {
+    test('レス自身の本文にグロがあれば印を付ける', () {
+      final res = [post(1, 'グロ画像注意 http://e/a.jpg'), post(2, '普通のレス')];
+      expect(guroMaskedResNumbers(res), {1});
+    });
+
+    test('返信でグロと言われた対象に印を付ける', () {
+      final res = [
+        post(1, 'http://e/a.jpg'),
+        post(2, '>>1 グロ'),
+        post(3, '>>1 きれい'),
+      ];
+      // グロと書いた 2 自身と、その返信先 1 の双方が対象。
+      expect(guroMaskedResNumbers(res), {1, 2});
+    });
+
+    test('dat 上の &gt;&gt; 越しでも対象を拾う', () {
+      final res = [post(1, 'http://e/a.jpg'), post(2, '&gt;&gt;1 グロ')];
+      expect(guroMaskedResNumbers(res), {1, 2});
+    });
+
+    test('範囲返信のグロは範囲内すべてを対象にする', () {
+      final res = [
+        post(1, 'a'),
+        post(2, 'b'),
+        post(3, 'c'),
+        post(4, '>>1-3 グロ注意'),
+      ];
+      expect(guroMaskedResNumbers(res), {1, 2, 3, 4});
+    });
+
+    test('グロが無ければ空', () {
+      expect(guroMaskedResNumbers([post(1, 'a'), post(2, '>>1 いいね')]), isEmpty);
+    });
+  });
 }

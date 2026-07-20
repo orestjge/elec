@@ -52,6 +52,15 @@ flutter run      # macOS デスクトップ / Android 実機・エミュレー�
 flutter test     # アプリのウィジェットテスト
 ```
 
+画像アップロードの既定 Imgur Client ID をローカルビルドに入れる場合は、
+`.env.example` を `.env` にコピーして値を入れ、`--dart-define-from-file` で渡します。
+
+```sh
+cp .env.example .env
+# .env の ELEC_DEFAULT_IMGUR_CLIENT_ID=... を編集
+flutter run --dart-define-from-file=.env
+```
+
 プロトコルと Shift_JIS 処理は `packages/edge_core` / `packages/edge_sjis` に分離しています。
 
 ```sh
@@ -60,3 +69,5 @@ flutter test     # アプリのウィジェットテスト
 ```
 
 `main` へマージすると GitHub Actions が署名済み APK を自動ビルドし、Releases に公開します。
+Release ビルドで既定 Imgur Client ID を入れる場合は、GitHub Secrets に
+`ELEC_DEFAULT_IMGUR_CLIENT_ID` を登録します。

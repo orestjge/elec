@@ -9,7 +9,7 @@ import '../net/http_fetcher.dart';
 import '../net/ng_store.dart';
 import '../net/read_history.dart';
 import 'new_thread_screen.dart';
-import 'ng_screen.dart';
+import 'settings_screen.dart';
 import 'thread_screen.dart';
 import 'thread_tile.dart';
 
@@ -281,9 +281,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
         .toList();
     final query = _search.text.trim().toLowerCase();
     if (query.isEmpty) return visible;
-    return visible
-        .where((t) => t.title.toLowerCase().contains(query))
-        .toList();
+    return visible.where((t) => t.title.toLowerCase().contains(query)).toList();
   }
 
   List<ThreadSummary> _withStoredThreads(
@@ -456,10 +454,10 @@ class _ThreadListScreenState extends State<ThreadListScreen>
     });
   }
 
-  void _openNgSettings() {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => NgScreen(store: NgStore.shared)),
-    );
+  void _openSettings() {
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => const SettingsScreen()));
   }
 
   /// スレを長押ししたときの操作シート。スレ主 NG・お気に入り・履歴削除。
@@ -711,9 +709,9 @@ class _ThreadListScreenState extends State<ThreadListScreen>
                   _FilterButton(filter: _filter, onPressed: _pickFilter),
                   _SortButton(sort: _sort, onPressed: _pickSort),
                   IconButton(
-                    icon: const Icon(Icons.block),
-                    tooltip: 'NG設定',
-                    onPressed: _openNgSettings,
+                    icon: const Icon(Icons.settings),
+                    tooltip: '設定',
+                    onPressed: _openSettings,
                   ),
                   const SizedBox(width: 4),
                 ],

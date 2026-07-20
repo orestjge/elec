@@ -49,3 +49,28 @@ List<Res> repliesTo(List<Res> res, int number) {
       .where((r) => referencedResNumbers(r.body).contains(number))
       .toList();
 }
+
+/// 本文に「グロ」注意の文字が含まれるか。dat 上のエスケープや `<br>` を跨いだ
+/// 表記も拾えるよう [htmlToText] で正規化してから素朴に部分一致で見る。
+/// これで「グロ」「グロい」「グロ注意」「グロ画像」等をまとめて拾える。
+bool _hasGuroMark(String body) => htmlToText(body).contains('グロ');
+
+/// 画像サムネイルにモザイクを掛けるべきレス番号の集合を返す。
+///
+/// 次のいずれかに当てはまるレスの番号を含める。
+/// - そのレスの本文自身に「グロ」の文字を含む（自己申告のグロ画像など）。
+/// - そのレスへ `>>N` で返信したいずれかのレスの本文に「グロ」の文字を含む
+///   （画像に対して他レスが「グロ」と付けた場合）。
+///
+/// 実際にモザイクを掛けるかは、対象レスが画像を含むかどうかも合わせて
+/// 表示層で判断する。
+Set<int> guroMaskedResNumbers(List<Res> res) {
+  final marked = <int>{};
+  for (final r in res) {
+    if (!_hasGuroMark(r.body)) continue;
+    // グロと書いたレス自身と、そのレスが返信している番号の双方に印を付ける。
+    marked.add(r.number);
+    marked.addAll(referencedResNumbers(r.body));
+  }
+  return marked;
+}

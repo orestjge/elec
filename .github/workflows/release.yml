@@ -60,6 +60,14 @@ jobs:
           echo "name=${TAG#v}" >> "$GITHUB_OUTPUT"
           echo "次バージョン: $TAG (versionCode=${{ github.run_number }})"
 
+      - name: Prepare Dart defines
+        env:
+          ELEC_DEFAULT_IMGUR_CLIENT_ID: ${{ secrets.ELEC_DEFAULT_IMGUR_CLIENT_ID }}
+        run: |
+          cat > "$RUNNER_TEMP/dart_defines.env" <<EOF
+          ELEC_DEFAULT_IMGUR_CLIENT_ID=$ELEC_DEFAULT_IMGUR_CLIENT_ID
+          EOF
+
       - name: Prepare release signing
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -82,8 +90,10 @@ jobs:
       - name: Build signed APKs
         run: |
           flutter build apk --release --split-per-abi \
+            --dart-define-from-file="$RUNNER_TEMP/dart_defines.env" \
             --build-name="${{ steps.ver.outputs.name }}" --build-number="${{ github.run_number }}"
           flutter build apk --release \
+            --dart-define-from-file="$RUNNER_TEMP/dart_defines.env" \
             --build-name="${{ steps.ver.outputs.name }}" --build-number="${{ github.run_number }}"
 
       - name: Collect APKs
@@ -120,11 +130,20 @@ jobs:
 
       - run: flutter pub get
 
+      - name: Prepare Dart defines
+        env:
+          ELEC_DEFAULT_IMGUR_CLIENT_ID: ${{ secrets.ELEC_DEFAULT_IMGUR_CLIENT_ID }}
+        run: |
+          cat > "$RUNNER_TEMP/dart_defines.env" <<EOF
+          ELEC_DEFAULT_IMGUR_CLIENT_ID=$ELEC_DEFAULT_IMGUR_CLIENT_ID
+          EOF
+
       # AltStore はインストール時にユーザーの Apple ID で再署名するため、
       # CI 側は証明書なしの無署名ビルドで良い（有料 Developer アカウント不要）。
       - name: Build unsigned iOS
         run: |
           flutter build ios --release --no-codesign \
+            --dart-define-from-file="$RUNNER_TEMP/dart_defines.env" \
             --build-name="${{ needs.release.outputs.name }}" --build-number="${{ github.run_number }}"
 
       # Runner.app を Payload/ に入れて zip すると IPA になる。

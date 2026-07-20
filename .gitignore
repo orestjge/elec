@@ -50,6 +50,9 @@ app.*.map.json
 # 設計メモは当面ローカルのみ（公開しない）
 /docs/
 
+# ローカルの Dart define / API キー
+.env
+
 # Android リリース署名（絶対にコミットしない）
 android/key.properties
 **/*.jks

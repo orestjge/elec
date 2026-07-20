@@ -3,12 +3,15 @@ import 'dart:async';
 import 'package:edge_core/edge_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 import '../net/auth_launcher.dart';
 import '../net/auth_store.dart';
 import '../net/endpoints.dart';
+import '../net/image_upload_settings.dart';
 import '../net/http_fetcher.dart';
+import '../net/imgur_uploader.dart';
 import '../net/ng_store.dart';
 import '../net/read_history.dart';
 import 'ng_screen.dart';
@@ -31,6 +34,10 @@ class ThreadScreen extends StatefulWidget {
     this.authLauncher = const SystemBrowserLauncher(),
     this.readHistory,
     this.ngStore,
+    this.imagePicker,
+    this.imgurUploader,
+    this.imageUploadSettings,
+    this.pickAndUploadImage,
     this.initialStatusLabel,
     this.initialResCount = 0,
     this.creatorMetadent,
@@ -66,6 +73,18 @@ class ThreadScreen extends StatefulWidget {
   /// 認証ページの開き方。既定はシステムブラウザ。
   final AuthLauncher authLauncher;
 
+  /// 端末画像の選択。テストでは差し替え可能。
+  final ImagePicker? imagePicker;
+
+  /// Imgur アップロード実装。未指定なら `IMGUR_CLIENT_ID` から作る。
+  final ImgurUploader? imgurUploader;
+
+  /// 画像アップロード先の利用者設定。
+  final ImageUploadSettings? imageUploadSettings;
+
+  /// 画像選択からアップロードまでを丸ごと差し替えるためのフック。
+  final Future<Uri?> Function()? pickAndUploadImage;
+
   @override
   State<ThreadScreen> createState() => _ThreadScreenState();
 }
@@ -78,6 +97,9 @@ class _ThreadScreenState extends State<ThreadScreen>
   late final AuthStore _authStore;
   late final ReadHistory _history;
   late final NgStore _ng;
+  late final ImagePicker _imagePicker;
+  late final ImgurUploader _imgurUploader;
+  late final ImageUploadSettings _imageUploadSettings;
 
   /// NG 判定されたが、タップで一時的に表示したレス番号。
   final _revealedNg = <int>{};
@@ -136,6 +158,14 @@ class _ThreadScreenState extends State<ThreadScreen>
     _authStore = widget.authStore ?? AuthStore.shared;
     _history = widget.readHistory ?? ReadHistory.shared;
     _ng = widget.ngStore ?? NgStore.shared;
+    _imagePicker = widget.imagePicker ?? ImagePicker();
+    _imgurUploader =
+        widget.imgurUploader ??
+        const ImgurUploader(
+          clientId: String.fromEnvironment('IMGUR_CLIENT_ID'),
+        );
+    _imageUploadSettings =
+        widget.imageUploadSettings ?? ImageUploadSettings.shared;
     _ng.addListener(_onNgChanged);
     _positions.itemPositions.addListener(_onPositions);
     WidgetsBinding.instance.addObserver(this);
@@ -514,6 +544,9 @@ class _ThreadScreenState extends State<ThreadScreen>
                     onTapId: null,
                     onTapUrl: _openUrl,
                     isOwn: _history.isOwnPost(widget.threadKey, res.number),
+                    blurImages: guroMaskedResNumbers(
+                      _state.res,
+                    ).contains(res.number),
                   ),
                 ),
               ),
@@ -617,6 +650,7 @@ class _ThreadScreenState extends State<ThreadScreen>
     final idCounts = _idCounts(_state.res);
     final idOrdinals = _idOrdinals(_state.res);
     final replyCountByNumber = replyCounts(_state.res);
+    final guroMasked = guroMaskedResNumbers(_state.res);
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -719,6 +753,7 @@ class _ThreadScreenState extends State<ThreadScreen>
                       onReply: _reply,
                       onLongPress: () => _showResActions(post),
                       isOwn: _history.isOwnPost(widget.threadKey, post.number),
+                      blurImages: guroMasked.contains(post.number),
                     );
                   },
                 ),
@@ -752,6 +787,7 @@ class _ThreadScreenState extends State<ThreadScreen>
     final idCounts = _idCounts(res);
     final idOrdinals = _idOrdinals(res);
     final replyCountByNumber = replyCounts(res);
+    final guroMasked = guroMaskedResNumbers(res);
     final title = centers.length == 1
         ? '会話 #${centers.single}'
         : '会話 #${centers.first}-${centers.last}';
@@ -775,6 +811,7 @@ class _ThreadScreenState extends State<ThreadScreen>
           idCounts: idCounts,
           idOrdinals: idOrdinals,
           replyCountByNumber: replyCountByNumber,
+          guroMasked: guroMasked,
           onTapId: _showIdPosts,
           onTapRes: (_, target) {
             Navigator.pop(context);
@@ -790,6 +827,7 @@ class _ThreadScreenState extends State<ThreadScreen>
           },
           onTapUrl: _openUrl,
           onSend: _submit,
+          onPickAndUploadImage: _pickAndUploadImage,
           onShowActions: _showResActions,
           isOwnPost: (n) => _history.isOwnPost(widget.threadKey, n),
           ng: _ng,
@@ -1068,6 +1106,57 @@ class _ThreadScreenState extends State<ThreadScreen>
 
   // ---- 書き込み ----
 
+  static const _bundledImgurClientId = String.fromEnvironment(
+    'ELEC_DEFAULT_IMGUR_CLIENT_ID',
+  );
+
+  Future<Uri?> _pickAndUploadImage() async {
+    final injected = widget.pickAndUploadImage;
+    if (injected != null) return injected();
+    final uploader = _imageUploader();
+    if (!uploader.configured) {
+      _showSnack(_imageUploaderMissingMessage());
+      return null;
+    }
+    final image = await _imagePicker.pickImage(source: ImageSource.gallery);
+    if (image == null) return null;
+
+    _showSnack('画像をアップロード中...');
+    try {
+      final url = await uploader.upload(image);
+      if (mounted) _showSnack('画像URLを挿入しました');
+      return url;
+    } on ImgurUploadException catch (e) {
+      if (mounted) _showSnack(e.message);
+      return null;
+    } catch (e) {
+      if (mounted) _showSnack('画像アップロードに失敗しました: $e');
+      return null;
+    }
+  }
+
+  ImageUploader _imageUploader() {
+    final settings = _imageUploadSettings.snapshot;
+    return switch (settings.provider) {
+      ImageUploadProvider.defaultImgur =>
+        _bundledImgurClientId.isNotEmpty
+            ? const ImgurUploader(clientId: _bundledImgurClientId)
+            : _imgurUploader,
+      ImageUploadProvider.imgur => ImgurUploader(
+        clientId: settings.imgurClientId,
+      ),
+      ImageUploadProvider.imgbb => ImgBbUploader(apiKey: settings.imgbbApiKey),
+    };
+  }
+
+  String _imageUploaderMissingMessage() {
+    return switch (_imageUploadSettings.snapshot.provider) {
+      ImageUploadProvider.defaultImgur => '既定の Imgur Client ID が設定されていません',
+      ImageUploadProvider.imgur => 'Imgur Client ID が設定されていません',
+      ImageUploadProvider.imgbb => 'ImgBB API Key が設定されていません',
+    };
+  }
+
   /// 1 回だけ POST し、トークンを更新して結果を返す（UI 副作用なし）。
   Future<BbsCgiResult> _postOnce(String text) async {
     final fetcher = _fetcher;
@@ -1185,6 +1274,7 @@ class _ThreadScreenState extends State<ThreadScreen>
               controller: _composer,
               focusNode: _composerFocus,
               onSend: _submit,
+              onPickAndUploadImage: _pickAndUploadImage,
               enabled: !_isStopped,
             ),
           ],
@@ -1205,6 +1295,7 @@ class _ThreadScreenState extends State<ThreadScreen>
     final idCounts = _idCounts(res);
     final idOrdinals = _idOrdinals(res);
     final replies = replyCounts(res);
+    final guroMasked = guroMaskedResNumbers(res);
     // 「新着」の境界（前回位置）。0 か総数以上なら新着ライン無し。
     final hasNewArrival = _openCount > 0 && _openCount < res.length;
 
@@ -1265,6 +1356,7 @@ class _ThreadScreenState extends State<ThreadScreen>
                           ),
                       onLongPress: () => _showResActions(item),
                       isOwn: _history.isOwnPost(widget.threadKey, item.number),
+                      blurImages: guroMasked.contains(item.number),
                     ),
                   const Divider(height: 1),
                 ],
@@ -1339,8 +1431,7 @@ class _FastScrollerState extends State<_FastScroller> {
     return (topIndex / (widget.itemCount - 1)).clamp(0.0, 1.0);
   }
 
-  int _indexFor(double fraction) =>
-      (fraction * (widget.itemCount - 1)).round();
+  int _indexFor(double fraction) => (fraction * (widget.itemCount - 1)).round();
 
   /// トラック内のローカル Y から位置を決め、その行へジャンプする。つまみ中心が
   /// 指の位置に来るよう `_handleHeight / 2` を引く。
@@ -1593,12 +1684,14 @@ class _ConversationSheet extends StatefulWidget {
     required this.idCounts,
     required this.idOrdinals,
     required this.replyCountByNumber,
+    required this.guroMasked,
     required this.onTapId,
     required this.onTapRes,
     required this.onTapResRange,
     required this.onTapReplies,
     required this.onTapUrl,
     required this.onSend,
+    required this.onPickAndUploadImage,
     required this.onShowActions,
     required this.isOwnPost,
     required this.ng,
@@ -1613,6 +1706,9 @@ class _ConversationSheet extends StatefulWidget {
   final Map<String, int> idCounts;
   final Map<int, int> idOrdinals;
   final Map<int, int> replyCountByNumber;
+
+  /// 「グロ」注意が付き、画像サムネイルへモザイクを掛けるレス番号の集合。
+  final Set<int> guroMasked;
   final ValueChanged<String> onTapId;
   final void Function(int source, int target) onTapRes;
   final void Function(int source, List<int> targets) onTapResRange;
@@ -1621,6 +1717,9 @@ class _ConversationSheet extends StatefulWidget {
 
   /// 会話シート内の入力欄から直接送信する投稿関数（受理で true）。
   final Future<bool> Function(String) onSend;
+
+  /// 画像選択とアップロード。成功時はレス本文へ挿入する URL を返す。
+  final Future<Uri?> Function() onPickAndUploadImage;
 
   /// レス長押しでアクションメニューを出す。
   final ValueChanged<Res> onShowActions;
@@ -1761,6 +1860,9 @@ class _ConversationSheetState extends State<_ConversationSheet> {
                                 onLongPress: () =>
                                     widget.onShowActions(entry.res),
                                 isOwn: widget.isOwnPost(entry.res.number),
+                                blurImages: widget.guroMasked.contains(
+                                  entry.res.number,
+                                ),
                               ),
                       ),
                     );
@@ -1785,6 +1887,7 @@ class _ConversationSheetState extends State<_ConversationSheet> {
                   controller: _controller,
                   focusNode: _focus,
                   onSend: _handleSend,
+                  onPickAndUploadImage: widget.onPickAndUploadImage,
                   enabled: widget.enabled,
                 ),
               ],
@@ -1905,6 +2008,7 @@ class _Composer extends StatefulWidget {
     required this.controller,
     required this.focusNode,
     required this.onSend,
+    required this.onPickAndUploadImage,
     required this.enabled,
   });
 
@@ -1913,6 +2017,7 @@ class _Composer extends StatefulWidget {
 
   /// 送信。受理されたら true を返す（入力欄をクリアする）。
   final Future<bool> Function(String) onSend;
+  final Future<Uri?> Function() onPickAndUploadImage;
   final bool enabled;
 
   @override
@@ -1921,10 +2026,13 @@ class _Composer extends StatefulWidget {
 
 class _ComposerState extends State<_Composer> {
   bool _sending = false;
+  bool _uploadingImage = false;
 
   Future<void> _send() async {
     final text = widget.controller.text;
-    if (!widget.enabled || text.trim().isEmpty || _sending) return;
+    if (!widget.enabled || text.trim().isEmpty || _sending || _uploadingImage) {
+      return;
+    }
     setState(() => _sending = true);
     try {
       final accepted = await widget.onSend(text);
@@ -1932,6 +2040,35 @@ class _ComposerState extends State<_Composer> {
     } finally {
       if (mounted) setState(() => _sending = false);
     }
+  }
+
+  Future<void> _attachImage() async {
+    if (!widget.enabled || _sending || _uploadingImage) return;
+    setState(() => _uploadingImage = true);
+    try {
+      final url = await widget.onPickAndUploadImage();
+      if (url != null) _insertUrl(url.toString());
+    } finally {
+      if (mounted) setState(() => _uploadingImage = false);
+    }
+  }
+
+  void _insertUrl(String url) {
+    final value = widget.controller.value;
+    final text = value.text;
+    final selection = value.selection;
+    final start = selection.isValid ? selection.start : text.length;
+    final end = selection.isValid ? selection.end : text.length;
+    final before = start > 0 ? text[start - 1] : '';
+    final after = end < text.length ? text[end] : '';
+    final prefix = before.isEmpty || before == '\n' ? '' : '\n';
+    final suffix = after.isEmpty || after == '\n' ? '' : '\n';
+    final insertion = '$prefix$url$suffix';
+    widget.controller.value = TextEditingValue(
+      text: text.replaceRange(start, end, insertion),
+      selection: TextSelection.collapsed(offset: start + insertion.length),
+    );
+    widget.focusNode.requestFocus();
   }
 
   @override
@@ -1979,6 +2116,25 @@ class _ComposerState extends State<_Composer> {
               ),
             ),
             const SizedBox(width: 8),
+            SizedBox(
+              width: 44,
+              height: 44,
+              child: IconButton(
+                padding: EdgeInsets.zero,
+                tooltip: '画像を追加',
+                onPressed: !widget.enabled || _sending || _uploadingImage
+                    ? null
+                    : _attachImage,
+                icon: _uploadingImage
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.image_outlined, size: 22),
+              ),
+            ),
+            const SizedBox(width: 4),
             // 送信ボタンは 1 行時の入力欄と同じ高さ（44）に固定。複数行に伸びた
             // ら crossAxisAlignment.end で下端に留まる。
             SizedBox(
