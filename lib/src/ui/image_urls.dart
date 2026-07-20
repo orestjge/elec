@@ -1,7 +1,9 @@
 /// レス本文から画像/動画 URL を抜き出す。
 ///
-/// 拡張子が画像のものだけを対象にする（`.jpg/.jpeg/.png/.gif/.webp/.bmp`、
-/// クエリ付きも可）。ページ URL（imgur のページ等、拡張子なし）は対象外。
+/// 基本は拡張子で判定する（`.jpg/.jpeg/.png/.gif/.webp/.bmp`、クエリ付きも可）。
+/// ページ URL（imgur のページ等、拡張子なし）は対象外。ただし拡張子を持たず
+/// クエリで種別が決まる例外（`pbs.twimg.com/media/...?format=jpg` 等）は
+/// 個別に対象へ含める。
 library;
 
 import 'link_urls.dart';
@@ -12,25 +14,45 @@ final _imageExtRe = RegExp(
 );
 final _videoExtRe = RegExp(r'\.(mp4|webm|mov|m4v)$', caseSensitive: false);
 
+/// pbs.twimg.com の画像 URL は拡張子を持たず、`format=jpg` 等のクエリで
+/// 種別が決まる（例: `https://pbs.twimg.com/media/XXXX?format=jpg&name=large`）。
+final _twimgFormatRe = RegExp(
+  r'^(jpe?g|png|gif|webp)$',
+  caseSensitive: false,
+);
+
 /// [text] 中の画像 URL を出現順・重複除去で返す。
 List<Uri> imageUrlsIn(String text) {
-  return _mediaUrlsIn(text, _imageExtRe);
+  return _mediaUrlsIn(text, _isImageUri);
 }
 
 /// [text] 中の動画 URL を出現順・重複除去で返す。
 List<Uri> videoUrlsIn(String text) {
-  return _mediaUrlsIn(text, _videoExtRe);
+  return _mediaUrlsIn(text, (uri) => _videoExtRe.hasMatch(uri.path));
 }
 
-List<Uri> _mediaUrlsIn(String text, RegExp extRe) {
+bool _isImageUri(Uri uri) {
+  // パス末尾（クエリ・フラグメントを除く）で拡張子判定。
+  if (_imageExtRe.hasMatch(uri.path)) return true;
+  return _isTwimgImageUri(uri);
+}
+
+/// `pbs.twimg.com/media/...?format=jpg` 形式の拡張子なし画像 URL か。
+bool _isTwimgImageUri(Uri uri) {
+  if (uri.host != 'pbs.twimg.com') return false;
+  if (!uri.path.startsWith('/media/')) return false;
+  final format = uri.queryParameters['format'];
+  return format != null && _twimgFormatRe.hasMatch(format);
+}
+
+List<Uri> _mediaUrlsIn(String text, bool Function(Uri) matches) {
   final seen = <String>{};
   final result = <Uri>[];
   for (final m in linkUrlRe.allMatches(text)) {
     final raw = m.group(0)!;
     final uri = normalizedLinkUri(raw);
     if (uri == null) continue;
-    // パス末尾（クエリ・フラグメントを除く）で拡張子判定。
-    if (!extRe.hasMatch(uri.path)) continue;
+    if (!matches(uri)) continue;
     if (seen.add(uri.toString())) result.add(uri);
   }
   return result;

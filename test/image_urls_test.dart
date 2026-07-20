@@ -50,6 +50,25 @@ void main() {
     ]);
   });
 
+  test('pbs.twimg.com/media は format クエリで画像展開する', () {
+    // 拡張子は無いが format=jpg なので画像扱い。URL 全体（クエリ含む）を返す。
+    expect(
+      urls('https://pbs.twimg.com/media/HNo8iF5bsAAURlS?format=jpg&name=4096x4096'),
+      ['https://pbs.twimg.com/media/HNo8iF5bsAAURlS?format=jpg&name=4096x4096'],
+    );
+    // png も対象。
+    expect(urls('https://pbs.twimg.com/media/ABC?format=png&name=large'), [
+      'https://pbs.twimg.com/media/ABC?format=png&name=large',
+    ]);
+  });
+
+  test('twimg でも format が無い/画像でなければ無視する', () {
+    expect(urls('https://pbs.twimg.com/media/ABC'), isEmpty);
+    expect(urls('https://pbs.twimg.com/media/ABC?format=mp4'), isEmpty);
+    // /media/ 以外のパスは対象外。
+    expect(urls('https://pbs.twimg.com/profile/ABC?format=jpg'), isEmpty);
+  });
+
   test('URL が無ければ空', () {
     expect(urls('ただの本文です'), isEmpty);
   });
