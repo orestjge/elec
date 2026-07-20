@@ -3,6 +3,11 @@ import 'package:flutter/material.dart';
 
 import 'link_urls.dart';
 
+/// 表示用に本文の前後空白を整える。AA はインデントや上下の余白が絵の一部に
+/// なるためそのまま残し、それ以外の普通のレスだけ [String.trim] で詰める。
+String trimUnlessAsciiArt(String text) =>
+    looksLikeAsciiArt(text) ? text : text.trim();
+
 /// AA（アスキーアート）らしい本文だけ、MS Pゴシック互換寄りの同梱フォントで
 /// 表示する。単発の顔文字まで巻き込まないよう、AA 記号を含む行数を見る。
 bool looksLikeAsciiArt(String text) {

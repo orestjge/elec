@@ -22,6 +22,22 @@ void main() {
     );
   });
 
+  test('普通のレスは前後の空白・空行を詰める', () {
+    expect(trimUnlessAsciiArt('  前後に空白  '), '前後に空白');
+    expect(trimUnlessAsciiArt('\n\n本文\n\n'), '本文');
+    // 内部の改行は保持する。
+    expect(trimUnlessAsciiArt('\n1行目\n2行目\n'), '1行目\n2行目');
+  });
+
+  test('AA はインデント・上下の余白をそのまま残す', () {
+    const aa = '''
+　　 ∧＿∧
+　　（　´∀｀）
+　　（　　　　）
+''';
+    expect(trimUnlessAsciiArt(aa), aa);
+  });
+
   testWidgets('AA 本文は Monapo で横スクロール表示する', (tester) async {
     const aa = '''
 　　 ∧＿∧

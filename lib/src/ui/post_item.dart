@@ -84,7 +84,9 @@ class PostItem extends StatelessWidget {
     }
 
     final name = htmlToText(res.name).trim();
-    final body = htmlToText(res.body);
+    // AA はインデントや上下の余白が絵の一部になるのでそのまま残し、普通のレスは
+    // 前後の空白・空行を落として詰める。
+    final body = trimUnlessAsciiArt(htmlToText(res.body));
     final images = imageUrlsIn(body);
     final videos = videoUrlsIn(body);
 
