@@ -192,6 +192,39 @@ void main() {
     expect(find.text('自分'), findsOneWidget);
   });
 
+  testWidgets('タイトルにエンティティ化される文字があっても自分のスレと判定する', (tester) async {
+    final history = ReadHistory(MemoryReadHistoryStorage());
+    // subject 上ではタイトルがエンティティ化される（A&B<C → A&amp;B&lt;C）。
+    final fetcher = QueueFetcher([
+      subjectOk('1.dat<>既存スレ (10)\n', 'LM1'),
+      subjectOk('2.dat<>A&amp;B&lt;C (1)\n1.dat<>既存スレ (10)\n', 'LM2'),
+    ]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadListScreen(
+          fetcher: fetcher,
+          pollInterval: const Duration(seconds: 15),
+          readHistory: history,
+          authStore: AuthStore(MemoryTokenStorage()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('スレを立てる'));
+    await tester.pumpAndSettle();
+    // 入力は生の文字列。
+    await tester.enterText(find.byType(TextField).at(0), 'A&B<C');
+    await tester.enterText(find.byType(TextField).at(1), '本文');
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, '立てる'));
+    await tester.pumpAndSettle();
+
+    expect(history.isOwnThread('2'), isTrue);
+    expect(find.text('自分'), findsOneWidget);
+  });
+
   testWidgets('表示フィルタで履歴とお気に入りを切り替える', (tester) async {
     final history = ReadHistory(MemoryReadHistoryStorage());
     await history.markRead('1', 10);

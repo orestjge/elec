@@ -688,8 +688,11 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   ) async {
     final state = _state;
     if (state == null) return;
+    // subject 上のタイトルは HTML エンティティ化されている（`&`→`&amp;`、絵文字は
+    // `&#…;` 等）。入力タイトルは生なので、デコードしてから突き合わせる。
     final candidates = state.threads.where(
-      (t) => !beforeKeys.contains(t.key) && t.title == title,
+      (t) =>
+          !beforeKeys.contains(t.key) && decodeEntities(t.title).trim() == title,
     );
     if (candidates.isEmpty) return;
     final created = candidates.reduce(

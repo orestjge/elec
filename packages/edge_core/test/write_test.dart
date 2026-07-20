@@ -132,7 +132,28 @@ void main() {
 
   group('parseBbsCgiResult', () {
     test('成功', () {
-      expect(parseBbsCgiResult(200, successBody()), isA<PostAccepted>());
+      final r = parseBbsCgiResult(200, successBody());
+      expect(r, isA<PostAccepted>());
+      expect((r as PostAccepted).resNum, isNull);
+    });
+
+    test('成功: x-resnum があればレス番号を載せる', () {
+      final r = parseBbsCgiResult(
+        200,
+        successBody(),
+        headers: const {'x-resnum': '42'},
+      );
+      expect(r, isA<PostAccepted>());
+      expect((r as PostAccepted).resNum, 42);
+    });
+
+    test('成功: x-resnum が数値でなければ null', () {
+      final r = parseBbsCgiResult(
+        200,
+        successBody(),
+        headers: const {'x-resnum': 'nan'},
+      );
+      expect((r as PostAccepted).resNum, isNull);
     });
 
     test('未認証: コードと URL を取り出す', () {
@@ -200,6 +221,25 @@ void main() {
       expect(poster.headers!['Cookie'], 'edge-token=E1; tinker-token=T1');
       expect(result.tokens.edgeToken, 'E1');
       expect(result.tokens.tinkerToken, 'updated.jwt'); // 更新された
+    });
+
+    test('成功応答の x-resnum ヘッダをレス番号として返す', () async {
+      final poster = FakePoster(
+        FetchResponse(
+          statusCode: 200,
+          bodyBytes: successBody(),
+          headers: const {'x-resnum': '7'},
+        ),
+      );
+      final result = await BbsWriter(poster).post(
+        bbsCgi: bbsCgi,
+        board: 'liveedge',
+        threadKey: '123',
+        message: 'やあ',
+      );
+
+      expect(result.outcome, isA<PostAccepted>());
+      expect((result.outcome as PostAccepted).resNum, 7);
     });
   });
 }

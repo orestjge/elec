@@ -94,7 +94,7 @@ class _NewThreadScreenState extends State<NewThreadScreen> {
         postOnce: _postOnce,
       );
       if (!mounted) return;
-      if (accepted) {
+      if (accepted != null) {
         final title = _title.text.trim();
         ScaffoldMessenger.of(
           context,
