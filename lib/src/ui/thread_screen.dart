@@ -563,6 +563,8 @@ class _ThreadScreenState extends State<ThreadScreen>
     if (mounted) _showSnack(message);
   }
 
+  Uri get _threadUrl => widget.endpoints.thread(widget.threadKey);
+
   /// このレスの全体（番号・名前・日時・ID・本文）を貼り付け向けに整形する。
   String _rawResText(Res res) {
     final name = htmlToText(res.name).trim();
@@ -999,6 +1001,16 @@ class _ThreadScreenState extends State<ThreadScreen>
                 const SizedBox(height: 12),
                 ListTile(
                   contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.link),
+                  title: const Text('スレURLをコピー'),
+                  subtitle: Text(_threadUrl.toString()),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _copyText(_threadUrl.toString(), 'スレURLをコピーしました');
+                  },
+                ),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
                   leading: Icon(
                     isFavorite ? Icons.star : Icons.star_border,
                     color: isFavorite
@@ -1293,7 +1305,10 @@ class _ThreadScreenState extends State<ThreadScreen>
 
     _showSnack('ファイルをアップロード中...');
     try {
-      final url = await _fileUploader().upload(bytes: bytes, filename: file.name);
+      final url = await _fileUploader().upload(
+        bytes: bytes,
+        filename: file.name,
+      );
       if (mounted) _showSnack('ファイルURLを挿入しました');
       return url;
     } on FileUploadException catch (e) {
@@ -2224,7 +2239,9 @@ class _ComposerState extends State<_Composer> {
   }
 
   Future<void> _attachImage() async {
-    if (!widget.enabled || _sending || _uploadingImage || _uploadingFile) return;
+    if (!widget.enabled || _sending || _uploadingImage || _uploadingFile) {
+      return;
+    }
     setState(() => _uploadingImage = true);
     try {
       final url = await widget.onPickAndUploadImage();
@@ -2235,7 +2252,9 @@ class _ComposerState extends State<_Composer> {
   }
 
   Future<void> _attachFile() async {
-    if (!widget.enabled || _sending || _uploadingImage || _uploadingFile) return;
+    if (!widget.enabled || _sending || _uploadingImage || _uploadingFile) {
+      return;
+    }
     setState(() => _uploadingFile = true);
     try {
       final url = await widget.onPickAndUploadFile();
@@ -2390,7 +2409,11 @@ class _NotFoundView extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.history_toggle_off, size: 48, color: scheme.onSurfaceVariant),
+            Icon(
+              Icons.history_toggle_off,
+              size: 48,
+              color: scheme.onSurfaceVariant,
+            ),
             const SizedBox(height: 16),
             const Text('スレッドが見つかりません'),
             const SizedBox(height: 6),

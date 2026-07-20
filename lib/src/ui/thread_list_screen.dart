@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:edge_core/edge_core.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../net/auth_store.dart';
 import '../net/endpoints.dart';
@@ -496,6 +497,73 @@ class _ThreadListScreenState extends State<ThreadListScreen>
     ).push(MaterialPageRoute<void>(builder: (_) => const SettingsScreen()));
   }
 
+  Future<void> _copyThreadUrl(ThreadSummary thread) async {
+    await Clipboard.setData(
+      ClipboardData(text: widget.endpoints.thread(thread.key).toString()),
+    );
+    if (mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('スレURLをコピーしました')));
+    }
+  }
+
+  Future<void> _openThreadFromUrl() async {
+    final clipboard = await Clipboard.getData(Clipboard.kTextPlain);
+    if (!mounted) return;
+    final initial = clipboard?.text?.trim() ?? '';
+    final controller = TextEditingController(
+      text: _threadRefFromText(initial) == null ? '' : initial,
+    );
+    final url = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('URLからスレを開く'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          keyboardType: TextInputType.url,
+          textInputAction: TextInputAction.done,
+          decoration: const InputDecoration(
+            hintText: 'https://bbs.eddibb.cc/liveedge/...',
+          ),
+          onSubmitted: (value) => Navigator.pop(dialogContext, value),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('キャンセル'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, controller.text),
+            child: const Text('開く'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    final ref = _threadRefFromText(url);
+    if (ref == null) {
+      if (url != null && url.trim().isNotEmpty && mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('この板のスレURLではありません')));
+      }
+      return;
+    }
+    await _openThreadRef(ref);
+  }
+
+  ThreadRef? _threadRefFromText(String? text) {
+    final raw = text?.trim();
+    if (raw == null || raw.isEmpty) return null;
+    final uri = Uri.tryParse(raw);
+    if (uri == null || uri.host != widget.endpoints.host) return null;
+    final ref = parseThreadUrl(uri);
+    if (ref == null || ref.board != widget.endpoints.boardKey) return null;
+    return ref;
+  }
+
   /// スレを長押ししたときの操作シート。スレ主 NG・お気に入り・履歴削除。
   Future<void> _showThreadActions(ThreadSummary thread) async {
     final metadent = thread.metadent;
@@ -519,6 +587,11 @@ class _ThreadListScreenState extends State<ThreadListScreen>
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(sheetContext).textTheme.titleSmall,
                 ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.link),
+                title: const Text('スレURLをコピー'),
+                onTap: () => Navigator.pop(sheetContext, 'copyUrl'),
               ),
               ListTile(
                 leading: Icon(
@@ -553,7 +626,9 @@ class _ThreadListScreenState extends State<ThreadListScreen>
         );
       },
     );
-    if (action == 'fav') {
+    if (action == 'copyUrl') {
+      await _copyThreadUrl(thread);
+    } else if (action == 'fav') {
       await _history.toggleFavorite(thread.key);
       if (!mounted) return;
       setState(_reorder);
@@ -593,6 +668,32 @@ class _ThreadListScreenState extends State<ThreadListScreen>
     // 戻ってきたら既読状態が変わっているので再描画し、並び順も貼り直す
     // （既読優先ソートなどに反映）。
     if (mounted) setState(_reorder);
+  }
+
+  Future<void> _openThreadRef(ThreadRef ref) async {
+    final thread = _threadByKey(ref.threadKey);
+    await _openThread(
+      thread ??
+          ThreadSummary(
+            key: ref.threadKey,
+            title: '',
+            resCount: 0,
+            capName: null,
+          ),
+    );
+  }
+
+  ThreadSummary? _threadByKey(String key) {
+    final state = _state;
+    if (state != null) {
+      for (final thread in state.threads) {
+        if (thread.key == key) return thread;
+      }
+    }
+    for (final thread in _history.storedThreads) {
+      if (thread.key == key) return thread.toSummary();
+    }
+    return null;
   }
 
   PageRoute<void> _threadRoute(ThreadSummary thread) {
@@ -692,7 +793,8 @@ class _ThreadListScreenState extends State<ThreadListScreen>
     // `&#…;` 等）。入力タイトルは生なので、デコードしてから突き合わせる。
     final candidates = state.threads.where(
       (t) =>
-          !beforeKeys.contains(t.key) && decodeEntities(t.title).trim() == title,
+          !beforeKeys.contains(t.key) &&
+          decodeEntities(t.title).trim() == title,
     );
     if (candidates.isEmpty) return;
     final created = candidates.reduce(
@@ -745,6 +847,11 @@ class _ThreadListScreenState extends State<ThreadListScreen>
                 actions: [
                   _PollingIndicator(active: _polling),
                   _SearchButton(active: _searchOpen, onPressed: _toggleSearch),
+                  IconButton(
+                    icon: const Icon(Icons.link),
+                    tooltip: 'URLからスレを開く',
+                    onPressed: _openThreadFromUrl,
+                  ),
                   _FilterButton(filter: _filter, onPressed: _pickFilter),
                   _SortButton(sort: _sort, onPressed: _pickSort),
                   IconButton(
