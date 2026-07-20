@@ -11,10 +11,16 @@ class DatState {
     required this.bytes,
     required this.res,
     required this.lastModified,
+    this.pastLog = false,
   });
 
   /// 初回取得前の空状態。
   static const empty = DatState(bytes: [], res: [], lastModified: null);
+
+  /// この dat が過去ログ（kako）から取れたか。現行 dat が 30x で過去ログへ
+  /// リダイレクトされた＝ dat落ち、を意味する。true なら書き込み不可・差分
+  /// ポーリング不要。
+  final bool pastLog;
 
   /// これまでに受信した dat の生バイト列（完全な行のみ。サーバの dat は
   /// 常に改行終端なので末尾が欠けることはない）。次回 Range 要求の基準になる。
@@ -63,8 +69,11 @@ enum DatFetchStatus {
   /// dat が書き換わっていた（あぼーん等）ため全再取得した。
   refetched,
 
-  /// スレッドが存在しない（404）。過去ログ送りの可能性。
+  /// スレッドが存在しない（404）。過去ログにも無い。
   notFound,
+
+  /// dat落ち。現行 dat が 30x で過去ログ（kako）へ飛び、そこから全取得した。
+  pastLog,
 }
 
 /// dat の差分取得を行う。純粋なロジックで、通信は [HttpFetcher] 越し。
@@ -120,9 +129,44 @@ class DatFetcher {
           status: DatFetchStatus.refetched,
         );
 
+      case final s when _isRedirect(s):
+        // 閲覧中に dat落ちした。過去ログ（kako）へ飛ばされたので辿る。
+        return _followRedirect(url, resp);
+
       default:
         throw HttpFetchException(resp.statusCode, url);
     }
+  }
+
+  static const _redirectStatuses = {301, 302, 303, 307, 308};
+
+  static bool _isRedirect(int status) => _redirectStatuses.contains(status);
+
+  /// 30x を辿って移動先（過去ログ dat）を全取得する。dat落ちなので [DatState.pastLog]
+  /// を立てる。移動先が 404 なら過去ログにも無い＝ notFound。
+  Future<DatFetchResult> _followRedirect(Uri from, FetchResponse resp) async {
+    final location = resp.header('location');
+    if (location == null || location.isEmpty) {
+      throw HttpFetchException(resp.statusCode, from);
+    }
+    final target = from.resolve(location);
+    final next = await http.get(target);
+    if (next.statusCode == 404) {
+      return DatFetchResult(
+        state: DatState.empty,
+        newRes: const [],
+        status: DatFetchStatus.notFound,
+      );
+    }
+    if (next.statusCode != 200) {
+      throw HttpFetchException(next.statusCode, target);
+    }
+    return _fromFullBody(
+      next,
+      lastModified: next.header('last-modified'),
+      status: DatFetchStatus.pastLog,
+      pastLog: true,
+    );
   }
 
   Future<DatFetchResult> _applyPartial(
@@ -186,6 +230,10 @@ class DatFetcher {
         status: DatFetchStatus.notFound,
       );
     }
+    if (_isRedirect(resp.statusCode)) {
+      // dat落ち → 過去ログ（kako）へリダイレクト。辿って全取得する。
+      return _followRedirect(url, resp);
+    }
     if (resp.statusCode != 200) {
       throw HttpFetchException(resp.statusCode, url);
     }
@@ -200,6 +248,7 @@ class DatFetcher {
     FetchResponse resp, {
     required String? lastModified,
     required DatFetchStatus status,
+    bool pastLog = false,
   }) {
     final res = parseDat(resp.bodyBytes);
     return DatFetchResult(
@@ -207,6 +256,7 @@ class DatFetcher {
         bytes: resp.bodyBytes,
         res: res,
         lastModified: lastModified,
+        pastLog: pastLog,
       ),
       newRes: res,
       status: status,

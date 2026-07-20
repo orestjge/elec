@@ -11,6 +11,7 @@ class FakeFetcher implements HttpFetcher {
   FakeFetcher(this._responses);
   final List<FetchResponse> _responses;
   final List<Map<String, String>> requests = [];
+  final List<Uri> urls = [];
   int _i = 0;
 
   @override
@@ -19,6 +20,7 @@ class FakeFetcher implements HttpFetcher {
     Map<String, String> headers = const {},
   }) async {
     requests.add(headers);
+    urls.add(url);
     return _responses[_i++];
   }
 }
@@ -33,6 +35,12 @@ FetchResponse partial(List<int> body, {String? lastModified}) => FetchResponse(
   statusCode: 206,
   bodyBytes: body,
   headers: {if (lastModified != null) 'last-modified': lastModified},
+);
+
+FetchResponse redirect(String location, {int status = 302}) => FetchResponse(
+  statusCode: status,
+  bodyBytes: const [],
+  headers: {'location': location},
 );
 
 void main() {
@@ -61,6 +69,40 @@ void main() {
       ]);
       final r = await DatFetcher(f).fetch(Uri.parse('http://x/dat'));
       expect(r.status, DatFetchStatus.notFound);
+    });
+
+    test('dat落ち: 302 で過去ログ(kako)へ辿って取得し pastLog を立てる', () async {
+      final f = FakeFetcher([
+        redirect('/liveedge/kako/1784/17845/1784559955.dat'),
+        ok([...res1, ...res2], lastModified: 'LM1'),
+      ]);
+      final r = await DatFetcher(f).fetch(
+        Uri.parse('https://bbs.eddibb.cc/liveedge/dat/1784559955.dat'),
+      );
+
+      expect(r.status, DatFetchStatus.pastLog);
+      expect(r.state.pastLog, isTrue);
+      expect(r.state.res, hasLength(2));
+      expect(r.state.res.first.threadTitle, 'スレタイ');
+      // 相対 Location を元 URL に対して解決して取りに行く。
+      expect(
+        f.urls.last,
+        Uri.parse(
+          'https://bbs.eddibb.cc/liveedge/kako/1784/17845/1784559955.dat',
+        ),
+      );
+    });
+
+    test('dat落ち: 過去ログも 404 なら notFound', () async {
+      final f = FakeFetcher([
+        redirect('/liveedge/kako/1700/17000/1700000000.dat'),
+        const FetchResponse(statusCode: 404, bodyBytes: []),
+      ]);
+      final r = await DatFetcher(f).fetch(
+        Uri.parse('https://bbs.eddibb.cc/liveedge/dat/1700000000.dat'),
+      );
+      expect(r.status, DatFetchStatus.notFound);
+      expect(r.state.pastLog, isFalse);
     });
   });
 

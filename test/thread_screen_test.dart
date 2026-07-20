@@ -42,6 +42,11 @@ FetchResponse ok(List<int> body) =>
     FetchResponse(statusCode: 200, bodyBytes: body, headers: const {});
 FetchResponse partial(List<int> body) =>
     FetchResponse(statusCode: 206, bodyBytes: body, headers: const {});
+FetchResponse redirect(String location) => FetchResponse(
+  statusCode: 302,
+  bodyBytes: const [],
+  headers: {'location': location},
+);
 
 void main() {
   final res1 = datLine(
@@ -534,6 +539,35 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('3レス ・ 完走'), findsOneWidget);
+  });
+
+  testWidgets('dat落ちは過去ログを辿って表示し、dat落ち表示・書き込み無効にする', (tester) async {
+    // 現行 dat が 302 で過去ログ(kako)へ飛び、そこから全文が返る。
+    final f = QueueFetcher([
+      redirect('/liveedge/kako/1762/17621/1762103691.dat'),
+      ok([...res1, ...res2]),
+    ]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    // 過去ログの本文が出る。
+    expect(find.text('最初のレス'), findsOneWidget);
+    // dat落ちラベル。
+    expect(find.text('2レス ・ dat落ち'), findsOneWidget);
+    // 書き込み欄は無効（停止扱い）。ヒントも停止中に変わる。
+    expect(find.widgetWithText(TextField, 'レスを書く'), findsNothing);
+    final field = tester.widget<TextField>(find.byType(TextField));
+    expect(field.enabled, isFalse);
+  });
+
+  testWidgets('dat も過去ログも無ければ「見つかりません」を出す', (tester) async {
+    final f = QueueFetcher([
+      const FetchResponse(statusCode: 404, bodyBytes: []),
+    ]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    expect(find.text('スレッドが見つかりません'), findsOneWidget);
   });
 
   testWidgets('自分のレスには自分ラベルを出す', (tester) async {

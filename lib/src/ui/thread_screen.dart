@@ -123,6 +123,9 @@ class _ThreadScreenState extends State<ThreadScreen>
   bool _loading = true;
   bool _polling = false;
 
+  /// dat も過去ログも見つからなかった（完全に消えた）スレか。
+  bool _notFound = false;
+
   /// スクロールで実際に見えた最大レス番号（＝どこまで読んだか）。可視性で
   /// 追跡する。これより後ろのレスが「未読」で、「最新へ」の件数の基準になる。
   int _furthestRead = 0;
@@ -153,6 +156,12 @@ class _ThreadScreenState extends State<ThreadScreen>
   static const Duration _postRefreshRetryDelay = Duration(milliseconds: 700);
 
   Uri get _url => widget.endpoints.dat(widget.threadKey);
+
+  /// 表示・履歴に使うスレタイトル。呼び出し側からタイトルを渡されていればそれを、
+  /// （スレリンクからの遷移など）空なら開いた dat の 1 レス目から補完する。
+  String get _effectiveTitle => widget.threadTitle.isNotEmpty
+      ? widget.threadTitle
+      : (_state.threadTitle ?? '');
 
   @override
   void initState() {
@@ -235,6 +244,8 @@ class _ThreadScreenState extends State<ThreadScreen>
   bool get _atBottom => _state.res.isEmpty || _atBottomNow;
 
   String? get _statusLabel {
+    // 過去ログ（dat落ち）は取得して初めて分かる。完走判定より優先して示す。
+    if (_state.pastLog) return 'dat落ち';
     final inherited = widget.initialStatusLabel;
     if (inherited != null) return inherited;
     if (_state.res.length >= 1000 ||
@@ -250,11 +261,36 @@ class _ThreadScreenState extends State<ThreadScreen>
     try {
       final r = await _dat.fetch(_url);
       if (!mounted) return;
+      if (r.status == DatFetchStatus.notFound && r.state.res.isEmpty) {
+        // dat も過去ログ（kako）も無い。スレが完全に消えている。
+        setState(() {
+          _notFound = true;
+          _loading = false;
+          _error = null;
+        });
+        return;
+      }
       final total = r.state.res.length;
+      // タイトルを呼び出し側指定 or dat の 1 レス目から確定させる。スレリンクから
+      // 開いた場合はここで初めてタイトルが分かるので、履歴にも入れ直す。
+      final title = widget.threadTitle.isNotEmpty
+          ? widget.threadTitle
+          : (r.state.threadTitle ?? '');
+      if (widget.threadTitle.isEmpty && title.isNotEmpty) {
+        await _history.markOpenedThread(
+          ThreadSummary(
+            key: widget.threadKey,
+            title: title,
+            resCount: total,
+            capName: null,
+          ),
+        );
+        if (!mounted) return;
+      }
       await _history.markLastViewedThread(
         ThreadSummary(
           key: widget.threadKey,
-          title: widget.threadTitle,
+          title: title,
           resCount: total,
           capName: null,
         ),
@@ -298,6 +334,8 @@ class _ThreadScreenState extends State<ThreadScreen>
   }
 
   Future<void> _poll({bool force = false}) async {
+    // dat落ち（過去ログ）は伸びないのでポーリングしない。
+    if (_state.pastLog || _notFound) return;
     if (_fetching || !mounted) return;
     _fetching = true;
     setState(() => _polling = true);
@@ -307,6 +345,11 @@ class _ThreadScreenState extends State<ThreadScreen>
       final previousResCount = _state.res.length;
       final r = await _dat.fetch(_url, prev: force ? DatState.empty : _state);
       if (!mounted) return;
+      // 閲覧中に dat落ちした（過去ログへ飛ばされた）。停止扱いへ切り替える。
+      if (r.state.pastLog && !_state.pastLog) {
+        setState(() => _state = r.state);
+        return;
+      }
       final newRes = _newResSince(r.state, previousResCount);
       if (newRes.isNotEmpty) {
         await _markPendingOwnPosts(newRes);
@@ -935,7 +978,7 @@ class _ThreadScreenState extends State<ThreadScreen>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 SelectableText(
-                  decodeEntities(widget.threadTitle),
+                  decodeEntities(_effectiveTitle),
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 const SizedBox(height: 12),
@@ -996,7 +1039,7 @@ class _ThreadScreenState extends State<ThreadScreen>
     await _history.rememberThread(
       ThreadSummary(
         key: widget.threadKey,
-        title: widget.threadTitle,
+        title: _effectiveTitle,
         resCount: _state.res.length,
         capName: null,
       ),
@@ -1011,8 +1054,63 @@ class _ThreadScreenState extends State<ThreadScreen>
   }
 
   Future<void> _openUrl(Uri url) async {
+    // 同じ板の別スレへのリンクはアプリ内で開く。それ以外（他板・他サイト）は
+    // これまで通りブラウザへ。
+    if (_openThreadLink(url)) return;
     final ok = await widget.authLauncher.open(url);
     if (!ok && mounted) _showSnack('リンクを開けませんでした');
+  }
+
+  /// [url] が自ホスト・自板のスレリンクなら、そのスレをアプリ内で開いて true。
+  /// 対象外なら false（呼び出し側でブラウザへ回す）。
+  bool _openThreadLink(Uri url) {
+    if (url.host != widget.endpoints.host) return false;
+    final ref = parseThreadUrl(url);
+    if (ref == null || ref.board != widget.endpoints.boardKey) return false;
+    if (ref.threadKey == widget.threadKey) {
+      // 今開いているスレ自身へのリンク。開き直さず、あれば先頭へ戻す程度に留める。
+      _showSnack('このスレです');
+      return true;
+    }
+    Navigator.of(context).push(_threadLinkRoute(ref.threadKey));
+    return true;
+  }
+
+  PageRoute<void> _threadLinkRoute(String threadKey) {
+    return PageRouteBuilder<void>(
+      pageBuilder: (context, animation, secondaryAnimation) => ThreadScreen(
+        threadKey: threadKey,
+        // タイトルは開くまで不明。dat の 1 レス目から補完する。
+        threadTitle: '',
+        fetcher: _fetcher,
+        endpoints: widget.endpoints,
+        pollInterval: widget.pollInterval,
+        authStore: _authStore,
+        authLauncher: widget.authLauncher,
+        readHistory: _history,
+        ngStore: _ng,
+        imagePicker: _imagePicker,
+        imgurUploader: _imgurUploader,
+        imageUploadSettings: _imageUploadSettings,
+        pickAndUploadImage: widget.pickAndUploadImage,
+      ),
+      transitionDuration: const Duration(milliseconds: 240),
+      reverseTransitionDuration: const Duration(milliseconds: 220),
+      transitionsBuilder: (context, animation, secondaryAnimation, child) {
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+          reverseCurve: Curves.easeInCubic,
+        );
+        return SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(1, 0),
+            end: Offset.zero,
+          ).animate(curved),
+          child: child,
+        );
+      },
+    );
   }
 
   void _handlePointerDown(PointerDownEvent event) {
@@ -1245,7 +1343,9 @@ class _ThreadScreenState extends State<ThreadScreen>
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  decodeEntities(widget.threadTitle),
+                  _effectiveTitle.isEmpty
+                      ? 'スレッド'
+                      : decodeEntities(_effectiveTitle),
                   maxLines: 2,
                   style: const TextStyle(
                     fontSize: 16,
@@ -1253,7 +1353,7 @@ class _ThreadScreenState extends State<ThreadScreen>
                     height: 1.22,
                   ),
                 ),
-                if (!_loading && _error == null)
+                if (!_loading && _error == null && !_notFound)
                   Text(
                     _statusLabel == null
                         ? '${_state.res.length}レス'
@@ -1299,6 +1399,9 @@ class _ThreadScreenState extends State<ThreadScreen>
   Widget _body() {
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
+    }
+    if (_notFound) {
+      return const _NotFoundView();
     }
     if (_state.isEmpty && _error != null) {
       return _ErrorView(error: _error!, onRetry: _refresh);
@@ -2166,6 +2269,35 @@ class _ComposerState extends State<_Composer> {
                       )
                     : const Icon(Icons.send, size: 20),
               ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// dat も過去ログ（kako）も見つからないスレに出す。エラーではなく「消えた」。
+class _NotFoundView extends StatelessWidget {
+  const _NotFoundView();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.history_toggle_off, size: 48, color: scheme.onSurfaceVariant),
+            const SizedBox(height: 16),
+            const Text('スレッドが見つかりません'),
+            const SizedBox(height: 6),
+            Text(
+              'dat落ち後、過去ログも残っていないようです。',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: scheme.onSurfaceVariant),
             ),
           ],
         ),
