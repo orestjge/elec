@@ -228,6 +228,44 @@ void main() {
     expect(find.text('お気に入りスレ'), findsNothing);
   });
 
+  testWidgets('履歴は既定で最後に見た順に並ぶ', (tester) async {
+    var now = DateTime.fromMillisecondsSinceEpoch(1000);
+    final history = ReadHistory(MemoryReadHistoryStorage(), now: () => now);
+    await history.markOpenedThread(
+      const ThreadSummary(key: '1', title: 'スレ壱', resCount: 10, capName: null),
+    );
+    now = DateTime.fromMillisecondsSinceEpoch(2000);
+    await history.markOpenedThread(
+      const ThreadSummary(key: '2', title: 'スレ弐', resCount: 5, capName: null),
+    );
+    // subject では 1.dat（スレ壱）が先、2.dat（スレ弐）が後。
+    final fetcher = QueueFetcher([
+      subjectOk('1.dat<>スレ壱 (10)\n2.dat<>スレ弐 (5)\n', 'LM1'),
+    ]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadListScreen(
+          fetcher: fetcher,
+          pollInterval: const Duration(seconds: 15),
+          readHistory: history,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 履歴表示に切り替える。
+    await tester.tap(find.text('現行'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('履歴').last);
+    await tester.pumpAndSettle();
+
+    // 最後に開いたスレ弐が上（subject の並びとは逆）。
+    final yLast = tester.getTopLeft(find.text('スレ弐')).dy;
+    final yFirst = tester.getTopLeft(find.text('スレ壱')).dy;
+    expect(yLast, lessThan(yFirst));
+  });
+
   testWidgets('既読スレを長押しして履歴から消せる', (tester) async {
     final history = ReadHistory(MemoryReadHistoryStorage());
     await history.markRead('1', 10);

@@ -19,7 +19,8 @@ enum ThreadSort {
   readPriority('既読優先', '既読スレを上に（新着ありを最優先）', Icons.mark_chat_read_outlined),
   momentum('勢い', '1日あたりのレス数が多い順', Icons.bolt),
   resCount('レス数', 'レスの多い順', Icons.forum_outlined),
-  newest('新着', '新しく立った順', Icons.schedule);
+  newest('新着', '新しく立った順', Icons.schedule),
+  lastSeen('最後に見た順', '最後に開いたスレ順', Icons.history);
 
   const ThreadSort(this.label, this.description, this.icon);
   final String label;
@@ -82,8 +83,20 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   Object? _error; // 初回失敗時のみ全画面エラーに使う
   bool _loading = true;
   bool _polling = false; // 背景ポーリング中の控えめなインジケータ用
-  ThreadSort _sort = ThreadSort.bump; // 掲示板の定番＝最近レス順
   ThreadFilter _filter = ThreadFilter.current;
+
+  /// 表示ごとの既定の並び。現行は掲示板の定番＝最近レス順、履歴は最後に見た順。
+  static const Map<ThreadFilter, ThreadSort> _defaultSort = {
+    ThreadFilter.current: ThreadSort.bump,
+    ThreadFilter.history: ThreadSort.lastSeen,
+    ThreadFilter.favorites: ThreadSort.lastSeen,
+  };
+
+  /// ユーザーが表示ごとに選んだ並び。未選択なら [_defaultSort] に従う。
+  final Map<ThreadFilter, ThreadSort> _sortByFilter = {};
+
+  /// 現在の表示に適用する並び。
+  ThreadSort get _sort => _sortByFilter[_filter] ?? _defaultSort[_filter]!;
   final _search = TextEditingController();
   bool _searchOpen = false;
   double _horizontalDragDistance = 0;
@@ -280,8 +293,13 @@ class _ThreadListScreenState extends State<ThreadListScreen>
         .where((t) => !_ng.isNgCreator(t.metadent))
         .toList();
     final query = _search.text.trim().toLowerCase();
-    if (query.isEmpty) return visible;
-    return visible.where((t) => t.title.toLowerCase().contains(query)).toList();
+    final matched = query.isEmpty
+        ? visible
+        : visible.where((t) => t.title.toLowerCase().contains(query)).toList();
+    // 最後に見た順は dat 落ち（stored）も混ぜて時刻で並べたいので、固定順
+    // スナップショットに頼らずここで一覧全体を並べ直す。
+    if (_sort == ThreadSort.lastSeen) matched.sort(_compareLastSeen);
+    return matched;
   }
 
   List<ThreadSummary> _withStoredThreads(
@@ -349,7 +367,22 @@ class _ThreadListScreenState extends State<ThreadListScreen>
         return [...threads]..sort((a, b) => b.resCount.compareTo(a.resCount));
       case ThreadSort.newest:
         return [...threads]..sort((a, b) => b.keyAsInt.compareTo(a.keyAsInt));
+      case ThreadSort.lastSeen:
+        return [...threads]..sort(_compareLastSeen);
     }
+  }
+
+  /// 最後に開いた順（新しいほど上）。開いた記録が無ければ末尾へ、同着はスレの
+  /// 新しい順。dat 落ちを含む履歴全体に効かせるため [_filteredThreads] でも使う。
+  int _compareLastSeen(ThreadSummary a, ThreadSummary b) {
+    final sa = _history.lastSeenAt(a.key);
+    final sb = _history.lastSeenAt(b.key);
+    if (sa != sb) {
+      if (sa == null) return 1;
+      if (sb == null) return -1;
+      return sb.compareTo(sa);
+    }
+    return b.keyAsInt.compareTo(a.keyAsInt);
   }
 
   Future<void> _pickSort() async {
@@ -395,7 +428,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
     );
     if (picked != null && picked != _sort) {
       setState(() {
-        _sort = picked;
+        _sortByFilter[_filter] = picked;
         _reorder(); // ソート変更は明示操作なので並び順を貼り直す
       });
     }
@@ -443,7 +476,10 @@ class _ThreadListScreenState extends State<ThreadListScreen>
       },
     );
     if (picked != null && picked != _filter) {
-      setState(() => _filter = picked);
+      setState(() {
+        _filter = picked;
+        _reorder(); // 表示ごとに既定の並びが変わるので貼り直す
+      });
     }
   }
 

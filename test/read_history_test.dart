@@ -81,6 +81,45 @@ void main() {
       expect(h.storedThreads.single.toSummary().title, '開いたスレ');
     });
 
+    test('開くたびに最後に見た時刻（lastSeenAt）が更新される', () async {
+      var now = DateTime.fromMillisecondsSinceEpoch(1000);
+      final h = ReadHistory(MemoryReadHistoryStorage(), now: () => now);
+      const a = ThreadSummary(key: '1', title: 'A', resCount: 1, capName: null);
+      const b = ThreadSummary(key: '2', title: 'B', resCount: 1, capName: null);
+
+      await h.markOpenedThread(a);
+      now = DateTime.fromMillisecondsSinceEpoch(2000);
+      await h.markOpenedThread(b);
+      expect(h.lastSeenAt('1'), 1000);
+      expect(h.lastSeenAt('2'), 2000);
+      expect(h.lastSeenAt('3'), isNull);
+
+      // 1 を開き直すと 1 が最新になる。
+      now = DateTime.fromMillisecondsSinceEpoch(3000);
+      await h.markOpenedThread(a);
+      expect(h.lastSeenAt('1'), 3000);
+    });
+
+    test('lastSeenAt は永続化され forgetThread で消える', () async {
+      final dir = Directory.systemTemp.createTempSync('elec_rh_seenat');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final now = DateTime.fromMillisecondsSinceEpoch(4000);
+      final a = ReadHistory(
+        FileReadHistoryStorage(directory: dir),
+        now: () => now,
+      );
+      await a.markOpenedThread(
+        const ThreadSummary(key: '9', title: '見たスレ', resCount: 3, capName: null),
+      );
+
+      final b = ReadHistory(FileReadHistoryStorage(directory: dir));
+      await b.load();
+      expect(b.lastSeenAt('9'), 4000);
+
+      await b.forgetThread('9');
+      expect(b.lastSeenAt('9'), isNull);
+    });
+
     test('forgetThread で既読も保存情報も消える', () async {
       final h = ReadHistory(MemoryReadHistoryStorage());
       const thread = ThreadSummary(
