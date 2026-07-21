@@ -1606,9 +1606,15 @@ class _FastScrollerState extends State<_FastScroller> {
   // 当たり判定も消し（IgnorePointer）、下にある返信ボタン等のタップを塞がない。
   bool _visible = false;
   Timer? _hideTimer;
-  // 直近の先頭行。データ更新だけで itemPositions が動いても、実スクロール
-  // （先頭行の変化）でない限り表示しないための基準。
-  int _lastTopIndex = -1;
+  // 静止してから消すまでの時間。少し余裕を持たせる。
+  static const _hideDelay = Duration(milliseconds: 2400);
+  // 再表示に必要な最小スクロール量（1 行分に対する割合）。小さめにして、
+  // わずかなスクロールでも出るようゆるめに判定する。
+  static const _revealThreshold = 0.015;
+  // 直近に表示したときのスクロール位置（先頭行 index からその行のスクロール量を
+  // 引いた連続値）。ここから一定量動いたら再表示する。末尾追記のデータ更新では
+  // 先頭行が動かないので出さない。未設定は NaN。
+  double _lastScroll = double.nan;
 
   @override
   void initState() {
@@ -1627,11 +1633,14 @@ class _FastScrollerState extends State<_FastScroller> {
     super.dispose();
   }
 
-  /// スクロールで先頭行が変わったときだけ表示する（データ更新では出さない）。
+  /// 少しでもスクロールしたら表示する（末尾追記のデータ更新では先頭行が動かない
+  /// ので出さない）。前回表示位置から一定量動いたかで判定する。
   void _onPositionsChanged() {
-    final top = _currentTopIndex();
-    if (top == _lastTopIndex) return;
-    _lastTopIndex = top;
+    final m = _scrollMetric();
+    if (_lastScroll.isFinite && (m - _lastScroll).abs() < _revealThreshold) {
+      return;
+    }
+    _lastScroll = m;
     _reveal();
   }
 
@@ -1639,10 +1648,25 @@ class _FastScrollerState extends State<_FastScroller> {
   void _reveal() {
     _hideTimer?.cancel();
     if (!_visible) setState(() => _visible = true);
-    _hideTimer = Timer(const Duration(milliseconds: 1500), () {
+    _hideTimer = Timer(_hideDelay, () {
       if (!mounted || _dragging) return;
       setState(() => _visible = false);
     });
+  }
+
+  /// 見えている先頭行を基準にした連続スクロール量。下へ進むほど大きくなる。
+  /// 行インデックスの丸ごとの変化を待たず、わずかなスクロールも拾える。
+  double _scrollMetric() {
+    final positions = widget.positions.itemPositions.value;
+    ItemPosition? top;
+    for (final p in positions) {
+      if (p.itemTrailingEdge <= 0) continue;
+      if (top == null || p.index < top.index) top = p;
+    }
+    if (top == null) return 0;
+    // itemLeadingEdge は行上端の位置（0=ビューポート上端、上へ流れると負）。
+    // index から引くと下方向スクロールで単調増加する連続値になる。
+    return top.index - top.itemLeadingEdge;
   }
 
   /// 見えている先頭行のインデックス。
