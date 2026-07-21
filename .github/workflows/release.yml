@@ -118,6 +118,15 @@ jobs:
             --dart-define-from-file="$RUNNER_TEMP/dart_defines.env" \
             --build-name="${{ steps.ver.outputs.name }}" --build-number="${{ github.run_number }}"
 
+      # Play へ投入するしないに関わらず AAB を成果物として保存しておく。
+      # 初回の手動アップロードや、Play 連携未設定時の取り出しに使える。
+      - name: Upload AAB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: elec-${{ steps.ver.outputs.tag }}-aab
+          path: build/app/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+
       # サービスアカウント JSON（Secret）が無ければアップロードは黙ってスキップし、
       # APK リリースだけ通す（Play 連携未設定でも main への push を壊さない）。
       - name: Check Play credentials
