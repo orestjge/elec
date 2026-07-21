@@ -1602,16 +1602,64 @@ class _FastScrollerState extends State<_FastScroller> {
   bool _dragging = false;
   double _fraction = 0;
 
-  /// 見えている先頭行から現在位置（0〜1）を求める。
-  double _currentFraction() {
+  // つまみはスクロール中・ドラッグ中だけ表示し、静止したら隠す。隠れている間は
+  // 当たり判定も消し（IgnorePointer）、下にある返信ボタン等のタップを塞がない。
+  bool _visible = false;
+  Timer? _hideTimer;
+  // 直近の先頭行。データ更新だけで itemPositions が動いても、実スクロール
+  // （先頭行の変化）でない限り表示しないための基準。
+  int _lastTopIndex = -1;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.positions.itemPositions.addListener(_onPositionsChanged);
+    // 入室直後に一度だけ出して場所を知らせ、そのまま自動で隠す。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _reveal();
+    });
+  }
+
+  @override
+  void dispose() {
+    widget.positions.itemPositions.removeListener(_onPositionsChanged);
+    _hideTimer?.cancel();
+    super.dispose();
+  }
+
+  /// スクロールで先頭行が変わったときだけ表示する（データ更新では出さない）。
+  void _onPositionsChanged() {
+    final top = _currentTopIndex();
+    if (top == _lastTopIndex) return;
+    _lastTopIndex = top;
+    _reveal();
+  }
+
+  /// つまみを表示し、一定時間操作が無ければ隠すタイマーを貼り直す。
+  void _reveal() {
+    _hideTimer?.cancel();
+    if (!_visible) setState(() => _visible = true);
+    _hideTimer = Timer(const Duration(milliseconds: 1500), () {
+      if (!mounted || _dragging) return;
+      setState(() => _visible = false);
+    });
+  }
+
+  /// 見えている先頭行のインデックス。
+  int _currentTopIndex() {
     final positions = widget.positions.itemPositions.value;
-    if (positions.isEmpty || widget.itemCount <= 1) return 0;
+    if (positions.isEmpty) return 0;
     var topIndex = widget.itemCount;
     for (final p in positions) {
       if (p.itemTrailingEdge > 0 && p.index < topIndex) topIndex = p.index;
     }
-    if (topIndex >= widget.itemCount) return 0;
-    return (topIndex / (widget.itemCount - 1)).clamp(0.0, 1.0);
+    return topIndex >= widget.itemCount ? 0 : topIndex;
+  }
+
+  /// 見えている先頭行から現在位置（0〜1）を求める。
+  double _currentFraction() {
+    if (widget.itemCount <= 1) return 0;
+    return (_currentTopIndex() / (widget.itemCount - 1)).clamp(0.0, 1.0);
   }
 
   int _indexFor(double fraction) => (fraction * (widget.itemCount - 1)).round();
@@ -1638,6 +1686,8 @@ class _FastScrollerState extends State<_FastScroller> {
             builder: (context, _, _) {
               final fraction = _dragging ? _fraction : _currentFraction();
               final top = travel <= 0 ? 0.0 : fraction * travel;
+              // 表示中・ドラッグ中だけ見せる。隠れている間は当たり判定も消す。
+              final shown = _visible || _dragging;
               // つまみ以外の場所は素通しにして、トラック上に重なる返信ボタン
               // などのタップを邪魔しないようにする（ジェスチャはつまみ限定）。
               return Stack(
@@ -1673,45 +1723,64 @@ class _FastScrollerState extends State<_FastScroller> {
                   Positioned(
                     right: 0,
                     top: top,
-                    // ジェスチャーアリーナを介さない Listener で、押した瞬間から
-                    // ポインタを掴む。親リストの縦スクロールと取り合わないので
-                    // 「一度タップしてからでないと動かせない」問題が起きない。
-                    // 掴んだ位置からの相対移動なので飛びもない。
-                    child: Listener(
-                      behavior: HitTestBehavior.opaque,
-                      onPointerDown: (_) => setState(() {
-                        _dragging = true;
-                        _fraction = _currentFraction();
-                      }),
-                      onPointerMove: (e) => _applyDelta(e.delta.dy, travel),
-                      onPointerUp: (_) => setState(() => _dragging = false),
-                      onPointerCancel: (_) => setState(() => _dragging = false),
-                      child: Container(
-                        width: _handleWidth,
-                        height: _handleHeight,
-                        decoration: BoxDecoration(
-                          color: _dragging
-                              ? scheme.primary
-                              : scheme.secondaryContainer.withValues(
-                                  alpha: 0.92,
+                    // 隠れているときは opacity 0＋IgnorePointer で当たり判定も消し、
+                    // 下の返信ボタンを塞がない。再表示はスクロールで行う。
+                    child: AnimatedOpacity(
+                      opacity: shown ? 1 : 0,
+                      duration: const Duration(milliseconds: 200),
+                      child: IgnorePointer(
+                        ignoring: !shown,
+                        // ジェスチャーアリーナを介さない Listener で、押した瞬間から
+                        // ポインタを掴む。親リストの縦スクロールと取り合わないので
+                        // 「一度タップしてからでないと動かせない」問題が起きない。
+                        // 掴んだ位置からの相対移動なので飛びもない。
+                        child: Listener(
+                          behavior: HitTestBehavior.opaque,
+                          onPointerDown: (_) {
+                            _hideTimer?.cancel();
+                            setState(() {
+                              _dragging = true;
+                              _visible = true;
+                              _fraction = _currentFraction();
+                            });
+                          },
+                          onPointerMove: (e) => _applyDelta(e.delta.dy, travel),
+                          onPointerUp: (_) {
+                            setState(() => _dragging = false);
+                            _reveal();
+                          },
+                          onPointerCancel: (_) {
+                            setState(() => _dragging = false);
+                            _reveal();
+                          },
+                          child: Container(
+                            width: _handleWidth,
+                            height: _handleHeight,
+                            decoration: BoxDecoration(
+                              color: _dragging
+                                  ? scheme.primary
+                                  : scheme.secondaryContainer.withValues(
+                                      alpha: 0.92,
+                                    ),
+                              borderRadius: const BorderRadius.horizontal(
+                                left: Radius.circular(15),
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.18),
+                                  blurRadius: 4,
+                                  offset: const Offset(0, 1),
                                 ),
-                          borderRadius: const BorderRadius.horizontal(
-                            left: Radius.circular(15),
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.18),
-                              blurRadius: 4,
-                              offset: const Offset(0, 1),
+                              ],
                             ),
-                          ],
-                        ),
-                        child: Icon(
-                          Icons.unfold_more,
-                          size: 20,
-                          color: _dragging
-                              ? scheme.onPrimary
-                              : scheme.onSecondaryContainer,
+                            child: Icon(
+                              Icons.unfold_more,
+                              size: 20,
+                              color: _dragging
+                                  ? scheme.onPrimary
+                                  : scheme.onSecondaryContainer,
+                            ),
+                          ),
                         ),
                       ),
                     ),
