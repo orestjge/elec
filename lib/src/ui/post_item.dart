@@ -226,57 +226,56 @@ class _Header extends StatelessWidget {
     final lineHeight = _headerLineHeight(theme);
 
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
+      // 左グループが 2 行になっても、日時・返信ボタンは 1 行目の高さに揃える。
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // 左グループ（番号・名前・ID）を Expanded で残り幅ごと占有させ、
-        // 日時・返信ボタンを画面幅に関わらず常に右端へ固定する。名前が短くても
-        // 中途半端な位置に流れない。名前は Flexible で長い場合は省略。
+        // 左グループ（番号・名前・ID・自分）を Expanded で残り幅ごと占有させ、
+        // 日時・返信ボタンを画面幅に関わらず常に右端へ固定する。深いツリーで幅が
+        // 足りないときは、要素を省略せず Wrap で 2 行目へ折り返す。
         Expanded(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              _HeaderSlot(
-                height: lineHeight,
-                child: Text(
-                  '${res.number}',
-                  style: theme.textTheme.labelMedium?.copyWith(
-                    color: scheme.primary,
-                    fontWeight: FontWeight.w700,
-                    leadingDistribution: TextLeadingDistribution.even,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Flexible(
-                child: _HeaderSlot(
-                  height: lineHeight,
-                  child: _NameLabel(name: name),
-                ),
-              ),
-              if (res.id != null) ...[
-                const SizedBox(width: 8),
+          child: LayoutBuilder(
+            builder: (context, constraints) => Wrap(
+              spacing: 8,
+              runSpacing: 2,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
                 _HeaderSlot(
                   height: lineHeight,
-                  child: _IdChip(
+                  child: Text(
+                    '${res.number}',
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: scheme.primary,
+                      fontWeight: FontWeight.w700,
+                      leadingDistribution: TextLeadingDistribution.even,
+                    ),
+                  ),
+                ),
+                // Wrap の子は Flexible にできないので、極端に長い名前だけは
+                // 行幅で頭打ちにして省略する（通常の名前はそのまま 1 チャンク）。
+                ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: constraints.maxWidth),
+                  child: _HeaderSlot(
+                    height: lineHeight,
+                    child: _NameLabel(name: name),
+                  ),
+                ),
+                // チップは固定高さのスロットに入れない。狭いときは中身に応じて
+                // 縦に伸び（最大 2 行）、それでも入らなければ省略する。スロットで
+                // 1 行に固定すると、折り返したときにチップが潰れる。
+                if (res.id != null)
+                  _IdChip(
                     id: res.id!,
                     count: idCount,
                     ordinal: idOrdinal,
                     onTap: onTapId,
                   ),
-                ),
+                if (isOwn) _OwnChip(color: scheme.secondary),
               ],
-              if (isOwn) ...[
-                const SizedBox(width: 8),
-                _HeaderSlot(
-                  height: lineHeight,
-                  child: _OwnChip(color: scheme.secondary),
-                ),
-              ],
-            ],
+            ),
           ),
         ),
         const SizedBox(width: 8),
-        _TimeLabel(res: res),
+        _HeaderSlot(height: lineHeight, child: _TimeLabel(res: res)),
         if (onReply != null) ...[
           const SizedBox(width: 4),
           InkResponse(
@@ -311,9 +310,15 @@ class _HeaderSlot extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // widthFactor: 1.0 で横幅は中身に合わせて縮める。これがないと Wrap の中で
+    // Align が横いっぱいに広がり、チップが全幅になって 1 個ずつ縦積みになる。
     return SizedBox(
       height: height,
-      child: Align(alignment: Alignment.centerLeft, child: child),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        widthFactor: 1,
+        child: child,
+      ),
     );
   }
 }
@@ -351,10 +356,10 @@ class _OwnChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 高さ・幅とも中身に合わせて縮める。height + alignment を使うと Wrap 内で
+    // 横いっぱいに広がってしまうため、上下パディングでピル高さを作る。
     return Container(
-      height: 16,
-      alignment: Alignment.center,
-      padding: const EdgeInsets.symmetric(horizontal: 7),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(6),
         border: Border.all(color: color.withValues(alpha: 0.55)),
@@ -428,18 +433,21 @@ class _IdChip extends StatelessWidget {
       onTap: onTap == null ? null : () => onTap!(id),
       borderRadius: BorderRadius.circular(6),
       child: Container(
-        height: 16,
-        alignment: Alignment.center,
-        padding: const EdgeInsets.symmetric(horizontal: 6),
+        // 高さ・幅とも中身に合わせて縮める（Wrap 内で全幅化させない）。
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
         decoration: BoxDecoration(
           color: color.withValues(alpha: 0.14),
           borderRadius: BorderRadius.circular(6),
         ),
         child: Text(
           count > 1 ? 'ID:$id ($ordinal/$count)' : 'ID:$id',
+          // 狭いときは最大 2 行まで折り返して縦に伸ばし、それでも入らなければ
+          // 省略する。1 行固定にするとチップが潰れるため許容する。
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
           style: TextStyle(
             fontSize: 11,
-            height: 1,
+            height: 1.15,
             leadingDistribution: TextLeadingDistribution.even,
             color: color,
             fontWeight: FontWeight.w600,

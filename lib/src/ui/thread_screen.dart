@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:edge_core/edge_core.dart';
 import 'package:file_picker/file_picker.dart';
@@ -2101,10 +2102,14 @@ class _ConversationPost extends StatelessWidget {
   final bool highlighted;
   final bool showDivider;
 
+  /// インデントを付ける最大の深さ。これ以上深くなっても字下げは増やさない。
+  /// 深いツリーで本文幅（＝ヘッダ行）が潰れて表示が破綻するのを防ぐ。
+  static const _maxIndentLevels = 6;
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final indent = depth * 18.0;
+    final indent = math.min(depth, _maxIndentLevels) * 18.0;
     return Container(
       decoration: BoxDecoration(
         color: highlighted
