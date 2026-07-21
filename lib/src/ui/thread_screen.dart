@@ -1602,16 +1602,88 @@ class _FastScrollerState extends State<_FastScroller> {
   bool _dragging = false;
   double _fraction = 0;
 
-  /// 見えている先頭行から現在位置（0〜1）を求める。
-  double _currentFraction() {
+  // つまみはスクロール中・ドラッグ中だけ表示し、静止したら隠す。隠れている間は
+  // 当たり判定も消し（IgnorePointer）、下にある返信ボタン等のタップを塞がない。
+  bool _visible = false;
+  Timer? _hideTimer;
+  // 静止してから消すまでの時間。少し余裕を持たせる。
+  static const _hideDelay = Duration(milliseconds: 2400);
+  // 再表示に必要な最小スクロール量（1 行分に対する割合）。小さめにして、
+  // わずかなスクロールでも出るようゆるめに判定する。
+  static const _revealThreshold = 0.015;
+  // 直近に表示したときのスクロール位置（先頭行 index からその行のスクロール量を
+  // 引いた連続値）。ここから一定量動いたら再表示する。末尾追記のデータ更新では
+  // 先頭行が動かないので出さない。未設定は NaN。
+  double _lastScroll = double.nan;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.positions.itemPositions.addListener(_onPositionsChanged);
+    // 入室直後に一度だけ出して場所を知らせ、そのまま自動で隠す。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _reveal();
+    });
+  }
+
+  @override
+  void dispose() {
+    widget.positions.itemPositions.removeListener(_onPositionsChanged);
+    _hideTimer?.cancel();
+    super.dispose();
+  }
+
+  /// 少しでもスクロールしたら表示する（末尾追記のデータ更新では先頭行が動かない
+  /// ので出さない）。前回表示位置から一定量動いたかで判定する。
+  void _onPositionsChanged() {
+    final m = _scrollMetric();
+    if (_lastScroll.isFinite && (m - _lastScroll).abs() < _revealThreshold) {
+      return;
+    }
+    _lastScroll = m;
+    _reveal();
+  }
+
+  /// つまみを表示し、一定時間操作が無ければ隠すタイマーを貼り直す。
+  void _reveal() {
+    _hideTimer?.cancel();
+    if (!_visible) setState(() => _visible = true);
+    _hideTimer = Timer(_hideDelay, () {
+      if (!mounted || _dragging) return;
+      setState(() => _visible = false);
+    });
+  }
+
+  /// 見えている先頭行を基準にした連続スクロール量。下へ進むほど大きくなる。
+  /// 行インデックスの丸ごとの変化を待たず、わずかなスクロールも拾える。
+  double _scrollMetric() {
     final positions = widget.positions.itemPositions.value;
-    if (positions.isEmpty || widget.itemCount <= 1) return 0;
+    ItemPosition? top;
+    for (final p in positions) {
+      if (p.itemTrailingEdge <= 0) continue;
+      if (top == null || p.index < top.index) top = p;
+    }
+    if (top == null) return 0;
+    // itemLeadingEdge は行上端の位置（0=ビューポート上端、上へ流れると負）。
+    // index から引くと下方向スクロールで単調増加する連続値になる。
+    return top.index - top.itemLeadingEdge;
+  }
+
+  /// 見えている先頭行のインデックス。
+  int _currentTopIndex() {
+    final positions = widget.positions.itemPositions.value;
+    if (positions.isEmpty) return 0;
     var topIndex = widget.itemCount;
     for (final p in positions) {
       if (p.itemTrailingEdge > 0 && p.index < topIndex) topIndex = p.index;
     }
-    if (topIndex >= widget.itemCount) return 0;
-    return (topIndex / (widget.itemCount - 1)).clamp(0.0, 1.0);
+    return topIndex >= widget.itemCount ? 0 : topIndex;
+  }
+
+  /// 見えている先頭行から現在位置（0〜1）を求める。
+  double _currentFraction() {
+    if (widget.itemCount <= 1) return 0;
+    return (_currentTopIndex() / (widget.itemCount - 1)).clamp(0.0, 1.0);
   }
 
   int _indexFor(double fraction) => (fraction * (widget.itemCount - 1)).round();
@@ -1638,6 +1710,8 @@ class _FastScrollerState extends State<_FastScroller> {
             builder: (context, _, _) {
               final fraction = _dragging ? _fraction : _currentFraction();
               final top = travel <= 0 ? 0.0 : fraction * travel;
+              // 表示中・ドラッグ中だけ見せる。隠れている間は当たり判定も消す。
+              final shown = _visible || _dragging;
               // つまみ以外の場所は素通しにして、トラック上に重なる返信ボタン
               // などのタップを邪魔しないようにする（ジェスチャはつまみ限定）。
               return Stack(
@@ -1673,45 +1747,64 @@ class _FastScrollerState extends State<_FastScroller> {
                   Positioned(
                     right: 0,
                     top: top,
-                    // ジェスチャーアリーナを介さない Listener で、押した瞬間から
-                    // ポインタを掴む。親リストの縦スクロールと取り合わないので
-                    // 「一度タップしてからでないと動かせない」問題が起きない。
-                    // 掴んだ位置からの相対移動なので飛びもない。
-                    child: Listener(
-                      behavior: HitTestBehavior.opaque,
-                      onPointerDown: (_) => setState(() {
-                        _dragging = true;
-                        _fraction = _currentFraction();
-                      }),
-                      onPointerMove: (e) => _applyDelta(e.delta.dy, travel),
-                      onPointerUp: (_) => setState(() => _dragging = false),
-                      onPointerCancel: (_) => setState(() => _dragging = false),
-                      child: Container(
-                        width: _handleWidth,
-                        height: _handleHeight,
-                        decoration: BoxDecoration(
-                          color: _dragging
-                              ? scheme.primary
-                              : scheme.secondaryContainer.withValues(
-                                  alpha: 0.92,
+                    // 隠れているときは opacity 0＋IgnorePointer で当たり判定も消し、
+                    // 下の返信ボタンを塞がない。再表示はスクロールで行う。
+                    child: AnimatedOpacity(
+                      opacity: shown ? 1 : 0,
+                      duration: const Duration(milliseconds: 200),
+                      child: IgnorePointer(
+                        ignoring: !shown,
+                        // ジェスチャーアリーナを介さない Listener で、押した瞬間から
+                        // ポインタを掴む。親リストの縦スクロールと取り合わないので
+                        // 「一度タップしてからでないと動かせない」問題が起きない。
+                        // 掴んだ位置からの相対移動なので飛びもない。
+                        child: Listener(
+                          behavior: HitTestBehavior.opaque,
+                          onPointerDown: (_) {
+                            _hideTimer?.cancel();
+                            setState(() {
+                              _dragging = true;
+                              _visible = true;
+                              _fraction = _currentFraction();
+                            });
+                          },
+                          onPointerMove: (e) => _applyDelta(e.delta.dy, travel),
+                          onPointerUp: (_) {
+                            setState(() => _dragging = false);
+                            _reveal();
+                          },
+                          onPointerCancel: (_) {
+                            setState(() => _dragging = false);
+                            _reveal();
+                          },
+                          child: Container(
+                            width: _handleWidth,
+                            height: _handleHeight,
+                            decoration: BoxDecoration(
+                              color: _dragging
+                                  ? scheme.primary
+                                  : scheme.secondaryContainer.withValues(
+                                      alpha: 0.92,
+                                    ),
+                              borderRadius: const BorderRadius.horizontal(
+                                left: Radius.circular(15),
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.18),
+                                  blurRadius: 4,
+                                  offset: const Offset(0, 1),
                                 ),
-                          borderRadius: const BorderRadius.horizontal(
-                            left: Radius.circular(15),
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.18),
-                              blurRadius: 4,
-                              offset: const Offset(0, 1),
+                              ],
                             ),
-                          ],
-                        ),
-                        child: Icon(
-                          Icons.unfold_more,
-                          size: 20,
-                          color: _dragging
-                              ? scheme.onPrimary
-                              : scheme.onSecondaryContainer,
+                            child: Icon(
+                              Icons.unfold_more,
+                              size: 20,
+                              color: _dragging
+                                  ? scheme.onPrimary
+                                  : scheme.onSecondaryContainer,
+                            ),
+                          ),
                         ),
                       ),
                     ),
