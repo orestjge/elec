@@ -8,7 +8,13 @@ name: Release
 on:
   push:
     branches: [main]
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      play_track:
+        description: "Play Console のアップロード先トラック"
+        type: choice
+        default: internal
+        options: [internal, alpha, beta, production]
 
 permissions:
   contents: write # タグ作成・Release 公開・altstore ブランチ更新に必要
@@ -104,6 +110,39 @@ jobs:
           cp build/app/outputs/flutter-apk/app-release.apk \
             "dist/elec-${{ steps.ver.outputs.tag }}-universal.apk"
           ls -la dist
+
+      # Play ストア公開用の署名済み AAB。APK と同じ release 署名が使われる。
+      - name: Build signed AAB
+        run: |
+          flutter build appbundle --release \
+            --dart-define-from-file="$RUNNER_TEMP/dart_defines.env" \
+            --build-name="${{ steps.ver.outputs.name }}" --build-number="${{ github.run_number }}"
+
+      # サービスアカウント JSON（Secret）が無ければアップロードは黙ってスキップし、
+      # APK リリースだけ通す（Play 連携未設定でも main への push を壊さない）。
+      - name: Check Play credentials
+        id: play
+        env:
+          SA_JSON: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          if [ -n "$SA_JSON" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Secret PLAY_SERVICE_ACCOUNT_JSON が未設定のため Play Console へのアップロードをスキップします"
+          fi
+
+      # r0adkll/upload-google-play で AAB を Play Console の指定トラックに投入。
+      # push（自動採番リリース）時は internal トラック、手動実行時は選択したトラック。
+      - name: Upload AAB to Play Console
+        if: steps.play.outputs.enabled == 'true'
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: io.github.orestjge.elec
+          releaseFiles: build/app/outputs/bundle/release/app-release.aab
+          track: ${{ github.event.inputs.play_track || 'internal' }}
+          status: completed
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
