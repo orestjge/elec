@@ -48,7 +48,8 @@ app.*.map.json
 .claude/settings.local.json
 
 # 設計メモは当面ローカルのみ（公開しない）
-/docs/
+#   内部メモ
+/notes/
 
 # ローカルの Dart define / API キー
 .env

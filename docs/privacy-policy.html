@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="index,follow" />
+    <title>elec プライバシーポリシー</title>
+    <style>
+      :root {
+        --bg: #ffffff;
+        --fg: #1a1a2e;
+        --muted: #55566b;
+        --accent: #3f51b5;
+        --card: #f5f6fb;
+        --border: #e2e4f0;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #12121c;
+          --fg: #e8e9f3;
+          --muted: #a6a8bd;
+          --accent: #8c9eff;
+          --card: #1c1d2b;
+          --border: #2c2e40;
+        }
+      }
+      * { box-sizing: border-box; }
+      html { -webkit-text-size-adjust: 100%; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font-family: system-ui, -apple-system, "Hiragino Kaku Gothic ProN",
+          "Noto Sans JP", Meiryo, sans-serif;
+        line-height: 1.8;
+        font-size: 16px;
+      }
+      .wrap { max-width: 760px; margin: 0 auto; padding: 40px 20px 80px; }
+      header { border-bottom: 2px solid var(--accent); padding-bottom: 16px; margin-bottom: 8px; }
+      h1 { font-size: 1.6rem; margin: 0 0 4px; }
+      .sub { color: var(--muted); font-size: 0.9rem; margin: 0; }
+      h2 {
+        font-size: 1.15rem;
+        margin: 40px 0 10px;
+        padding-left: 10px;
+        border-left: 4px solid var(--accent);
+      }
+      p { margin: 10px 0; }
+      ul { padding-left: 1.3em; margin: 10px 0; }
+      li { margin: 6px 0; }
+      a { color: var(--accent); }
+      code {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 1px 5px;
+        font-size: 0.9em;
+        word-break: break-all;
+      }
+      .note {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 14px 18px;
+        margin: 16px 0;
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+      footer {
+        margin-top: 56px;
+        padding-top: 16px;
+        border-top: 1px solid var(--border);
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <h1>elec プライバシーポリシー</h1>
+        <p class="sub">最終更新日: 2026年7月21日</p>
+      </header>
+
+      <p>
+        本プライバシーポリシー（以下「本ポリシー」）は、個人開発者（以下「開発者」）が提供する
+        Android / iOS 向けアプリ <strong>elec</strong>（以下「本アプリ」）における、利用者の情報の取り扱いについて定めるものです。
+      </p>
+      <div class="note">
+        本アプリは、掲示板「エッヂ」（<code>bbs.eddibb.cc</code> / liveedge）を閲覧・書き込みするための
+        <strong>非公式クライアント</strong>です。掲示板の運営者とは無関係であり、開発者はいかなる形でも
+        掲示板の運営に関与していません。
+      </div>
+
+      <h2>1. 基本方針</h2>
+      <p>
+        本アプリは、開発者が運営するサーバーを持ちません。開発者は利用者の個人情報を収集・保管・送信しません。
+        本アプリには、広告・アクセス解析・行動トラッキング・第三者トラッキング SDK は
+        <strong>一切含まれていません</strong>。
+      </p>
+
+      <h2>2. 端末内にのみ保存される情報</h2>
+      <p>
+        本アプリは、動作のために以下の情報を<strong>利用者の端末内にのみ</strong>保存します。これらは開発者や
+        第三者に送信されることはなく、アプリのデータを削除するかアプリをアンインストールすることでいつでも消去できます。
+      </p>
+      <ul>
+        <li>
+          <strong>認証トークン</strong>: 掲示板への書き込み時に、掲示板サーバーが発行する認証情報（edge / tinker トークン）。
+          再起動時の再認証を省くため端末内に保存します。
+        </li>
+        <li><strong>既読履歴</strong>: どのスレッドをどこまで読んだかの記録（新着表示・並べ替えのため）。</li>
+        <li><strong>アプリ設定</strong>: 表示に関する設定値。</li>
+      </ul>
+
+      <h2>3. 第三者サービスへの送信</h2>
+      <p>本アプリを利用すると、利用者の操作に応じて以下の第三者サービスと直接通信します。</p>
+      <ul>
+        <li>
+          <strong>エッヂ掲示板サーバー（<code>bbs.eddibb.cc</code> 等）</strong>:
+          スレッドの閲覧リクエスト、および利用者が投稿・スレッド作成を行った際の投稿内容（本文・名前欄など、利用者が入力した内容）が送信されます。
+          投稿内容は掲示板上で公開されます。掲示板サーバーにおける情報の取り扱いは、当該掲示板の規約・方針に従います。
+        </li>
+        <li>
+          <strong>Imgur（<code>imgur.com</code>）</strong>:
+          利用者が画像投稿機能を使って画像をアップロードした場合に<strong>限り</strong>、その画像データが画像共有サービス Imgur に送信されます。
+          アップロードされた画像は Imgur 上でホストされ、その取り扱いは
+          <a href="https://imgur.com/privacy" target="_blank" rel="noopener">Imgur のプライバシーポリシー</a>に従います。
+        </li>
+      </ul>
+      <div class="note">
+        いずれの送信も、利用者自身の操作（閲覧・投稿・画像アップロード）に基づいて行われます。開発者はこれらの通信を仲介・記録しません。
+      </div>
+
+      <h2>4. 権限</h2>
+      <p>
+        本アプリが要求する権限はインターネット接続（<code>INTERNET</code>）のみです。連絡先・位置情報・カメラ・
+        ストレージ内の個人ファイルなどへのアクセスは要求しません。
+      </p>
+
+      <h2>5. 子どものプライバシー</h2>
+      <p>
+        本アプリは特に子どもを対象としたものではなく、開発者が個人情報を収集することもありません。
+      </p>
+
+      <h2>6. データの削除方法</h2>
+      <p>
+        端末内に保存された情報（第2項）は、OS の設定からアプリのデータを削除するか、本アプリをアンインストールすることで完全に消去できます。
+        掲示板や Imgur に既に送信・公開された内容の削除については、それぞれのサービスの手続きに従ってください。
+      </p>
+
+      <h2>7. 本ポリシーの変更</h2>
+      <p>
+        本ポリシーは、必要に応じて改定することがあります。重要な変更を行った場合は、本ページの最終更新日を更新します。
+      </p>
+
+      <h2>8. お問い合わせ</h2>
+      <p>
+        本ポリシーまたは本アプリに関するお問い合わせは、以下の GitHub リポジトリの Issues までお願いします。
+      </p>
+      <ul>
+        <li><a href="https://github.com/orestjge/elec/issues" target="_blank" rel="noopener">https://github.com/orestjge/elec/issues</a></li>
+      </ul>
+
+      <footer>
+        elec — エッヂ非公式掲示板ビューア（個人開発）<br />
+        <a href="https://github.com/orestjge/elec" target="_blank" rel="noopener">github.com/orestjge/elec</a>
+      </footer>
+    </div>
+  </body>
+</html>
