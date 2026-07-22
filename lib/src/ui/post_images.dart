@@ -20,6 +20,8 @@ class PostImages extends StatelessWidget {
     this.embedVideos = const [],
     this.onTapVideo,
     this.onTapEmbed,
+    this.onRemove,
+    this.thumbSize = 160,
     this.blurImages = false,
   });
 
@@ -35,8 +37,30 @@ class PostImages extends StatelessWidget {
   final ValueChanged<Uri>? onTapVideo;
   final ValueChanged<Uri>? onTapEmbed;
 
+  /// 指定すると各サムネイルに削除（×）ボタンを重ね、押すとその URL を渡す。
+  /// 入力欄の添付プレビューで、本文から URL を取り消すために使う。
+  final ValueChanged<Uri>? onRemove;
+
+  /// サムネイルの一辺（px）。入力欄プレビューなどで小さく出したいとき使う。
+  final double thumbSize;
+
   /// このレスの画像に「グロ」注意が付いており、サムネイルへモザイクを掛けるか。
   final bool blurImages;
+
+  Widget _removable(Uri url, Widget child) {
+    if (onRemove == null) return child;
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        child,
+        Positioned(
+          top: 4,
+          right: 4,
+          child: _RemoveButton(onTap: () => onRemove!(url)),
+        ),
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -53,25 +77,49 @@ class PostImages extends StatelessWidget {
               runSpacing: 8,
               children: [
                 for (var i = 0; i < urls.length; i++)
-                  _Thumb(urls: urls, index: i, blurred: blurImages),
+                  _removable(
+                    urls[i],
+                    _Thumb(
+                      urls: urls,
+                      index: i,
+                      size: thumbSize,
+                      blurred: blurImages,
+                    ),
+                  ),
                 for (final url in videoUrls)
-                  _VideoThumb(
-                    url: url,
-                    onTap: onTapVideo == null ? null : () => onTapVideo!(url),
+                  _removable(
+                    url,
+                    _VideoThumb(
+                      url: url,
+                      size: thumbSize,
+                      onTap: onTapVideo == null ? null : () => onTapVideo!(url),
+                    ),
                   ),
                 for (final video in embedVideos)
-                  _EmbedThumb(
-                    video: video,
-                    onTap: onTapEmbed == null
-                        ? null
-                        : () => onTapEmbed!(video.url),
+                  _removable(
+                    video.url,
+                    _EmbedThumb(
+                      video: video,
+                      size: thumbSize,
+                      onTap: onTapEmbed == null
+                          ? null
+                          : () => onTapEmbed!(video.url),
+                    ),
                   ),
               ],
             ),
           for (var i = 0; i < audioUrls.length; i++)
             Padding(
               padding: EdgeInsets.only(top: (hasThumbs || i > 0) ? 8 : 0),
-              child: AudioPlayerTile(url: audioUrls[i]),
+              child: onRemove == null
+                  ? AudioPlayerTile(url: audioUrls[i])
+                  : Row(
+                      children: [
+                        Expanded(child: AudioPlayerTile(url: audioUrls[i])),
+                        const SizedBox(width: 4),
+                        _RemoveButton(onTap: () => onRemove!(audioUrls[i])),
+                      ],
+                    ),
             ),
         ],
       ),
@@ -79,10 +127,38 @@ class PostImages extends StatelessWidget {
   }
 }
 
+/// サムネイル右上に重ねる削除ボタン。
+class _RemoveButton extends StatelessWidget {
+  const _RemoveButton({required this.onTap});
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.black.withValues(alpha: 0.55),
+      shape: const CircleBorder(),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: const Padding(
+          padding: EdgeInsets.all(3),
+          child: Icon(Icons.close, size: 18, color: Colors.white),
+        ),
+      ),
+    );
+  }
+}
+
 class _Thumb extends StatefulWidget {
-  const _Thumb({required this.urls, required this.index, this.blurred = false});
+  const _Thumb({
+    required this.urls,
+    required this.index,
+    this.size = 160,
+    this.blurred = false,
+  });
   final List<Uri> urls;
   final int index;
+  final double size;
 
   /// 「グロ」注意が付いた画像で、初期表示をモザイクにするか。
   final bool blurred;
@@ -119,17 +195,19 @@ class _ThumbState extends State<_Thumb> {
           children: [
             Image.network(
               _url.toString(),
-              height: 160,
-              width: 160,
+              height: widget.size,
+              width: widget.size,
               fit: BoxFit.cover,
               loadingBuilder: (context, child, progress) {
                 if (progress == null) return child;
                 return _Placeholder(
+                  size: widget.size,
                   color: scheme.surfaceContainerHighest,
                   child: const CircularProgressIndicator(strokeWidth: 2),
                 );
               },
               errorBuilder: (context, error, stack) => _Placeholder(
+                size: widget.size,
                 color: scheme.surfaceContainerHighest,
                 child: Icon(
                   Icons.broken_image_outlined,
@@ -184,9 +262,10 @@ class _GuroMask extends StatelessWidget {
 }
 
 class _VideoThumb extends StatelessWidget {
-  const _VideoThumb({required this.url, required this.onTap});
+  const _VideoThumb({required this.url, required this.onTap, this.size = 160});
   final Uri url;
   final VoidCallback? onTap;
+  final double size;
 
   @override
   Widget build(BuildContext context) {
@@ -205,8 +284,8 @@ class _VideoThumb extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(10),
       child: Container(
-        height: 160,
-        width: 160,
+        height: size,
+        width: size,
         decoration: BoxDecoration(
           color: scheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(10),
@@ -283,9 +362,14 @@ class _VideoBadge extends StatelessWidget {
 /// サムネイル画像が取れる場合（YouTube）は背景に敷き、無い場合（ニコニコ）は
 /// 無地の再生カードにする。
 class _EmbedThumb extends StatelessWidget {
-  const _EmbedThumb({required this.video, required this.onTap});
+  const _EmbedThumb({
+    required this.video,
+    required this.onTap,
+    this.size = 160,
+  });
   final EmbedVideo video;
   final VoidCallback? onTap;
+  final double size;
 
   @override
   Widget build(BuildContext context) {
@@ -309,8 +393,8 @@ class _EmbedThumb extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(10),
       child: Container(
-        height: 160,
-        width: 200,
+        height: size,
+        width: size * 1.25,
         decoration: BoxDecoration(
           color: scheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(10),
@@ -373,15 +457,20 @@ class _EmbedThumb extends StatelessWidget {
 }
 
 class _Placeholder extends StatelessWidget {
-  const _Placeholder({required this.color, required this.child});
+  const _Placeholder({
+    required this.color,
+    required this.child,
+    this.size = 160,
+  });
   final Color color;
   final Widget child;
+  final double size;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 160,
-      width: 160,
+      height: size,
+      width: size,
       color: color,
       alignment: Alignment.center,
       child: child,
@@ -501,9 +590,7 @@ class _ZoomableImageState extends State<_ZoomableImage> {
   }
 
   void _resolveImageSize() {
-    final stream = NetworkImage(
-      widget.url,
-    ).resolve(const ImageConfiguration());
+    final stream = NetworkImage(widget.url).resolve(const ImageConfiguration());
     final listener = ImageStreamListener((info, _) {
       if (!mounted) return;
       setState(() {

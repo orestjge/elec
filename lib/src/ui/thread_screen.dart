@@ -18,7 +18,10 @@ import '../net/http_fetcher.dart';
 import '../net/imgur_uploader.dart';
 import '../net/ng_store.dart';
 import '../net/read_history.dart';
+import 'embed_urls.dart';
+import 'image_urls.dart';
 import 'ng_screen.dart';
+import 'post_images.dart';
 import 'post_item.dart';
 import 'write_auth.dart';
 
@@ -2329,8 +2332,36 @@ class _ComposerState extends State<_Composer> {
   bool _uploadingImage = false;
   bool _uploadingFile = false;
 
+  @override
+  void initState() {
+    super.initState();
+    // 本文中の URL から添付プレビューを作るので、テキスト変更で作り直す。
+    widget.controller.addListener(_onTextChanged);
+  }
+
+  @override
+  void didUpdateWidget(_Composer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_onTextChanged);
+      widget.controller.addListener(_onTextChanged);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_onTextChanged);
+    super.dispose();
+  }
+
+  void _onTextChanged() {
+    if (mounted) setState(() {});
+  }
+
   Future<void> _send() async {
-    final text = widget.controller.text;
+    // URL 挿入で末尾に付く改行は投稿本文に残さない。AA は末尾の空白が絵の
+    // 一部になりうるので、落とすのは末尾の改行だけにする。
+    final text = widget.controller.text.replaceAll(RegExp(r'\n+$'), '');
     if (!widget.enabled ||
         text.trim().isEmpty ||
         _sending ||
@@ -2382,7 +2413,9 @@ class _ComposerState extends State<_Composer> {
     final before = start > 0 ? text[start - 1] : '';
     final after = end < text.length ? text[end] : '';
     final prefix = before.isEmpty || before == '\n' ? '' : '\n';
-    final suffix = after.isEmpty || after == '\n' ? '' : '\n';
+    // URL の後ろは常に改行して次の入力を新しい行から始められるようにする。
+    // すでに直後が改行なら足さない。
+    final suffix = after == '\n' ? '' : '\n';
     final insertion = '$prefix$url$suffix';
     widget.controller.value = TextEditingValue(
       text: text.replaceRange(start, end, insertion),
@@ -2391,9 +2424,43 @@ class _ComposerState extends State<_Composer> {
     widget.focusNode.requestFocus();
   }
 
+  /// 添付プレビューの × から呼ばれ、本文中の該当 URL を取り除く。
+  /// URL に続く（なければ直前の）改行も一緒に消して空行を残さない。
+  void _removeUrl(Uri url) {
+    final controller = widget.controller;
+    final text = controller.text;
+    final raw = url.toString();
+    final index = text.indexOf(raw);
+    if (index < 0) return;
+    var start = index;
+    var end = index + raw.length;
+    if (end < text.length && text[end] == '\n') {
+      end += 1;
+    } else if (start > 0 && text[start - 1] == '\n') {
+      start -= 1;
+    }
+    final newText = text.replaceRange(start, end, '');
+    controller.value = TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(
+        offset: start.clamp(0, newText.length),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final text = widget.controller.text;
+    final imageUrls = imageUrlsIn(text);
+    final videoUrls = videoUrlsIn(text);
+    final audioUrls = audioUrlsIn(text);
+    final embedVideos = embedVideosIn(text);
+    final hasAttachments =
+        imageUrls.isNotEmpty ||
+        videoUrls.isNotEmpty ||
+        audioUrls.isNotEmpty ||
+        embedVideos.isNotEmpty;
     return SafeArea(
       top: false,
       child: Container(
@@ -2406,97 +2473,119 @@ class _ComposerState extends State<_Composer> {
           ),
         ),
         padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Expanded(
-              child: TextField(
-                controller: widget.controller,
-                focusNode: widget.focusNode,
-                enabled: widget.enabled,
-                minLines: 1,
-                maxLines: 5,
-                textInputAction: TextInputAction.newline,
-                decoration: InputDecoration(
-                  hintText: widget.enabled ? 'レスを書く' : '書き込み停止中',
-                  filled: true,
-                  fillColor: scheme.surfaceContainerHighest,
-                  // isDense で余分な最小高さを外し、1 行時の高さを送信ボタン
-                  // （44）に合わせる。
-                  isDense: true,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 13,
-                  ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(24),
-                    borderSide: BorderSide.none,
+            if (hasAttachments) ...[
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 160),
+                child: SingleChildScrollView(
+                  child: PostImages(
+                    urls: imageUrls,
+                    videoUrls: videoUrls,
+                    audioUrls: audioUrls,
+                    embedVideos: embedVideos,
+                    onRemove: _removeUrl,
+                    thumbSize: 96,
                   ),
                 ),
               ),
-            ),
-            const SizedBox(width: 8),
-            SizedBox(
-              width: 44,
-              height: 44,
-              child: IconButton(
-                padding: EdgeInsets.zero,
-                tooltip: '画像を追加',
-                onPressed:
-                    !widget.enabled ||
-                        _sending ||
-                        _uploadingImage ||
-                        _uploadingFile
-                    ? null
-                    : _attachImage,
-                icon: _uploadingImage
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.image_outlined, size: 22),
-              ),
-            ),
-            SizedBox(
-              width: 44,
-              height: 44,
-              child: IconButton(
-                padding: EdgeInsets.zero,
-                tooltip: 'ファイルを添付',
-                onPressed:
-                    !widget.enabled ||
-                        _sending ||
-                        _uploadingImage ||
-                        _uploadingFile
-                    ? null
-                    : _attachFile,
-                icon: _uploadingFile
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.attach_file, size: 22),
-              ),
-            ),
-            const SizedBox(width: 4),
-            // 送信ボタンは 1 行時の入力欄と同じ高さ（44）に固定。複数行に伸びた
-            // ら crossAxisAlignment.end で下端に留まる。
-            SizedBox(
-              width: 44,
-              height: 44,
-              child: IconButton.filled(
-                padding: EdgeInsets.zero,
-                onPressed: !widget.enabled || _sending ? null : _send,
-                icon: _sending
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.send, size: 20),
-              ),
+              const SizedBox(height: 10),
+            ],
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: widget.controller,
+                    focusNode: widget.focusNode,
+                    enabled: widget.enabled,
+                    minLines: 1,
+                    maxLines: 5,
+                    textInputAction: TextInputAction.newline,
+                    decoration: InputDecoration(
+                      hintText: widget.enabled ? 'レスを書く' : '書き込み停止中',
+                      filled: true,
+                      fillColor: scheme.surfaceContainerHighest,
+                      // isDense で余分な最小高さを外し、1 行時の高さを送信ボタン
+                      // （44）に合わせる。
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 13,
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(24),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 44,
+                  height: 44,
+                  child: IconButton(
+                    padding: EdgeInsets.zero,
+                    tooltip: '画像を追加',
+                    onPressed:
+                        !widget.enabled ||
+                            _sending ||
+                            _uploadingImage ||
+                            _uploadingFile
+                        ? null
+                        : _attachImage,
+                    icon: _uploadingImage
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.image_outlined, size: 22),
+                  ),
+                ),
+                SizedBox(
+                  width: 44,
+                  height: 44,
+                  child: IconButton(
+                    padding: EdgeInsets.zero,
+                    tooltip: 'ファイルを添付',
+                    onPressed:
+                        !widget.enabled ||
+                            _sending ||
+                            _uploadingImage ||
+                            _uploadingFile
+                        ? null
+                        : _attachFile,
+                    icon: _uploadingFile
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.attach_file, size: 22),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                // 送信ボタンは 1 行時の入力欄と同じ高さ（44）に固定。複数行に伸びた
+                // ら crossAxisAlignment.end で下端に留まる。
+                SizedBox(
+                  width: 44,
+                  height: 44,
+                  child: IconButton.filled(
+                    padding: EdgeInsets.zero,
+                    onPressed: !widget.enabled || _sending ? null : _send,
+                    icon: _sending
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.send, size: 20),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
