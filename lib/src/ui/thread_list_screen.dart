@@ -104,7 +104,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   double _verticalDragDistance = 0;
   bool _trackingSwipe = false;
   Timer? _swipeStartTimer;
-  static const double _swipeDistanceThreshold = 50;
+  static const double _swipeDistanceThreshold = 25;
   static const Duration _swipeStartTimeout = Duration(milliseconds: 450);
 
   /// 表示中の並び順（スレキー列）の固定スナップショット。実況板では最近レス順
