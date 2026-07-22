@@ -182,7 +182,7 @@ void main() {
     await tester.enterText(find.byType(TextField).at(0), '立てたスレ');
     await tester.enterText(find.byType(TextField).at(1), '本文');
     await tester.pump();
-    await tester.tap(find.widgetWithText(FilledButton, '立てる'));
+    await tester.tap(find.byKey(const ValueKey('new-thread-submit')));
     await tester.pumpAndSettle();
 
     expect(fetcher.postCalls, 1);
@@ -218,7 +218,7 @@ void main() {
     await tester.enterText(find.byType(TextField).at(0), 'A&B<C');
     await tester.enterText(find.byType(TextField).at(1), '本文');
     await tester.pump();
-    await tester.tap(find.widgetWithText(FilledButton, '立てる'));
+    await tester.tap(find.byKey(const ValueKey('new-thread-submit')));
     await tester.pumpAndSettle();
 
     expect(history.isOwnThread('2'), isTrue);

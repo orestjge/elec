@@ -38,6 +38,7 @@ class FetchResponse {
     required this.bodyBytes,
     this.headers = const {},
     this.setCookies = const [],
+    this.remoteIpVersion,
   });
 
   final int statusCode;
@@ -49,6 +50,10 @@ class FetchResponse {
   /// `Set-Cookie` の値（`name=value` 形式）。複数 cookie を潰さないため、
   /// ヘッダマップとは別にリストで持つ。
   final List<String> setCookies;
+
+  /// この通信で使った IP バージョン（`'IPv4'` / `'IPv6'`）。書き込み認証の
+  /// 切り分け診断に使う。実装が分からない場合は null。
+  final String? remoteIpVersion;
 
   String? header(String name) => headers[name.toLowerCase()];
 }
