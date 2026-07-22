@@ -164,11 +164,22 @@ String _errorMessage(String body) {
 
 /// 1 回の書き込み結果と、更新後のトークン。
 class WriteResult {
-  const WriteResult({required this.outcome, required this.tokens});
+  const WriteResult({
+    required this.outcome,
+    required this.tokens,
+    this.statusCode = 0,
+    this.remoteIpVersion,
+  });
   final BbsCgiResult outcome;
 
   /// 応答の Set-Cookie を反映したトークン。次回に持ち回すこと。
   final AuthTokens tokens;
+
+  /// 応答の HTTP ステータス。認証まわりの切り分け診断に使う。
+  final int statusCode;
+
+  /// この通信で使った IP バージョン（`'IPv4'` / `'IPv6'`）。分からなければ null。
+  final String? remoteIpVersion;
 }
 
 /// bbs.cgi への書き込み（レス・スレ立て）を行う。純ロジックで、通信は
@@ -236,6 +247,8 @@ class BbsWriter {
         headers: resp.headers,
       ),
       tokens: tokens.updatedFrom(resp.setCookies),
+      statusCode: resp.statusCode,
+      remoteIpVersion: resp.remoteIpVersion,
     );
   }
 }

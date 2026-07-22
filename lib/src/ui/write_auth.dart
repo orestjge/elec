@@ -14,6 +14,7 @@ Future<PostAccepted?> submitWithAuth({
   required AuthLauncher launcher,
   required Future<BbsCgiResult> Function() postOnce,
   ValueChanged<String>? onRejected,
+  String? Function()? diagnostics,
 }) async {
   final messenger = ScaffoldMessenger.of(context);
   final outcome = await postOnce();
@@ -36,9 +37,23 @@ Future<PostAccepted?> submitWithAuth({
           initialCode: authCode,
           onOpen: () => launcher.open(authUrl),
           onRetry: postOnce,
+          diagnostics: diagnostics,
         ),
       );
   }
+}
+
+/// 認証ダイアログに出す切り分け診断。**保存済みの edge-token があるのに
+/// `Unauthenticated` を受けた「異常時」だけ**文字列を返す（通常の初回認証では
+/// null）。外で再認証を求められる不具合の原因（Cookie を送っていないのか／
+/// サーバがトークンを無視して新規発行したのか／IP 版）を、その場で読めるように
+/// する。判明したら丸ごと消してよい。
+String? buildAuthDiagnostics(AuthTokens before, WriteResult result) {
+  if (result.outcome is! PostNeedsAuth || !before.hasEdgeToken) return null;
+  final rotated = before.edgeToken != result.tokens.edgeToken;
+  final ipv = result.remoteIpVersion ?? '不明';
+  return '診断: Cookie送信=あり / 応答=${result.statusCode} / '
+      'サーバ新token=${rotated ? '回転あり' : 'なし'} / 経路=$ipv';
 }
 
 /// 未認証時に出す認証ダイアログ。6 桁コードを見せ、ブラウザで開かせ、認証後の
@@ -52,6 +67,7 @@ class AuthDialog extends StatefulWidget {
     required this.initialCode,
     required this.onOpen,
     required this.onRetry,
+    this.diagnostics,
   });
 
   final String initialCode;
@@ -59,6 +75,10 @@ class AuthDialog extends StatefulWidget {
 
   /// 認証後の再送。最新の結果を返す（コードが更新されていれば反映する）。
   final Future<BbsCgiResult> Function() onRetry;
+
+  /// 切り分け診断の文字列を返すフック（[buildAuthDiagnostics]）。異常時のみ
+  /// 非 null。再送のたびに最新値を読み直せるよう、値でなく getter で受ける。
+  final String? Function()? diagnostics;
 
   @override
   State<AuthDialog> createState() => _AuthDialogState();
@@ -142,6 +162,31 @@ class _AuthDialogState extends State<AuthDialog> {
           if (_message != null) ...[
             const SizedBox(height: 12),
             Text(_message!, style: TextStyle(color: theme.colorScheme.error)),
+          ],
+          if (widget.diagnostics?.call() case final diag?) ...[
+            const SizedBox(height: 16),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: SelectableText(
+                diag,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  fontFeatures: const [],
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+            Text(
+              '※ トークンがあるのに認証を求められた異常時の診断です。'
+              'この内容をコピーして共有してください。',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
           ],
         ],
       ),

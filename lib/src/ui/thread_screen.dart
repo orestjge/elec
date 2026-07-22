@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:edge_core/edge_core.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
@@ -12,12 +11,12 @@ import '../net/auth_launcher.dart';
 import '../net/auth_store.dart';
 import '../net/endpoints.dart';
 import '../net/file_upload_settings.dart';
-import '../net/file_uploader.dart';
 import '../net/image_upload_settings.dart';
 import '../net/http_fetcher.dart';
 import '../net/imgur_uploader.dart';
 import '../net/ng_store.dart';
 import '../net/read_history.dart';
+import 'attachment_uploader.dart';
 import 'embed_urls.dart';
 import 'image_urls.dart';
 import 'ng_screen.dart';
@@ -116,6 +115,7 @@ class _ThreadScreenState extends State<ThreadScreen>
   late final ImgurUploader _imgurUploader;
   late final ImageUploadSettings _imageUploadSettings;
   late final FileUploadSettings _fileUploadSettings;
+  late final AttachmentUploader _uploader;
 
   /// NG 判定されたが、タップで一時的に表示したレス番号。
   final _revealedNg = <int>{};
@@ -166,7 +166,7 @@ class _ThreadScreenState extends State<ThreadScreen>
   bool _trackingSwipe = false;
   final _selectedBodyResNumbers = <int>{};
   Timer? _swipeStartTimer;
-  static const double _swipeDistanceThreshold = 50;
+  static const double _swipeDistanceThreshold = 25;
   static const Duration _swipeStartTimeout = Duration(milliseconds: 450);
   static const int _postRefreshAttempts = 4;
   static const Duration _postRefreshRetryDelay = Duration(milliseconds: 700);
@@ -198,6 +198,12 @@ class _ThreadScreenState extends State<ThreadScreen>
         widget.imageUploadSettings ?? ImageUploadSettings.shared;
     _fileUploadSettings =
         widget.fileUploadSettings ?? FileUploadSettings.shared;
+    _uploader = AttachmentUploader(
+      imagePicker: _imagePicker,
+      imgurUploader: _imgurUploader,
+      imageUploadSettings: _imageUploadSettings,
+      fileUploadSettings: _fileUploadSettings,
+    );
     _ng.addListener(_onNgChanged);
     _positions.itemPositions.addListener(_onPositions);
     WidgetsBinding.instance.addObserver(this);
@@ -1249,93 +1255,23 @@ class _ThreadScreenState extends State<ThreadScreen>
 
   // ---- 書き込み ----
 
-  static const _bundledImgurClientId = String.fromEnvironment(
-    'ELEC_DEFAULT_IMGUR_CLIENT_ID',
-  );
+  /// 直近の書き込みで作った認証診断（[buildAuthDiagnostics]）。異常時のみ非 null。
+  String? _authDiag;
 
   Future<Uri?> _pickAndUploadImage() async {
     final injected = widget.pickAndUploadImage;
     if (injected != null) return injected();
-    final uploader = _imageUploader();
-    if (!uploader.configured) {
-      _showSnack(_imageUploaderMissingMessage());
-      return null;
-    }
-    final image = await _imagePicker.pickImage(source: ImageSource.gallery);
-    if (image == null) return null;
-
-    _showSnack('画像をアップロード中...');
-    try {
-      final url = await uploader.upload(image);
-      if (mounted) _showSnack('画像URLを挿入しました');
-      return url;
-    } on ImgurUploadException catch (e) {
-      if (mounted) _showSnack(e.message);
-      return null;
-    } catch (e) {
-      if (mounted) _showSnack('画像アップロードに失敗しました: $e');
-      return null;
-    }
-  }
-
-  ImageUploader _imageUploader() {
-    final settings = _imageUploadSettings.snapshot;
-    return switch (settings.provider) {
-      ImageUploadProvider.defaultImgur =>
-        _bundledImgurClientId.isNotEmpty
-            ? const ImgurUploader(clientId: _bundledImgurClientId)
-            : _imgurUploader,
-      ImageUploadProvider.imgur => ImgurUploader(
-        clientId: settings.imgurClientId,
-      ),
-      ImageUploadProvider.imgbb => ImgBbUploader(apiKey: settings.imgbbApiKey),
-    };
-  }
-
-  String _imageUploaderMissingMessage() {
-    return switch (_imageUploadSettings.snapshot.provider) {
-      ImageUploadProvider.defaultImgur => '既定の Imgur Client ID が設定されていません',
-      ImageUploadProvider.imgur => 'Imgur Client ID が設定されていません',
-      ImageUploadProvider.imgbb => 'ImgBB API Key が設定されていません',
-    };
+    return _uploader.pickAndUploadImage(_showSnackIfMounted);
   }
 
   Future<Uri?> _pickAndUploadFile() async {
     final injected = widget.pickAndUploadFile;
     if (injected != null) return injected();
-
-    final picked = await FilePicker.pickFiles(withData: true);
-    final file = picked?.files.firstOrNull;
-    if (file == null) return null;
-
-    final bytes = file.bytes;
-    if (bytes == null) {
-      _showSnack('ファイルを読み込めませんでした');
-      return null;
-    }
-
-    _showSnack('ファイルをアップロード中...');
-    try {
-      final url = await _fileUploader().upload(
-        bytes: bytes,
-        filename: file.name,
-      );
-      if (mounted) _showSnack('ファイルURLを挿入しました');
-      return url;
-    } on FileUploadException catch (e) {
-      if (mounted) _showSnack(e.message);
-      return null;
-    } catch (e) {
-      if (mounted) _showSnack('ファイルのアップロードに失敗しました: $e');
-      return null;
-    }
+    return _uploader.pickAndUploadFile(_showSnackIfMounted);
   }
 
-  FileUploader _fileUploader() {
-    return switch (_fileUploadSettings.snapshot.provider) {
-      FileUploadProvider.catbox => const CatboxUploader(),
-      FileUploadProvider.uguu => const UguuUploader(),
-    };
+  void _showSnackIfMounted(String message) {
+    if (mounted) _showSnack(message);
   }
 
   /// 1 回だけ POST し、トークンを更新して結果を返す（UI 副作用なし）。
@@ -1348,14 +1284,16 @@ class _ThreadScreenState extends State<ThreadScreen>
       );
     }
     // HttpPoster は HttpFetcher の部分型ではないので明示キャストが要る。
+    final before = _authStore.tokens; // 送信前トークン（診断の基準）
     final result = await BbsWriter(fetcher as HttpPoster).post(
       bbsCgi: widget.endpoints.bbsCgi,
       board: widget.endpoints.boardKey,
       threadKey: widget.threadKey,
       message: text,
-      tokens: _authStore.tokens,
+      tokens: before,
     );
     await _authStore.setTokens(result.tokens); // edge/tinker を持ち回して永続化
+    _authDiag = buildAuthDiagnostics(before, result);
     return result.outcome;
   }
 
@@ -1366,6 +1304,7 @@ class _ThreadScreenState extends State<ThreadScreen>
       launcher: widget.authLauncher,
       postOnce: () => _postOnce(text),
       onRejected: _showSnack,
+      diagnostics: () => _authDiag,
     );
     if (accepted != null && mounted) {
       final resNum = accepted.resNum;
