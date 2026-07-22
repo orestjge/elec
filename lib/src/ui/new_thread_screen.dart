@@ -216,7 +216,7 @@ class _NewThreadScreenState extends State<NewThreadScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('スレを立てる')),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         children: [
           TextField(
             controller: _title,
@@ -225,13 +225,13 @@ class _NewThreadScreenState extends State<NewThreadScreen> {
             style: theme.textTheme.titleMedium?.copyWith(
               fontWeight: FontWeight.w600,
             ),
-            decoration: _plainInputDecoration(
+            decoration: _filledInputDecoration(
+              scheme,
               hintText: 'スレッドタイトル',
-              counterText: '',
             ),
           ),
-          Divider(height: 1, color: scheme.outlineVariant),
-          const SizedBox(height: 8),
+          _CharCount(length: _title.text.characters.length, max: _titleMax),
+          const SizedBox(height: 12),
           TextField(
             controller: _body,
             focusNode: _bodyFocus,
@@ -239,11 +239,9 @@ class _NewThreadScreenState extends State<NewThreadScreen> {
             minLines: 10,
             maxLines: 24,
             textInputAction: TextInputAction.newline,
-            decoration: _plainInputDecoration(
-              hintText: '本文を書く',
-              counterText: '',
-            ),
+            decoration: _filledInputDecoration(scheme, hintText: '本文を書く'),
           ),
+          _CharCount(length: _body.text.characters.length, max: _bodyMax),
           const SizedBox(height: 12),
           _AttachmentPreview(body: _body, onRemove: _removeUrl),
           const SizedBox(height: 12),
@@ -267,17 +265,53 @@ class _NewThreadScreenState extends State<NewThreadScreen> {
   }
 }
 
-InputDecoration _plainInputDecoration({
+/// レス入力欄・スレ内検索欄と同じ filled + 角丸スタイル。アプリ内で入力欄の
+/// 見た目を1系統に揃えるための共通デコレーション。
+InputDecoration _filledInputDecoration(
+  ColorScheme scheme, {
   required String hintText,
-  required String counterText,
 }) {
   return InputDecoration(
     hintText: hintText,
-    counterText: counterText,
-    border: InputBorder.none,
+    counterText: '',
+    filled: true,
+    fillColor: scheme.surfaceContainerHighest,
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(12),
+      borderSide: BorderSide.none,
+    ),
     isDense: true,
-    contentPadding: EdgeInsets.zero,
+    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
   );
+}
+
+/// 入力欄の下に出す控えめな文字数カウンタ。空欄では場所を取らず、上限に近づく
+/// と色で知らせる。上限自体は [TextField.maxLength] が弾く。
+class _CharCount extends StatelessWidget {
+  const _CharCount({required this.length, required this.max});
+
+  final int length;
+  final int max;
+
+  @override
+  Widget build(BuildContext context) {
+    if (length == 0) return const SizedBox(height: 4);
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final near = length >= max * 0.9;
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, right: 4),
+      child: Align(
+        alignment: Alignment.centerRight,
+        child: Text(
+          '$length / $max',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: near ? scheme.error : scheme.onSurfaceVariant,
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _NewThreadActions extends StatelessWidget {
