@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 
+import 'image_metadata.dart';
 import 'upload_filename.dart';
 
 abstract interface class ImageUploader {
@@ -39,7 +40,8 @@ class ImgurUploader implements ImageUploader {
     final client = _client ?? http.Client();
     final shouldClose = _client == null;
     try {
-      final bytes = await file.readAsBytes();
+      // 位置情報などの Exif を送信前に取り除く。
+      final bytes = stripImageMetadata(await file.readAsBytes());
       final req = http.MultipartRequest('POST', Uri.parse(endpoint))
         ..headers['Authorization'] = 'Client-ID ${clientId.trim()}'
         ..files.add(
@@ -114,7 +116,8 @@ class ImgBbUploader implements ImageUploader {
     final client = _client ?? http.Client();
     final shouldClose = _client == null;
     try {
-      final bytes = await file.readAsBytes();
+      // 位置情報などの Exif を送信前に取り除く。
+      final bytes = stripImageMetadata(await file.readAsBytes());
       final req = http.MultipartRequest('POST', Uri.parse(endpoint))
         ..fields['key'] = apiKey.trim()
         ..files.add(
