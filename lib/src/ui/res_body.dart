@@ -199,6 +199,8 @@ class ResBody extends StatefulWidget {
 
 class _ResBodyState extends State<ResBody> {
   final _recognizers = <TapGestureRecognizer>[];
+  final _focusNode = FocusNode();
+  bool _selectionActive = false;
 
   // URL か >>数字 を拾う。URL を先に（貪欲に）判定する。
   static final _pattern = RegExp(
@@ -206,7 +208,27 @@ class _ResBodyState extends State<ResBody> {
   );
 
   @override
+  void initState() {
+    super.initState();
+    _focusNode.addListener(_handleFocusChange);
+  }
+
+  // フォーカスを失うと選択も解除されるが、onSelectionChanged が collapsed で
+  // 呼ばれないことがあるため、フォーカス喪失を選択解除の確実な合図として使う。
+  void _handleFocusChange() {
+    if (!_focusNode.hasFocus) _setSelectionActive(false);
+  }
+
+  void _setSelectionActive(bool active) {
+    if (_selectionActive == active) return;
+    _selectionActive = active;
+    widget.onSelectionActiveChanged?.call(active);
+  }
+
+  @override
   void dispose() {
+    _focusNode.removeListener(_handleFocusChange);
+    _focusNode.dispose();
     _disposeRecognizers();
     super.dispose();
   }
@@ -291,8 +313,9 @@ class _ResBodyState extends State<ResBody> {
 
     final body = SelectableText.rich(
       TextSpan(style: effectiveStyle, children: spans),
+      focusNode: _focusNode,
       onSelectionChanged: (selection, cause) {
-        widget.onSelectionActiveChanged?.call(!selection.isCollapsed);
+        _setSelectionActive(!selection.isCollapsed);
       },
     );
     if (!isAsciiArt) return body;
