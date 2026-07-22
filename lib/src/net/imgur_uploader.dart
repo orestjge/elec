@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 
+import 'upload_filename.dart';
+
 abstract interface class ImageUploader {
   bool get configured;
   Future<Uri> upload(XFile file);
@@ -44,7 +46,8 @@ class ImgurUploader implements ImageUploader {
           http.MultipartFile.fromBytes(
             'image',
             bytes,
-            filename: file.name.isEmpty ? 'image' : file.name,
+            // 元のファイル名を送らず、ランダム名に置き換えて漏洩を防ぐ。
+            filename: randomizedUploadFilename(file.name),
           ),
         );
       final streamed = await client.send(req);
@@ -118,7 +121,8 @@ class ImgBbUploader implements ImageUploader {
           http.MultipartFile.fromBytes(
             'image',
             bytes,
-            filename: file.name.isEmpty ? 'image' : file.name,
+            // 元のファイル名を送らず、ランダム名に置き換えて漏洩を防ぐ。
+            filename: randomizedUploadFilename(file.name),
           ),
         );
       final streamed = await client.send(req);
