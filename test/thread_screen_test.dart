@@ -161,6 +161,40 @@ void main() {
     expect(find.byTooltip('次の一致'), findsOneWidget);
   });
 
+  testWidgets('スレ内検索は本文の一致箇所を背景色でハイライトする', (tester) async {
+    final f = QueueFetcher([
+      ok([...res1, ...res2, ...res3]),
+    ]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('テストスレ').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('スレ内検索'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'スレ内検索'), 'あとから');
+    await tester.pumpAndSettle();
+
+    // 本文（SelectableText.rich）の一致語だけに背景色が載っている。
+    var highlighted = 0;
+    for (final e in tester.widgetList<EditableText>(find.byType(EditableText))) {
+      final span = e.controller.buildTextSpan(
+        context: tester.element(find.byType(EditableText).first),
+        style: e.style,
+        withComposing: false,
+      );
+      span.visitChildren((s) {
+        if (s is TextSpan &&
+            s.text == 'あとから' &&
+            s.style?.backgroundColor != null) {
+          highlighted++;
+        }
+        return true;
+      });
+    }
+    expect(highlighted, greaterThan(0));
+  });
+
   testWidgets('スレ内検索は該当なしを表示して閉じられる', (tester) async {
     final f = QueueFetcher([
       ok([...res1, ...res2]),

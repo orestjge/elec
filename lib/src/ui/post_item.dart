@@ -26,6 +26,8 @@ class PostItem extends StatelessWidget {
     this.onLongPress,
     this.isOwn = false,
     this.blurImages = false,
+    this.highlightQuery = '',
+    this.isCurrentMatch = false,
   });
 
   final Res res;
@@ -70,6 +72,12 @@ class PostItem extends StatelessWidget {
   /// この画像に「グロ」注意が付いており、サムネイルへモザイクを掛けるか。
   final bool blurImages;
 
+  /// スレ内検索中の検索語。空でなければ名前・本文の一致箇所をハイライトする。
+  final String highlightQuery;
+
+  /// このレスが現在ジャンプ中の一致レスか。アイテムごと強調する。
+  final bool isCurrentMatch;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -97,11 +105,20 @@ class PostItem extends StatelessWidget {
     final audios = audioUrlsIn(body);
     final embeds = embedVideosIn(body);
 
+    // 現在ジャンプ中の一致レスは、左のアクセント帯と薄い背景でひと目で分かる
+    // ようにする（左パディングを帯の分だけ詰めて本文位置は揃える）。
     final content = Container(
-      color: isOwn
-          ? scheme.secondaryContainer.withValues(alpha: 0.22)
-          : Colors.transparent,
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      decoration: BoxDecoration(
+        color: isCurrentMatch
+            ? scheme.tertiaryContainer.withValues(alpha: 0.32)
+            : isOwn
+            ? scheme.secondaryContainer.withValues(alpha: 0.22)
+            : Colors.transparent,
+        border: isCurrentMatch
+            ? Border(left: BorderSide(color: scheme.tertiary, width: 3))
+            : null,
+      ),
+      padding: EdgeInsets.fromLTRB(isCurrentMatch ? 13 : 16, 12, 16, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -113,6 +130,7 @@ class PostItem extends StatelessWidget {
             onTapId: onTapId,
             onReply: onReply,
             isOwn: isOwn,
+            highlightQuery: highlightQuery,
           ),
           if (body.isNotEmpty) ...[
             const SizedBox(height: 6),
@@ -123,6 +141,7 @@ class PostItem extends StatelessWidget {
               onTapResRange: (numbers) => onTapResRange?.call(numbers),
               onTapUrl: (u) => onTapUrl?.call(u),
               onSelectionActiveChanged: onBodySelectionActiveChanged,
+              highlightQuery: highlightQuery,
             ),
           ],
           if (images.isNotEmpty ||
@@ -209,6 +228,7 @@ class _Header extends StatelessWidget {
     required this.onTapId,
     required this.onReply,
     required this.isOwn,
+    this.highlightQuery = '',
   });
 
   final Res res;
@@ -218,6 +238,7 @@ class _Header extends StatelessWidget {
   final ValueChanged<String>? onTapId;
   final ValueChanged<int>? onReply;
   final bool isOwn;
+  final String highlightQuery;
 
   @override
   Widget build(BuildContext context) {
@@ -256,7 +277,7 @@ class _Header extends StatelessWidget {
                   constraints: BoxConstraints(maxWidth: constraints.maxWidth),
                   child: _HeaderSlot(
                     height: lineHeight,
-                    child: _NameLabel(name: name),
+                    child: _NameLabel(name: name, highlightQuery: highlightQuery),
                   ),
                 ),
                 // チップは固定高さのスロットに入れない。狭いときは中身に応じて
@@ -324,22 +345,36 @@ class _HeaderSlot extends StatelessWidget {
 }
 
 class _NameLabel extends StatelessWidget {
-  const _NameLabel({required this.name});
+  const _NameLabel({required this.name, this.highlightQuery = ''});
   final String name;
+  final String highlightQuery;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final label = Text(
-      name,
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      style: theme.textTheme.labelLarge?.copyWith(
-        color: theme.colorScheme.onSurface,
-        fontWeight: FontWeight.w600,
-        leadingDistribution: TextLeadingDistribution.even,
-      ),
+    final style = theme.textTheme.labelLarge?.copyWith(
+      color: theme.colorScheme.onSurface,
+      fontWeight: FontWeight.w600,
+      leadingDistribution: TextLeadingDistribution.even,
     );
+    final queryLower = highlightQuery.trim().toLowerCase();
+    final Widget label;
+    if (queryLower.isEmpty) {
+      label = Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: style);
+    } else {
+      final spans = <InlineSpan>[];
+      appendHighlighted(
+        spans,
+        name,
+        queryLower,
+        searchHighlightStyle(theme.colorScheme),
+      );
+      label = Text.rich(
+        TextSpan(style: style, children: spans),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      );
+    }
     if (name.isEmpty) return label;
     return Tooltip(
       message: name,

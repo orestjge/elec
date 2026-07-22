@@ -126,7 +126,6 @@ class _ThreadScreenState extends State<ThreadScreen>
   final _composerKey = GlobalKey();
   final _searchController = TextEditingController();
   final _searchFocus = FocusNode();
-  final _searchFocusTimers = <Timer>[];
 
   /// 一覧の各行。Res（レス）か [_NewArrivalLine]（新着境界）のどちらか。
   List<Object> _items = const [];
@@ -241,7 +240,6 @@ class _ThreadScreenState extends State<ThreadScreen>
     _swipeStartTimer?.cancel();
     _topSnackTimer?.cancel();
     _topSnackEntry?.remove();
-    _cancelSearchFocusTimers();
     _composer.dispose();
     _composerFocus.dispose();
     _searchController.dispose();
@@ -370,9 +368,7 @@ class _ThreadScreenState extends State<ThreadScreen>
     if (_state.pastLog || _notFound) return;
     if (_fetching || !mounted) return;
     _fetching = true;
-    final keepSearchFocus = _searching && _searchFocus.hasFocus;
     setState(() => _polling = true);
-    _restoreSearchFocusSoon(keepSearchFocus);
     try {
       final wasAtBottom = _atBottom;
       final wasShortContent = _contentFitsViewport();
@@ -390,7 +386,6 @@ class _ThreadScreenState extends State<ThreadScreen>
         _awaitingOwnPost = false; // 自分のレスが現れたので再取得ループを止める
         if (!mounted) return;
         setState(() => _state = r.state);
-        _restoreSearchFocusSoon(keepSearchFocus);
         if (_searching) return;
         // 末尾に居たなら追従する。
         if (wasShortContent) {
@@ -403,10 +398,7 @@ class _ThreadScreenState extends State<ThreadScreen>
       // ポーリング失敗は無視。次周期で回復を試みる。
     } finally {
       _fetching = false;
-      if (mounted) {
-        setState(() => _polling = false);
-        _restoreSearchFocusSoon(keepSearchFocus);
-      }
+      if (mounted) setState(() => _polling = false);
     }
   }
 
@@ -559,14 +551,22 @@ class _ThreadScreenState extends State<ThreadScreen>
     return _state.res.where((res) => _searchText(res).contains(query)).toList();
   }
 
+  // レス番号ごとの検索用テキスト（小文字化済み）。dat は追記のみで既存レスは
+  // 不変なので番号でキャッシュしてよい。毎打鍵・毎ポーリングで htmlToText を
+  // 全レスに掛け直すと長いスレでカクついて入力が落ちるため。
+  final _searchTextCache = <int, String>{};
+
   String _searchText(Res res) {
-    return [
-      '${res.number}',
-      htmlToText(res.name),
-      res.dateText,
-      if (res.id != null) 'ID:${res.id}',
-      htmlToText(res.body),
-    ].join('\n').toLowerCase();
+    return _searchTextCache.putIfAbsent(
+      res.number,
+      () => [
+        '${res.number}',
+        htmlToText(res.name),
+        res.dateText,
+        if (res.id != null) 'ID:${res.id}',
+        htmlToText(res.body),
+      ].join('\n').toLowerCase(),
+    );
   }
 
   void _startSearch() {
@@ -579,24 +579,13 @@ class _ThreadScreenState extends State<ThreadScreen>
 
   void _restoreSearchFocusSoon(bool shouldRestore) {
     if (!shouldRestore) return;
-    _cancelSearchFocusTimers();
-    void request() {
-      if (!mounted || !_searching || _searchFocus.hasFocus) return;
-      _searchFocus.requestFocus();
-    }
-
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      request();
-      _searchFocusTimers.add(Timer(const Duration(milliseconds: 80), request));
-      _searchFocusTimers.add(Timer(const Duration(milliseconds: 180), request));
+      if (!mounted || !_searching || _searchFocus.hasFocus) return;
+      // IME 変換中に requestFocus すると入力連携が張り直され、変換中の文字が
+      // 消える。確定前は触らない。
+      if (_searchController.value.composing.isValid) return;
+      _searchFocus.requestFocus();
     });
-  }
-
-  void _cancelSearchFocusTimers() {
-    for (final timer in _searchFocusTimers) {
-      timer.cancel();
-    }
-    _searchFocusTimers.clear();
   }
 
   void _closeSearch() {
@@ -605,12 +594,14 @@ class _ThreadScreenState extends State<ThreadScreen>
       _currentSearchIndex = 0;
       _searchController.clear();
     });
-    _cancelSearchFocusTimers();
     _searchFocus.unfocus();
   }
 
   void _onSearchChanged(String value) {
     setState(() => _currentSearchIndex = 0);
+    // IME 変換確定前はスクロールを走らせない。変換中に list を scrollTo すると
+    // 入力の妨げになり、確定前の文字が落ちることがある。
+    if (_searchController.value.composing.isValid) return;
     if (value.trim().isNotEmpty) _jumpToCurrentSearchMatch();
   }
 
@@ -1537,7 +1528,9 @@ class _ThreadScreenState extends State<ThreadScreen>
                   ),
                 ),
               ),
-        bottom: _polling
+        // 検索中はポーリングのインジケータで AppBar の高さ・構造を毎回変えない。
+        // 5秒ごとの再構築で検索欄がちらつく・IME を妨げるのを避ける。
+        bottom: _polling && !_searching
             ? const PreferredSize(
                 preferredSize: Size.fromHeight(2),
                 child: LinearProgressIndicator(minHeight: 2),
@@ -1605,6 +1598,14 @@ class _ThreadScreenState extends State<ThreadScreen>
     // 未読（まだスクロールで到達していない）レス数。スクロールで減る。
     final unread = res.length - _furthestRead;
 
+    // スレ内検索中は一致箇所をハイライトし、今ジャンプ先の一致レスを強調する。
+    final searchQuery = _searching ? _searchController.text.trim() : '';
+    final searchMatches = searchQuery.isEmpty ? const <Res>[] : _searchMatches;
+    final currentMatchNumber = searchMatches.isEmpty
+        ? null
+        : searchMatches[math.min(_currentSearchIndex, searchMatches.length - 1)]
+              .number;
+
     return Stack(
       children: [
         RefreshIndicator(
@@ -1649,6 +1650,8 @@ class _ThreadScreenState extends State<ThreadScreen>
                       onLongPress: () => _showResActions(item),
                       isOwn: _history.isOwnPost(widget.threadKey, item.number),
                       blurImages: guroMasked.contains(item.number),
+                      highlightQuery: searchQuery,
+                      isCurrentMatch: item.number == currentMatchNumber,
                     ),
                   const Divider(height: 1),
                 ],
