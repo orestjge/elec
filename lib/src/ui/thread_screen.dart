@@ -126,6 +126,7 @@ class _ThreadScreenState extends State<ThreadScreen>
   final _composerKey = GlobalKey();
   final _searchController = TextEditingController();
   final _searchFocus = FocusNode();
+  final _searchFocusTimers = <Timer>[];
 
   /// 一覧の各行。Res（レス）か [_NewArrivalLine]（新着境界）のどちらか。
   List<Object> _items = const [];
@@ -240,6 +241,7 @@ class _ThreadScreenState extends State<ThreadScreen>
     _swipeStartTimer?.cancel();
     _topSnackTimer?.cancel();
     _topSnackEntry?.remove();
+    _cancelSearchFocusTimers();
     _composer.dispose();
     _composerFocus.dispose();
     _searchController.dispose();
@@ -577,10 +579,24 @@ class _ThreadScreenState extends State<ThreadScreen>
 
   void _restoreSearchFocusSoon(bool shouldRestore) {
     if (!shouldRestore) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    _cancelSearchFocusTimers();
+    void request() {
       if (!mounted || !_searching || _searchFocus.hasFocus) return;
       _searchFocus.requestFocus();
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      request();
+      _searchFocusTimers.add(Timer(const Duration(milliseconds: 80), request));
+      _searchFocusTimers.add(Timer(const Duration(milliseconds: 180), request));
     });
+  }
+
+  void _cancelSearchFocusTimers() {
+    for (final timer in _searchFocusTimers) {
+      timer.cancel();
+    }
+    _searchFocusTimers.clear();
   }
 
   void _closeSearch() {
@@ -589,6 +605,7 @@ class _ThreadScreenState extends State<ThreadScreen>
       _currentSearchIndex = 0;
       _searchController.clear();
     });
+    _cancelSearchFocusTimers();
     _searchFocus.unfocus();
   }
 
@@ -1082,8 +1099,8 @@ class _ThreadScreenState extends State<ThreadScreen>
   }
 
   /// スレタイトルの全文を折り返して表示する（AppBar では省略されるため）。
-  void _showFullTitle() {
-    showModalBottomSheet<void>(
+  Future<void> _showFullTitle() async {
+    final action = await showModalBottomSheet<_ThreadTitleAction>(
       context: context,
       showDragHandle: true,
       builder: (context) {
@@ -1121,8 +1138,7 @@ class _ThreadScreenState extends State<ThreadScreen>
                     onTap: _state.res.isEmpty
                         ? null
                         : () {
-                            Navigator.pop(context);
-                            _startSearch();
+                            Navigator.pop(context, _ThreadTitleAction.search);
                           },
                   ),
                   ListTile(
@@ -1165,6 +1181,13 @@ class _ThreadScreenState extends State<ThreadScreen>
         );
       },
     );
+    if (!mounted) return;
+    switch (action) {
+      case _ThreadTitleAction.search:
+        _startSearch();
+      case null:
+        break;
+    }
   }
 
   Future<void> _toggleNgCreator(String metadent) async {
@@ -1729,6 +1752,8 @@ class _ThreadSearchField extends StatelessWidget {
     );
   }
 }
+
+enum _ThreadTitleAction { search }
 
 /// 右端のファストスクロール用つまみ。長いスレで一気に距離を移動できる。
 ///

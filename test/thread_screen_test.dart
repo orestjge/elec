@@ -148,6 +148,10 @@ void main() {
     await tester.tap(find.text('スレ内検索'));
     await tester.pumpAndSettle();
     expect(find.widgetWithText(TextField, 'スレ内検索'), findsOneWidget);
+    final field = tester.widget<TextField>(
+      find.widgetWithText(TextField, 'スレ内検索'),
+    );
+    expect(field.focusNode!.hasFocus, isTrue);
 
     await tester.enterText(find.widgetWithText(TextField, 'スレ内検索'), 'あとから');
     await tester.pumpAndSettle();
