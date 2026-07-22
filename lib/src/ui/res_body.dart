@@ -169,6 +169,40 @@ int _runLengthEncodedLength(List<String> lines) {
   return length;
 }
 
+/// [text] のうち [queryLower]（小文字化済み・非空）に一致する箇所へ
+/// [highlightStyle] を当てた span 列を [out] に追記する。残りは素の span。
+/// スレ内検索で「どこが一致したか」を可視化するのに使う。
+void appendHighlighted(
+  List<InlineSpan> out,
+  String text,
+  String queryLower,
+  TextStyle highlightStyle,
+) {
+  if (text.isEmpty) return;
+  if (queryLower.isEmpty) {
+    out.add(TextSpan(text: text));
+    return;
+  }
+  final lower = text.toLowerCase();
+  var i = 0;
+  while (i < text.length) {
+    final idx = lower.indexOf(queryLower, i);
+    if (idx < 0) {
+      out.add(TextSpan(text: text.substring(i)));
+      return;
+    }
+    if (idx > i) out.add(TextSpan(text: text.substring(i, idx)));
+    final end = idx + queryLower.length;
+    out.add(TextSpan(text: text.substring(idx, end), style: highlightStyle));
+    i = end;
+  }
+}
+
+/// スレ内検索の一致ハイライト色。地の文の色は変えず背景だけ薄く敷く（半透明の
+/// ため明暗どちらのテーマでも本文が読める）。
+TextStyle searchHighlightStyle(ColorScheme scheme) =>
+    TextStyle(backgroundColor: scheme.tertiary.withValues(alpha: 0.32));
+
 /// レス本文。`>>123` / `>>3-5` のレス参照と URL をタップ可能にして表示する。
 ///
 /// - `>>N` タップ → [onTapRes]（該当レスへスクロール）
@@ -184,6 +218,7 @@ class ResBody extends StatefulWidget {
     this.onTapResRange,
     this.onSelectionActiveChanged,
     this.style,
+    this.highlightQuery = '',
   });
 
   final String text;
@@ -192,6 +227,10 @@ class ResBody extends StatefulWidget {
   final ValueChanged<Uri> onTapUrl;
   final ValueChanged<bool>? onSelectionActiveChanged;
   final TextStyle? style;
+
+  /// スレ内検索中の検索語（小文字化前でよい）。空でなければ本文の一致箇所を
+  /// ハイライトする。
+  final String highlightQuery;
 
   @override
   State<ResBody> createState() => _ResBodyState();
@@ -258,10 +297,14 @@ class _ResBodyState extends State<ResBody> {
     final effectiveStyle = isAsciiArt
         ? _asciiArtStyle(context, widget.style)
         : widget.style;
+    final queryLower = widget.highlightQuery.trim().toLowerCase();
+    final highlightStyle = searchHighlightStyle(theme.colorScheme);
+    void addPlain(String part) =>
+        appendHighlighted(spans, part, queryLower, highlightStyle);
     var last = 0;
     for (final m in _pattern.allMatches(text)) {
       if (m.start > last) {
-        spans.add(TextSpan(text: text.substring(last, m.start)));
+        addPlain(text.substring(last, m.start));
       }
       final url = m.group(1);
       if (url != null) {
@@ -308,7 +351,7 @@ class _ResBodyState extends State<ResBody> {
       last = m.end;
     }
     if (last < text.length) {
-      spans.add(TextSpan(text: text.substring(last)));
+      addPlain(text.substring(last));
     }
 
     final body = SelectableText.rich(

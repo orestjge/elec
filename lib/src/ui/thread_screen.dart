@@ -386,6 +386,7 @@ class _ThreadScreenState extends State<ThreadScreen>
         _awaitingOwnPost = false; // 自分のレスが現れたので再取得ループを止める
         if (!mounted) return;
         setState(() => _state = r.state);
+        if (_searching) return;
         // 末尾に居たなら追従する。
         if (wasShortContent) {
           _scrollToTopSoon();
@@ -500,6 +501,7 @@ class _ThreadScreenState extends State<ThreadScreen>
 
   Future<void> _refresh() async {
     try {
+      final keepSearchFocus = _searching && _searchFocus.hasFocus;
       final previousResCount = _state.res.length;
       final r = await _dat.fetch(_url, prev: _state);
       if (!mounted) return;
@@ -514,6 +516,7 @@ class _ThreadScreenState extends State<ThreadScreen>
         _loading = false;
         _error = null;
       });
+      _restoreSearchFocusSoon(keepSearchFocus);
     } catch (e) {
       if (!mounted) return;
       if (_state.isEmpty) setState(() => _error = e);
@@ -548,14 +551,22 @@ class _ThreadScreenState extends State<ThreadScreen>
     return _state.res.where((res) => _searchText(res).contains(query)).toList();
   }
 
+  // レス番号ごとの検索用テキスト（小文字化済み）。dat は追記のみで既存レスは
+  // 不変なので番号でキャッシュしてよい。毎打鍵・毎ポーリングで htmlToText を
+  // 全レスに掛け直すと長いスレでカクついて入力が落ちるため。
+  final _searchTextCache = <int, String>{};
+
   String _searchText(Res res) {
-    return [
-      '${res.number}',
-      htmlToText(res.name),
-      res.dateText,
-      if (res.id != null) 'ID:${res.id}',
-      htmlToText(res.body),
-    ].join('\n').toLowerCase();
+    return _searchTextCache.putIfAbsent(
+      res.number,
+      () => [
+        '${res.number}',
+        htmlToText(res.name),
+        res.dateText,
+        if (res.id != null) 'ID:${res.id}',
+        htmlToText(res.body),
+      ].join('\n').toLowerCase(),
+    );
   }
 
   void _startSearch() {
@@ -563,8 +574,17 @@ class _ThreadScreenState extends State<ThreadScreen>
       _searching = true;
       _currentSearchIndex = 0;
     });
+    _restoreSearchFocusSoon(true);
+  }
+
+  void _restoreSearchFocusSoon(bool shouldRestore) {
+    if (!shouldRestore) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _searchFocus.requestFocus();
+      if (!mounted || !_searching || _searchFocus.hasFocus) return;
+      // IME 変換中に requestFocus すると入力連携が張り直され、変換中の文字が
+      // 消える。確定前は触らない。
+      if (_searchController.value.composing.isValid) return;
+      _searchFocus.requestFocus();
     });
   }
 
@@ -579,6 +599,9 @@ class _ThreadScreenState extends State<ThreadScreen>
 
   void _onSearchChanged(String value) {
     setState(() => _currentSearchIndex = 0);
+    // IME 変換確定前はスクロールを走らせない。変換中に list を scrollTo すると
+    // 入力の妨げになり、確定前の文字が落ちることがある。
+    if (_searchController.value.composing.isValid) return;
     if (value.trim().isNotEmpty) _jumpToCurrentSearchMatch();
   }
 
@@ -595,7 +618,8 @@ class _ThreadScreenState extends State<ThreadScreen>
   void _jumpToCurrentSearchMatch() {
     final matches = _searchMatches;
     if (matches.isEmpty) return;
-    final index = _indexForResNumber(matches[_currentSearchIndex].number);
+    final matchIndex = math.min(_currentSearchIndex, matches.length - 1);
+    final index = _indexForResNumber(matches[matchIndex].number);
     if (index == null || !_itemScroll.isAttached) return;
     _itemScroll.scrollTo(
       index: index,
@@ -1066,8 +1090,8 @@ class _ThreadScreenState extends State<ThreadScreen>
   }
 
   /// スレタイトルの全文を折り返して表示する（AppBar では省略されるため）。
-  void _showFullTitle() {
-    showModalBottomSheet<void>(
+  Future<void> _showFullTitle() async {
+    final action = await showModalBottomSheet<_ThreadTitleAction>(
       context: context,
       showDragHandle: true,
       builder: (context) {
@@ -1105,8 +1129,7 @@ class _ThreadScreenState extends State<ThreadScreen>
                     onTap: _state.res.isEmpty
                         ? null
                         : () {
-                            Navigator.pop(context);
-                            _startSearch();
+                            Navigator.pop(context, _ThreadTitleAction.search);
                           },
                   ),
                   ListTile(
@@ -1149,6 +1172,13 @@ class _ThreadScreenState extends State<ThreadScreen>
         );
       },
     );
+    if (!mounted) return;
+    switch (action) {
+      case _ThreadTitleAction.search:
+        _startSearch();
+      case null:
+        break;
+    }
   }
 
   Future<void> _toggleNgCreator(String metadent) async {
@@ -1498,7 +1528,9 @@ class _ThreadScreenState extends State<ThreadScreen>
                   ),
                 ),
               ),
-        bottom: _polling
+        // 検索中はポーリングのインジケータで AppBar の高さ・構造を毎回変えない。
+        // 5秒ごとの再構築で検索欄がちらつく・IME を妨げるのを避ける。
+        bottom: _polling && !_searching
             ? const PreferredSize(
                 preferredSize: Size.fromHeight(2),
                 child: LinearProgressIndicator(minHeight: 2),
@@ -1566,6 +1598,14 @@ class _ThreadScreenState extends State<ThreadScreen>
     // 未読（まだスクロールで到達していない）レス数。スクロールで減る。
     final unread = res.length - _furthestRead;
 
+    // スレ内検索中は一致箇所をハイライトし、今ジャンプ先の一致レスを強調する。
+    final searchQuery = _searching ? _searchController.text.trim() : '';
+    final searchMatches = searchQuery.isEmpty ? const <Res>[] : _searchMatches;
+    final currentMatchNumber = searchMatches.isEmpty
+        ? null
+        : searchMatches[math.min(_currentSearchIndex, searchMatches.length - 1)]
+              .number;
+
     return Stack(
       children: [
         RefreshIndicator(
@@ -1610,6 +1650,8 @@ class _ThreadScreenState extends State<ThreadScreen>
                       onLongPress: () => _showResActions(item),
                       isOwn: _history.isOwnPost(widget.threadKey, item.number),
                       blurImages: guroMasked.contains(item.number),
+                      highlightQuery: searchQuery,
+                      isCurrentMatch: item.number == currentMatchNumber,
                     ),
                   const Divider(height: 1),
                 ],
@@ -1713,6 +1755,8 @@ class _ThreadSearchField extends StatelessWidget {
     );
   }
 }
+
+enum _ThreadTitleAction { search }
 
 /// 右端のファストスクロール用つまみ。長いスレで一気に距離を移動できる。
 ///
