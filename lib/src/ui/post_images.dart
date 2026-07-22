@@ -20,6 +20,7 @@ class PostImages extends StatelessWidget {
     this.embedVideos = const [],
     this.onTapVideo,
     this.onTapEmbed,
+    this.onRemove,
     this.blurImages = false,
   });
 
@@ -35,8 +36,27 @@ class PostImages extends StatelessWidget {
   final ValueChanged<Uri>? onTapVideo;
   final ValueChanged<Uri>? onTapEmbed;
 
+  /// 指定すると各サムネイルに削除（×）ボタンを重ね、押すとその URL を渡す。
+  /// 入力欄の添付プレビューで、本文から URL を取り消すために使う。
+  final ValueChanged<Uri>? onRemove;
+
   /// このレスの画像に「グロ」注意が付いており、サムネイルへモザイクを掛けるか。
   final bool blurImages;
+
+  Widget _removable(Uri url, Widget child) {
+    if (onRemove == null) return child;
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        child,
+        Positioned(
+          top: 4,
+          right: 4,
+          child: _RemoveButton(onTap: () => onRemove!(url)),
+        ),
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -53,27 +73,66 @@ class PostImages extends StatelessWidget {
               runSpacing: 8,
               children: [
                 for (var i = 0; i < urls.length; i++)
-                  _Thumb(urls: urls, index: i, blurred: blurImages),
+                  _removable(
+                    urls[i],
+                    _Thumb(urls: urls, index: i, blurred: blurImages),
+                  ),
                 for (final url in videoUrls)
-                  _VideoThumb(
-                    url: url,
-                    onTap: onTapVideo == null ? null : () => onTapVideo!(url),
+                  _removable(
+                    url,
+                    _VideoThumb(
+                      url: url,
+                      onTap: onTapVideo == null ? null : () => onTapVideo!(url),
+                    ),
                   ),
                 for (final video in embedVideos)
-                  _EmbedThumb(
-                    video: video,
-                    onTap: onTapEmbed == null
-                        ? null
-                        : () => onTapEmbed!(video.url),
+                  _removable(
+                    video.url,
+                    _EmbedThumb(
+                      video: video,
+                      onTap: onTapEmbed == null
+                          ? null
+                          : () => onTapEmbed!(video.url),
+                    ),
                   ),
               ],
             ),
           for (var i = 0; i < audioUrls.length; i++)
             Padding(
               padding: EdgeInsets.only(top: (hasThumbs || i > 0) ? 8 : 0),
-              child: AudioPlayerTile(url: audioUrls[i]),
+              child: onRemove == null
+                  ? AudioPlayerTile(url: audioUrls[i])
+                  : Row(
+                      children: [
+                        Expanded(child: AudioPlayerTile(url: audioUrls[i])),
+                        const SizedBox(width: 4),
+                        _RemoveButton(onTap: () => onRemove!(audioUrls[i])),
+                      ],
+                    ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// サムネイル右上に重ねる削除ボタン。
+class _RemoveButton extends StatelessWidget {
+  const _RemoveButton({required this.onTap});
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.black.withValues(alpha: 0.55),
+      shape: const CircleBorder(),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: const Padding(
+          padding: EdgeInsets.all(3),
+          child: Icon(Icons.close, size: 18, color: Colors.white),
+        ),
       ),
     );
   }
@@ -501,9 +560,7 @@ class _ZoomableImageState extends State<_ZoomableImage> {
   }
 
   void _resolveImageSize() {
-    final stream = NetworkImage(
-      widget.url,
-    ).resolve(const ImageConfiguration());
+    final stream = NetworkImage(widget.url).resolve(const ImageConfiguration());
     final listener = ImageStreamListener((info, _) {
       if (!mounted) return;
       setState(() {
