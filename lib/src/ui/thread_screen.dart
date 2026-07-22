@@ -2348,7 +2348,9 @@ class _ComposerState extends State<_Composer> {
   }
 
   Future<void> _send() async {
-    final text = widget.controller.text;
+    // URL 挿入で末尾に付く改行は投稿本文に残さない。AA は末尾の空白が絵の
+    // 一部になりうるので、落とすのは末尾の改行だけにする。
+    final text = widget.controller.text.replaceAll(RegExp(r'\n+$'), '');
     if (!widget.enabled ||
         text.trim().isEmpty ||
         _sending ||
@@ -2400,7 +2402,9 @@ class _ComposerState extends State<_Composer> {
     final before = start > 0 ? text[start - 1] : '';
     final after = end < text.length ? text[end] : '';
     final prefix = before.isEmpty || before == '\n' ? '' : '\n';
-    final suffix = after.isEmpty || after == '\n' ? '' : '\n';
+    // URL の後ろは常に改行して次の入力を新しい行から始められるようにする。
+    // すでに直後が改行なら足さない。
+    final suffix = after == '\n' ? '' : '\n';
     final insertion = '$prefix$url$suffix';
     widget.controller.value = TextEditingValue(
       text: text.replaceRange(start, end, insertion),
@@ -2462,9 +2466,9 @@ class _ComposerState extends State<_Composer> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (hasAttachments)
+            if (hasAttachments) ...[
               ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 220),
+                constraints: const BoxConstraints(maxHeight: 160),
                 child: SingleChildScrollView(
                   child: PostImages(
                     urls: imageUrls,
@@ -2472,9 +2476,12 @@ class _ComposerState extends State<_Composer> {
                     audioUrls: audioUrls,
                     embedVideos: embedVideos,
                     onRemove: _removeUrl,
+                    thumbSize: 96,
                   ),
                 ),
               ),
+              const SizedBox(height: 10),
+            ],
             Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [

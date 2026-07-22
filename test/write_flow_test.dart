@@ -301,7 +301,8 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
 
-    expect(find.text('本文\nhttps://i.imgur.com/example.jpg'), findsOneWidget);
+    // URL の後ろには改行が入り、次の入力を新しい行から始められる。
+    expect(find.text('本文\nhttps://i.imgur.com/example.jpg\n'), findsOneWidget);
 
     await tester.tap(find.byIcon(Icons.send));
     await tester.pump();

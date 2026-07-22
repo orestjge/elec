@@ -21,6 +21,7 @@ class PostImages extends StatelessWidget {
     this.onTapVideo,
     this.onTapEmbed,
     this.onRemove,
+    this.thumbSize = 160,
     this.blurImages = false,
   });
 
@@ -39,6 +40,9 @@ class PostImages extends StatelessWidget {
   /// 指定すると各サムネイルに削除（×）ボタンを重ね、押すとその URL を渡す。
   /// 入力欄の添付プレビューで、本文から URL を取り消すために使う。
   final ValueChanged<Uri>? onRemove;
+
+  /// サムネイルの一辺（px）。入力欄プレビューなどで小さく出したいとき使う。
+  final double thumbSize;
 
   /// このレスの画像に「グロ」注意が付いており、サムネイルへモザイクを掛けるか。
   final bool blurImages;
@@ -75,13 +79,19 @@ class PostImages extends StatelessWidget {
                 for (var i = 0; i < urls.length; i++)
                   _removable(
                     urls[i],
-                    _Thumb(urls: urls, index: i, blurred: blurImages),
+                    _Thumb(
+                      urls: urls,
+                      index: i,
+                      size: thumbSize,
+                      blurred: blurImages,
+                    ),
                   ),
                 for (final url in videoUrls)
                   _removable(
                     url,
                     _VideoThumb(
                       url: url,
+                      size: thumbSize,
                       onTap: onTapVideo == null ? null : () => onTapVideo!(url),
                     ),
                   ),
@@ -90,6 +100,7 @@ class PostImages extends StatelessWidget {
                     video.url,
                     _EmbedThumb(
                       video: video,
+                      size: thumbSize,
                       onTap: onTapEmbed == null
                           ? null
                           : () => onTapEmbed!(video.url),
@@ -139,9 +150,15 @@ class _RemoveButton extends StatelessWidget {
 }
 
 class _Thumb extends StatefulWidget {
-  const _Thumb({required this.urls, required this.index, this.blurred = false});
+  const _Thumb({
+    required this.urls,
+    required this.index,
+    this.size = 160,
+    this.blurred = false,
+  });
   final List<Uri> urls;
   final int index;
+  final double size;
 
   /// 「グロ」注意が付いた画像で、初期表示をモザイクにするか。
   final bool blurred;
@@ -178,17 +195,19 @@ class _ThumbState extends State<_Thumb> {
           children: [
             Image.network(
               _url.toString(),
-              height: 160,
-              width: 160,
+              height: widget.size,
+              width: widget.size,
               fit: BoxFit.cover,
               loadingBuilder: (context, child, progress) {
                 if (progress == null) return child;
                 return _Placeholder(
+                  size: widget.size,
                   color: scheme.surfaceContainerHighest,
                   child: const CircularProgressIndicator(strokeWidth: 2),
                 );
               },
               errorBuilder: (context, error, stack) => _Placeholder(
+                size: widget.size,
                 color: scheme.surfaceContainerHighest,
                 child: Icon(
                   Icons.broken_image_outlined,
@@ -243,9 +262,10 @@ class _GuroMask extends StatelessWidget {
 }
 
 class _VideoThumb extends StatelessWidget {
-  const _VideoThumb({required this.url, required this.onTap});
+  const _VideoThumb({required this.url, required this.onTap, this.size = 160});
   final Uri url;
   final VoidCallback? onTap;
+  final double size;
 
   @override
   Widget build(BuildContext context) {
@@ -264,8 +284,8 @@ class _VideoThumb extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(10),
       child: Container(
-        height: 160,
-        width: 160,
+        height: size,
+        width: size,
         decoration: BoxDecoration(
           color: scheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(10),
@@ -342,9 +362,14 @@ class _VideoBadge extends StatelessWidget {
 /// サムネイル画像が取れる場合（YouTube）は背景に敷き、無い場合（ニコニコ）は
 /// 無地の再生カードにする。
 class _EmbedThumb extends StatelessWidget {
-  const _EmbedThumb({required this.video, required this.onTap});
+  const _EmbedThumb({
+    required this.video,
+    required this.onTap,
+    this.size = 160,
+  });
   final EmbedVideo video;
   final VoidCallback? onTap;
+  final double size;
 
   @override
   Widget build(BuildContext context) {
@@ -368,8 +393,8 @@ class _EmbedThumb extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(10),
       child: Container(
-        height: 160,
-        width: 200,
+        height: size,
+        width: size * 1.25,
         decoration: BoxDecoration(
           color: scheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(10),
@@ -432,15 +457,20 @@ class _EmbedThumb extends StatelessWidget {
 }
 
 class _Placeholder extends StatelessWidget {
-  const _Placeholder({required this.color, required this.child});
+  const _Placeholder({
+    required this.color,
+    required this.child,
+    this.size = 160,
+  });
   final Color color;
   final Widget child;
+  final double size;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 160,
-      width: 160,
+      height: size,
+      width: size,
       color: color,
       alignment: Alignment.center,
       child: child,
