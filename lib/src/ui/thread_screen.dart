@@ -124,6 +124,8 @@ class _ThreadScreenState extends State<ThreadScreen>
   final _composer = TextEditingController();
   final _composerFocus = FocusNode();
   final _composerKey = GlobalKey();
+  final _searchController = TextEditingController();
+  final _searchFocus = FocusNode();
 
   /// 一覧の各行。Res（レス）か [_NewArrivalLine]（新着境界）のどちらか。
   List<Object> _items = const [];
@@ -138,6 +140,8 @@ class _ThreadScreenState extends State<ThreadScreen>
   Object? _error;
   bool _loading = true;
   bool _polling = false;
+  bool _searching = false;
+  int _currentSearchIndex = 0;
 
   /// dat も過去ログも見つからなかった（完全に消えた）スレか。
   bool _notFound = false;
@@ -238,6 +242,8 @@ class _ThreadScreenState extends State<ThreadScreen>
     _topSnackEntry?.remove();
     _composer.dispose();
     _composerFocus.dispose();
+    _searchController.dispose();
+    _searchFocus.dispose();
     final fetcher = _fetcher;
     if (_ownsFetcher && fetcher is HttpClientFetcher) fetcher.close();
     super.dispose();
@@ -534,6 +540,77 @@ class _ThreadScreenState extends State<ThreadScreen>
       ordinals[r.number] = ordinal;
     }
     return ordinals;
+  }
+
+  List<Res> get _searchMatches {
+    final query = _searchController.text.trim().toLowerCase();
+    if (query.isEmpty) return const [];
+    return _state.res.where((res) => _searchText(res).contains(query)).toList();
+  }
+
+  String _searchText(Res res) {
+    return [
+      '${res.number}',
+      htmlToText(res.name),
+      res.dateText,
+      if (res.id != null) 'ID:${res.id}',
+      htmlToText(res.body),
+    ].join('\n').toLowerCase();
+  }
+
+  void _startSearch() {
+    setState(() {
+      _searching = true;
+      _currentSearchIndex = 0;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _searchFocus.requestFocus();
+    });
+  }
+
+  void _closeSearch() {
+    setState(() {
+      _searching = false;
+      _currentSearchIndex = 0;
+      _searchController.clear();
+    });
+    _searchFocus.unfocus();
+  }
+
+  void _onSearchChanged(String value) {
+    setState(() => _currentSearchIndex = 0);
+    if (value.trim().isNotEmpty) _jumpToCurrentSearchMatch();
+  }
+
+  void _moveSearchResult(int delta) {
+    final matches = _searchMatches;
+    if (matches.isEmpty) return;
+    setState(() {
+      _currentSearchIndex =
+          (_currentSearchIndex + delta + matches.length) % matches.length;
+    });
+    _jumpToCurrentSearchMatch();
+  }
+
+  void _jumpToCurrentSearchMatch() {
+    final matches = _searchMatches;
+    if (matches.isEmpty) return;
+    final index = _indexForResNumber(matches[_currentSearchIndex].number);
+    if (index == null || !_itemScroll.isAttached) return;
+    _itemScroll.scrollTo(
+      index: index,
+      alignment: 0.12,
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOut,
+    );
+  }
+
+  int? _indexForResNumber(int number) {
+    for (var i = 0; i < _items.length; i++) {
+      final item = _items[i];
+      if (item is Res && item.number == number) return i;
+    }
+    return null;
   }
 
   Future<void> _markPendingOwnPosts(List<Res> newRes) async {
@@ -998,61 +1075,75 @@ class _ThreadScreenState extends State<ThreadScreen>
         final metadent = widget.creatorMetadent;
         final isNgCreator = metadent != null && _ng.creators.contains(metadent);
         return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SelectableText(
-                  decodeEntities(_effectiveTitle),
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 12),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(Icons.link),
-                  title: const Text('スレURLをコピー'),
-                  subtitle: Text(_threadUrl.toString()),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _copyText(_threadUrl.toString(), 'スレURLをコピーしました');
-                  },
-                ),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(
-                    isFavorite ? Icons.star : Icons.star_border,
-                    color: isFavorite
-                        ? Theme.of(context).colorScheme.tertiary
-                        : null,
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SelectableText(
+                    decodeEntities(_effectiveTitle),
+                    style: Theme.of(context).textTheme.titleMedium,
                   ),
-                  title: Text(isFavorite ? 'お気に入りを解除' : 'お気に入りに追加'),
-                  onTap: () async {
-                    Navigator.pop(context);
-                    await _toggleFavorite();
-                  },
-                ),
-                if (metadent != null)
+                  const SizedBox(height: 12),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.link),
+                    title: const Text('スレURLをコピー'),
+                    subtitle: Text(_threadUrl.toString()),
+                    onTap: () {
+                      Navigator.pop(context);
+                      _copyText(_threadUrl.toString(), 'スレURLをコピーしました');
+                    },
+                  ),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.search),
+                    title: const Text('スレ内検索'),
+                    enabled: _state.res.isNotEmpty,
+                    onTap: _state.res.isEmpty
+                        ? null
+                        : () {
+                            Navigator.pop(context);
+                            _startSearch();
+                          },
+                  ),
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: Icon(
-                      isNgCreator
-                          ? Icons.person_outline
-                          : Icons.person_off_outlined,
+                      isFavorite ? Icons.star : Icons.star_border,
+                      color: isFavorite
+                          ? Theme.of(context).colorScheme.tertiary
+                          : null,
                     ),
-                    title: Text(isNgCreator ? 'このスレ主のNGを解除' : 'このスレ主をNG'),
-                    subtitle: Text(
-                      isNgCreator
-                          ? 'スレ主 [$metadent★] のスレを再び表示します'
-                          : 'スレ主 [$metadent★] のスレを一覧から隠します',
-                    ),
+                    title: Text(isFavorite ? 'お気に入りを解除' : 'お気に入りに追加'),
                     onTap: () async {
                       Navigator.pop(context);
-                      await _toggleNgCreator(metadent);
+                      await _toggleFavorite();
                     },
                   ),
-              ],
+                  if (metadent != null)
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(
+                        isNgCreator
+                            ? Icons.person_outline
+                            : Icons.person_off_outlined,
+                      ),
+                      title: Text(isNgCreator ? 'このスレ主のNGを解除' : 'このスレ主をNG'),
+                      subtitle: Text(
+                        isNgCreator
+                            ? 'スレ主 [$metadent★] のスレを再び表示します'
+                            : 'スレ主 [$metadent★] のスレを一覧から隠します',
+                      ),
+                      onTap: () async {
+                        Navigator.pop(context);
+                        await _toggleNgCreator(metadent);
+                      },
+                    ),
+                ],
+              ),
             ),
           ),
         );
@@ -1343,44 +1434,70 @@ class _ThreadScreenState extends State<ThreadScreen>
 
   @override
   Widget build(BuildContext context) {
+    final matches = _searchMatches;
+    final searchIndex = matches.isEmpty
+        ? 0
+        : math.min(_currentSearchIndex, matches.length - 1);
     return Scaffold(
       appBar: AppBar(
         toolbarHeight: 80,
         // タイトルは重要なので AppBar 内でできるだけ読ませる。極端に長い場合は
         // これまで通りタップで全文を出す。
-        title: InkWell(
-          onTap: _showFullTitle,
-          borderRadius: BorderRadius.circular(8),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  _effectiveTitle.isEmpty
-                      ? 'スレッド'
-                      : decodeEntities(_effectiveTitle),
-                  maxLines: 2,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    height: 1.22,
+        title: _searching
+            ? _ThreadSearchField(
+                controller: _searchController,
+                focusNode: _searchFocus,
+                matchLabel: _searchController.text.trim().isEmpty
+                    ? ''
+                    : matches.isEmpty
+                    ? '0件'
+                    : '${searchIndex + 1}/${matches.length}',
+                onChanged: _onSearchChanged,
+                onPrevious: matches.isEmpty
+                    ? null
+                    : () => _moveSearchResult(-1),
+                onNext: matches.isEmpty ? null : () => _moveSearchResult(1),
+                onClose: _closeSearch,
+              )
+            : InkWell(
+                onTap: _showFullTitle,
+                borderRadius: BorderRadius.circular(8),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 4,
+                    horizontal: 4,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        _effectiveTitle.isEmpty
+                            ? 'スレッド'
+                            : decodeEntities(_effectiveTitle),
+                        maxLines: 2,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          height: 1.22,
+                        ),
+                      ),
+                      if (!_loading && _error == null && !_notFound)
+                        Text(
+                          _statusLabel == null
+                              ? '${_state.res.length}レス'
+                              : '${_state.res.length}レス ・ $_statusLabel',
+                          style: Theme.of(context).textTheme.labelSmall
+                              ?.copyWith(
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                              ),
+                        ),
+                    ],
                   ),
                 ),
-                if (!_loading && _error == null && !_notFound)
-                  Text(
-                    _statusLabel == null
-                        ? '${_state.res.length}レス'
-                        : '${_state.res.length}レス ・ $_statusLabel',
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ),
+              ),
         bottom: _polling
             ? const PreferredSize(
                 preferredSize: Size.fromHeight(2),
@@ -1522,6 +1639,76 @@ class _ThreadScreenState extends State<ThreadScreen>
               onTap: _scrollToBottom,
             ),
           ),
+      ],
+    );
+  }
+}
+
+class _ThreadSearchField extends StatelessWidget {
+  const _ThreadSearchField({
+    required this.controller,
+    required this.focusNode,
+    required this.matchLabel,
+    required this.onChanged,
+    required this.onPrevious,
+    required this.onNext,
+    required this.onClose,
+  });
+
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final String matchLabel;
+  final ValueChanged<String> onChanged;
+  final VoidCallback? onPrevious;
+  final VoidCallback? onNext;
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Row(
+      children: [
+        Expanded(
+          child: TextField(
+            controller: controller,
+            focusNode: focusNode,
+            autofocus: true,
+            textInputAction: TextInputAction.search,
+            decoration: InputDecoration(
+              hintText: 'スレ内検索',
+              isDense: true,
+              prefixIcon: const Icon(Icons.search),
+              suffixText: matchLabel,
+              filled: true,
+              fillColor: scheme.surfaceContainerHighest,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide.none,
+              ),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 10,
+              ),
+            ),
+            onChanged: onChanged,
+            onSubmitted: (_) => onNext?.call(),
+          ),
+        ),
+        IconButton(
+          tooltip: '前の一致',
+          icon: const Icon(Icons.keyboard_arrow_up),
+          onPressed: onPrevious,
+        ),
+        IconButton(
+          tooltip: '次の一致',
+          icon: const Icon(Icons.keyboard_arrow_down),
+          onPressed: onNext,
+        ),
+        IconButton(
+          tooltip: '検索を閉じる',
+          icon: const Icon(Icons.close),
+          onPressed: onClose,
+        ),
       ],
     );
   }

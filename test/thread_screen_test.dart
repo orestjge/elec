@@ -134,6 +134,50 @@ void main() {
     expect(find.text('>>1\n'), findsOneWidget); // 入力欄に反映
   });
 
+  testWidgets('スレ内検索で一致件数を表示する', (tester) async {
+    final f = QueueFetcher([
+      ok([...res1, ...res2, ...res3]),
+    ]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip('スレ内検索'), findsNothing);
+
+    await tester.tap(find.text('テストスレ').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('スレ内検索'));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(TextField, 'スレ内検索'), findsOneWidget);
+
+    await tester.enterText(find.widgetWithText(TextField, 'スレ内検索'), 'あとから');
+    await tester.pumpAndSettle();
+
+    expect(find.text('1/1'), findsOneWidget);
+    expect(find.byTooltip('前の一致'), findsOneWidget);
+    expect(find.byTooltip('次の一致'), findsOneWidget);
+  });
+
+  testWidgets('スレ内検索は該当なしを表示して閉じられる', (tester) async {
+    final f = QueueFetcher([
+      ok([...res1, ...res2]),
+    ]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('テストスレ').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('スレ内検索'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'スレ内検索'), '存在しない語');
+    await tester.pumpAndSettle();
+
+    expect(find.text('0件'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('検索を閉じる'));
+    await tester.pumpAndSettle();
+    expect(find.text('テストスレ'), findsOneWidget);
+  });
+
   testWidgets('ポーリングで新着が付き、新着ラインが出る', (tester) async {
     final full = [...res1, ...res2];
     final f = QueueFetcher([
