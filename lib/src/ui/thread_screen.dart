@@ -368,7 +368,9 @@ class _ThreadScreenState extends State<ThreadScreen>
     if (_state.pastLog || _notFound) return;
     if (_fetching || !mounted) return;
     _fetching = true;
+    final keepSearchFocus = _searching && _searchFocus.hasFocus;
     setState(() => _polling = true);
+    _restoreSearchFocusSoon(keepSearchFocus);
     try {
       final wasAtBottom = _atBottom;
       final wasShortContent = _contentFitsViewport();
@@ -386,6 +388,8 @@ class _ThreadScreenState extends State<ThreadScreen>
         _awaitingOwnPost = false; // 自分のレスが現れたので再取得ループを止める
         if (!mounted) return;
         setState(() => _state = r.state);
+        _restoreSearchFocusSoon(keepSearchFocus);
+        if (_searching) return;
         // 末尾に居たなら追従する。
         if (wasShortContent) {
           _scrollToTopSoon();
@@ -397,7 +401,10 @@ class _ThreadScreenState extends State<ThreadScreen>
       // ポーリング失敗は無視。次周期で回復を試みる。
     } finally {
       _fetching = false;
-      if (mounted) setState(() => _polling = false);
+      if (mounted) {
+        setState(() => _polling = false);
+        _restoreSearchFocusSoon(keepSearchFocus);
+      }
     }
   }
 
@@ -500,6 +507,7 @@ class _ThreadScreenState extends State<ThreadScreen>
 
   Future<void> _refresh() async {
     try {
+      final keepSearchFocus = _searching && _searchFocus.hasFocus;
       final previousResCount = _state.res.length;
       final r = await _dat.fetch(_url, prev: _state);
       if (!mounted) return;
@@ -514,6 +522,7 @@ class _ThreadScreenState extends State<ThreadScreen>
         _loading = false;
         _error = null;
       });
+      _restoreSearchFocusSoon(keepSearchFocus);
     } catch (e) {
       if (!mounted) return;
       if (_state.isEmpty) setState(() => _error = e);
@@ -563,8 +572,14 @@ class _ThreadScreenState extends State<ThreadScreen>
       _searching = true;
       _currentSearchIndex = 0;
     });
+    _restoreSearchFocusSoon(true);
+  }
+
+  void _restoreSearchFocusSoon(bool shouldRestore) {
+    if (!shouldRestore) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _searchFocus.requestFocus();
+      if (!mounted || !_searching || _searchFocus.hasFocus) return;
+      _searchFocus.requestFocus();
     });
   }
 
@@ -595,7 +610,8 @@ class _ThreadScreenState extends State<ThreadScreen>
   void _jumpToCurrentSearchMatch() {
     final matches = _searchMatches;
     if (matches.isEmpty) return;
-    final index = _indexForResNumber(matches[_currentSearchIndex].number);
+    final matchIndex = math.min(_currentSearchIndex, matches.length - 1);
+    final index = _indexForResNumber(matches[matchIndex].number);
     if (index == null || !_itemScroll.isAttached) return;
     _itemScroll.scrollTo(
       index: index,

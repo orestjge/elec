@@ -178,6 +178,35 @@ void main() {
     expect(find.text('テストスレ'), findsOneWidget);
   });
 
+  testWidgets('スレ内検索中にポーリング更新が来ても検索欄のフォーカスを維持する', (tester) async {
+    final full = [...res1, ...res2];
+    final f = QueueFetcher([
+      ok(full),
+      partial([full.last, ...res3]),
+    ]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('テストスレ').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('スレ内検索'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'スレ内検索'), '最初');
+    await tester.pumpAndSettle();
+
+    var field = tester.widget<TextField>(
+      find.widgetWithText(TextField, 'スレ内検索'),
+    );
+    expect(field.focusNode!.hasFocus, isTrue);
+
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+
+    field = tester.widget<TextField>(find.widgetWithText(TextField, 'スレ内検索'));
+    expect(f.calls, 2);
+    expect(field.focusNode!.hasFocus, isTrue);
+  });
+
   testWidgets('ポーリングで新着が付き、新着ラインが出る', (tester) async {
     final full = [...res1, ...res2];
     final f = QueueFetcher([
