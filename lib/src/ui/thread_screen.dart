@@ -1184,6 +1184,13 @@ class _ThreadScreenState extends State<ThreadScreen>
     _trackingSwipe = false;
   }
 
+  // 本文以外（名前欄・ヘッダー・余白など）をタップしたとき、選択中なら解除する。
+  // onTap は本文・リンク・ボタン等が拾ったタップには発火しないので、
+  // 誰も拾わなかったタップだけを対象にできる。
+  void _handleBackgroundTap() {
+    if (_bodySelectionActive) FocusManager.instance.primaryFocus?.unfocus();
+  }
+
   bool get _bodySelectionActive => _selectedBodyResNumbers.isNotEmpty;
 
   void _handleBodySelectionActiveChanged(int resNumber, bool active) {
@@ -1445,19 +1452,23 @@ class _ThreadScreenState extends State<ThreadScreen>
         onPointerMove: _handlePointerMove,
         onPointerUp: _handlePointerUp,
         onPointerCancel: _handlePointerCancel,
-        child: Column(
-          children: [
-            Expanded(child: _body()),
-            _Composer(
-              key: _composerKey,
-              controller: _composer,
-              focusNode: _composerFocus,
-              onSend: _submit,
-              onPickAndUploadImage: _pickAndUploadImage,
-              onPickAndUploadFile: _pickAndUploadFile,
-              enabled: !_isStopped,
-            ),
-          ],
+        child: GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onTap: _handleBackgroundTap,
+          child: Column(
+            children: [
+              Expanded(child: _body()),
+              _Composer(
+                key: _composerKey,
+                controller: _composer,
+                focusNode: _composerFocus,
+                onSend: _submit,
+                onPickAndUploadImage: _pickAndUploadImage,
+                onPickAndUploadFile: _pickAndUploadFile,
+                enabled: !_isStopped,
+              ),
+            ],
+          ),
         ),
       ),
     );
