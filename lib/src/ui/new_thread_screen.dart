@@ -58,9 +58,6 @@ class _NewThreadScreenState extends State<NewThreadScreen> {
   bool _uploadingImage = false;
   bool _uploadingFile = false;
 
-  /// 直近の書き込みで作った認証診断（[buildAuthDiagnostics]）。異常時のみ非 null。
-  String? _authDiag;
-
   @override
   void initState() {
     super.initState();
@@ -172,7 +169,6 @@ class _NewThreadScreenState extends State<NewThreadScreen> {
         message: 'この環境では書き込みに未対応です',
       );
     }
-    final before = _authStore.tokens; // 送信前トークン（診断の基準）
     final result = await BbsWriter(fetcher as HttpPoster).createThread(
       bbsCgi: widget.endpoints.bbsCgi,
       board: widget.endpoints.boardKey,
@@ -180,10 +176,9 @@ class _NewThreadScreenState extends State<NewThreadScreen> {
       // URL 挿入で末尾に付く改行は残さない。AA の末尾空白は保持したいので、
       // 落とすのは末尾の改行だけにする。
       message: _body.text.replaceAll(RegExp(r'\n+$'), ''),
-      tokens: before,
+      tokens: _authStore.tokens,
     );
     await _authStore.setTokens(result.tokens);
-    _authDiag = buildAuthDiagnostics(before, result);
     return result.outcome;
   }
 
@@ -194,7 +189,6 @@ class _NewThreadScreenState extends State<NewThreadScreen> {
         context: context,
         launcher: widget.authLauncher,
         postOnce: _postOnce,
-        diagnostics: () => _authDiag,
       );
       if (!mounted) return;
       if (accepted != null) {

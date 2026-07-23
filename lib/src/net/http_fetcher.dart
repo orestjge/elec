@@ -148,10 +148,6 @@ class HttpClientFetcher implements HttpFetcher, HttpPoster {
         bodyBytes: bytes,
         headers: headerMap,
         setCookies: resp.cookies.map((c) => '${c.name}=${c.value}').toList(),
-        // フォールバック後は _preferred が実際に使った版を指す（成功時点の値）。
-        remoteIpVersion: _preferred == io.InternetAddressType.IPv6
-            ? 'IPv6'
-            : 'IPv4',
       );
     });
   }
