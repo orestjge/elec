@@ -127,7 +127,7 @@ void main() {
     expect(order(), ['スレA', 'スレB', 'スレC', 'スレD']);
 
     // ソート変更（明示操作）では並び順を貼り直す。新着＝スレ番号の新しい順。
-    await tester.tap(find.byIcon(Icons.swap_vert));
+    await tester.tap(find.byTooltip('並べ替え'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('新着'));
     await tester.pumpAndSettle();
@@ -460,7 +460,7 @@ void main() {
     expect(find.text('料理スレ'), findsOneWidget);
     expect(find.text('野球スレ'), findsOneWidget);
 
-    await tester.tap(find.byIcon(Icons.search));
+    await tester.tap(find.text('検索'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), '料理');
     await tester.pumpAndSettle();

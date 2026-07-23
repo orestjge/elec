@@ -817,8 +817,14 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // よく使う検索・絞り込み・並び替えと「スレを立てる」は、片手で届く下部の
-      // バーにまとめる。設定・URL で開くは低頻度なので上の ⋮ に集約する。
+      // 「スレを立てる」は主役の操作なので、下部バーから独立させて浮かせる。
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _openNewThread,
+        icon: const Icon(Icons.add),
+        label: const Text('スレを立てる'),
+      ),
+      // よく使う検索・絞り込み・並び替えは、片手で届く下部のバーにチップで
+      // まとめる。設定・URL で開くは低頻度なので上の ⋮ に集約する。
       bottomNavigationBar: _BottomActionBar(
         searchOpen: _searchOpen,
         search: _search,
@@ -829,7 +835,6 @@ class _ThreadListScreenState extends State<ThreadListScreen>
         onPickFilter: _pickFilter,
         sort: _sort,
         onPickSort: _pickSort,
-        onNewThread: _openNewThread,
       ),
       body: RefreshIndicator(
         onRefresh: _refresh,
@@ -896,8 +901,9 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   }
 }
 
-/// 画面下部の操作バー。検索・絞り込み・並び替え＋「スレを立てる」を片手で届く
-/// 位置にまとめる。検索中は同じ場所を検索欄に差し替えて、操作を下部で完結させる。
+/// 画面下部の操作バー。検索・並び替え・絞り込みを、同じチップ形に揃えて片手で
+/// 届く位置に置く。並び替え・絞り込みは現在値＋▾で「今この値・タップで変更」と
+/// 分かるようにする。検索中は同じ場所を検索欄に差し替え、操作を下部で完結させる。
 class _BottomActionBar extends StatelessWidget {
   const _BottomActionBar({
     required this.searchOpen,
@@ -909,7 +915,6 @@ class _BottomActionBar extends StatelessWidget {
     required this.onPickFilter,
     required this.sort,
     required this.onPickSort,
-    required this.onNewThread,
   });
 
   final bool searchOpen;
@@ -921,7 +926,6 @@ class _BottomActionBar extends StatelessWidget {
   final VoidCallback onPickFilter;
   final ThreadSort sort;
   final VoidCallback onPickSort;
-  final VoidCallback onNewThread;
 
   @override
   Widget build(BuildContext context) {
@@ -949,22 +953,67 @@ class _BottomActionBar extends StatelessWidget {
         ),
       );
     }
+    // 右端は独立した FAB が浮くので、チップは左寄せにして重ならないようにする。
     return BottomAppBar(
       height: 64,
-      padding: const EdgeInsets.symmetric(horizontal: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 12),
       child: Row(
         children: [
-          _SearchButton(active: false, onPressed: onToggleSearch),
-          _FilterButton(filter: filter, onPressed: onPickFilter),
-          _SortButton(sort: sort, onPressed: onPickSort),
-          const Spacer(),
-          FilledButton.icon(
-            onPressed: onNewThread,
-            icon: const Icon(Icons.add),
-            label: const Text('スレを立てる'),
+          ActionChip(
+            avatar: const Icon(Icons.search, size: 18),
+            label: const Text('検索'),
+            onPressed: onToggleSearch,
+          ),
+          const SizedBox(width: 8),
+          _SelectorChip(
+            icon: sort.icon,
+            value: sort.label,
+            tooltip: '並べ替え',
+            onPressed: onPickSort,
+          ),
+          const SizedBox(width: 8),
+          _SelectorChip(
+            icon: filter.icon,
+            value: filter.label,
+            tooltip: '表示',
+            onPressed: onPickFilter,
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 現在値を表示する選択チップ。先頭にその値のアイコン、末尾に ▾ を付けて
+/// 「今この値・タップで変更できる」ことを伝える。並び替え・絞り込み用。
+class _SelectorChip extends StatelessWidget {
+  const _SelectorChip({
+    required this.icon,
+    required this.value,
+    required this.tooltip,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String value;
+  final String tooltip;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return ActionChip(
+      tooltip: tooltip,
+      avatar: Icon(icon, size: 18),
+      label: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(value),
+          const Icon(Icons.arrow_drop_down, size: 18),
+        ],
+      ),
+      // ▾ を詰めて置くため、末尾側の内側余白を少し削る。
+      labelPadding: const EdgeInsets.only(left: 8, right: 2),
+      onPressed: onPressed,
     );
   }
 }
@@ -998,53 +1047,6 @@ class _OverflowMenu extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _FilterButton extends StatelessWidget {
-  const _FilterButton({required this.filter, required this.onPressed});
-  final ThreadFilter filter;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final active = filter != ThreadFilter.current;
-    final scheme = Theme.of(context).colorScheme;
-    return Tooltip(
-      message: '表示',
-      child: TextButton(
-        onPressed: onPressed,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(filter.icon, size: 18, color: active ? scheme.primary : null),
-            const SizedBox(width: 4),
-            Text(filter.label),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _SearchButton extends StatelessWidget {
-  const _SearchButton({required this.active, required this.onPressed});
-  final bool active;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Tooltip(
-      message: active ? '検索を閉じる' : 'スレ検索',
-      child: IconButton(
-        onPressed: onPressed,
-        icon: Icon(
-          active ? Icons.search_off : Icons.search,
-          color: active ? scheme.primary : null,
-        ),
-      ),
     );
   }
 }
@@ -1143,32 +1145,6 @@ class _PollingIndicator extends StatelessWidget {
                 child: CircularProgressIndicator(strokeWidth: 2),
               )
             : const SizedBox.shrink(),
-      ),
-    );
-  }
-}
-
-/// 並べ替えボタン。ソートマーク（⇅）＋現在の項目＋▾ で「これは並べ替えで、
-/// 今は◯◯、タップで変えられる」ことを一目で伝える。
-class _SortButton extends StatelessWidget {
-  const _SortButton({required this.sort, required this.onPressed});
-  final ThreadSort sort;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: '並べ替え',
-      child: TextButton(
-        onPressed: onPressed,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.swap_vert, size: 18),
-            const SizedBox(width: 4),
-            Text(sort.label),
-          ],
-        ),
       ),
     );
   }
