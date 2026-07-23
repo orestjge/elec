@@ -85,7 +85,7 @@ class PostItem extends StatelessWidget {
 
     if (res.isAbone) {
       return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         child: Text(
           '${res.number} あぼーん',
           style: theme.textTheme.bodyMedium?.copyWith(
@@ -118,7 +118,7 @@ class PostItem extends StatelessWidget {
             ? Border(left: BorderSide(color: scheme.tertiary, width: 3))
             : null,
       ),
-      padding: EdgeInsets.fromLTRB(isCurrentMatch ? 13 : 16, 12, 16, 12),
+      padding: EdgeInsets.fromLTRB(isCurrentMatch ? 13 : 16, 8, 16, 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -133,7 +133,7 @@ class PostItem extends StatelessWidget {
             highlightQuery: highlightQuery,
           ),
           if (body.isNotEmpty) ...[
-            const SizedBox(height: 6),
+            const SizedBox(height: 4),
             ResBody(
               text: body,
               style: theme.textTheme.bodyLarge?.copyWith(height: 1.45),
@@ -158,7 +158,7 @@ class PostItem extends StatelessWidget {
               blurImages: blurImages,
             ),
           if (replyCount > 0) ...[
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             _ReplyCountChip(
               count: replyCount,
               onTap: onTapReplies == null
