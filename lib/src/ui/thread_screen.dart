@@ -1376,9 +1376,6 @@ class _ThreadScreenState extends State<ThreadScreen>
 
   // ---- 書き込み ----
 
-  /// 直近の書き込みで作った認証診断（[buildAuthDiagnostics]）。異常時のみ非 null。
-  String? _authDiag;
-
   Future<Uri?> _pickAndUploadImage() async {
     final injected = widget.pickAndUploadImage;
     if (injected != null) return injected();
@@ -1405,16 +1402,14 @@ class _ThreadScreenState extends State<ThreadScreen>
       );
     }
     // HttpPoster は HttpFetcher の部分型ではないので明示キャストが要る。
-    final before = _authStore.tokens; // 送信前トークン（診断の基準）
     final result = await BbsWriter(fetcher as HttpPoster).post(
       bbsCgi: widget.endpoints.bbsCgi,
       board: widget.endpoints.boardKey,
       threadKey: widget.threadKey,
       message: text,
-      tokens: before,
+      tokens: _authStore.tokens,
     );
     await _authStore.setTokens(result.tokens); // edge/tinker を持ち回して永続化
-    _authDiag = buildAuthDiagnostics(before, result);
     return result.outcome;
   }
 
@@ -1425,7 +1420,6 @@ class _ThreadScreenState extends State<ThreadScreen>
       launcher: widget.authLauncher,
       postOnce: () => _postOnce(text),
       onRejected: _showSnack,
-      diagnostics: () => _authDiag,
     );
     if (accepted != null && mounted) {
       final resNum = accepted.resNum;

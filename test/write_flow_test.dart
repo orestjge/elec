@@ -220,8 +220,6 @@ void main() {
     // 認証ダイアログにコードが出る。
     expect(find.text('認証が必要です'), findsOneWidget);
     expect(find.text('016227'), findsOneWidget);
-    // 初回認証（保存済みトークン無し）では診断は出さない。
-    expect(find.textContaining('診断:'), findsNothing);
     // edge-token は未認証応答から回収済み。
     expect(store.tokens.edgeToken, 'abc123');
 
@@ -241,49 +239,6 @@ void main() {
 
     // 後始末: 保留中の SnackBar タイマーを流す。
     await tester.pump(const Duration(seconds: 5));
-  });
-
-  testWidgets('保存済みトークンがあるのに未認証だと切り分け診断を表示する', (tester) async {
-    // 送信前に有効そうな edge-token を持っている＝「異常時」の再現。
-    final client = ScriptedClient([
-      FetchResponse(
-        statusCode: 200,
-        bodyBytes: unauthBody('016227'),
-        setCookies: const ['edge-token=e2'], // サーバが別トークンを発行（回転）
-        remoteIpVersion: 'IPv6',
-      ),
-    ]);
-    final store = AuthStore(
-      MemoryTokenStorage(const AuthTokens(edgeToken: 'e1', tinkerToken: 't1')),
-    );
-    await store.load(); // 保存済みトークンをメモリへ
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: ThreadScreen(
-          threadKey: '123',
-          threadTitle: 'テスト',
-          fetcher: client,
-          authStore: store,
-          authLauncher: FakeLauncher(),
-          pollInterval: const Duration(seconds: 60),
-          readHistory: ReadHistory(MemoryReadHistoryStorage()),
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    await tester.enterText(find.byType(TextField), 'やあ');
-    await tester.tap(find.byIcon(Icons.send));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 400));
-
-    expect(find.text('認証が必要です'), findsOneWidget);
-    // 診断に Cookie 送信・トークン回転・IP 版が出る。
-    expect(find.textContaining('診断:'), findsOneWidget);
-    expect(find.textContaining('Cookie送信=あり'), findsOneWidget);
-    expect(find.textContaining('サーバ新token=回転あり'), findsOneWidget);
-    expect(find.textContaining('経路=IPv6'), findsOneWidget);
   });
 
   testWidgets('レス投稿では本文前後の空白を保持する', (tester) async {
