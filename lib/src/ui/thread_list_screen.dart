@@ -817,10 +817,19 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _openNewThread,
-        icon: const Icon(Icons.add),
-        label: const Text('スレを立てる'),
+      // よく使う検索・絞り込み・並び替えと「スレを立てる」は、片手で届く下部の
+      // バーにまとめる。設定・URL で開くは低頻度なので上の ⋮ に集約する。
+      bottomNavigationBar: _BottomActionBar(
+        searchOpen: _searchOpen,
+        search: _search,
+        onToggleSearch: _toggleSearch,
+        onSearchChanged: (_) => setState(() {}),
+        onSearchClear: () => setState(_search.clear),
+        filter: _filter,
+        onPickFilter: _pickFilter,
+        sort: _sort,
+        onPickSort: _pickSort,
+        onNewThread: _openNewThread,
       ),
       body: RefreshIndicator(
         onRefresh: _refresh,
@@ -834,30 +843,11 @@ class _ThreadListScreenState extends State<ThreadListScreen>
             slivers: [
               SliverAppBar.medium(
                 title: const Text('エッヂ'),
-                bottom: _searchOpen
-                    ? PreferredSize(
-                        preferredSize: const Size.fromHeight(64),
-                        child: _ThreadSearchField(
-                          controller: _search,
-                          onChanged: (_) => setState(() {}),
-                          onClear: () => setState(_search.clear),
-                        ),
-                      )
-                    : null,
                 actions: [
                   _PollingIndicator(active: _polling),
-                  _SearchButton(active: _searchOpen, onPressed: _toggleSearch),
-                  IconButton(
-                    icon: const Icon(Icons.link),
-                    tooltip: 'URLからスレを開く',
-                    onPressed: _openThreadFromUrl,
-                  ),
-                  _FilterButton(filter: _filter, onPressed: _pickFilter),
-                  _SortButton(sort: _sort, onPressed: _pickSort),
-                  IconButton(
-                    icon: const Icon(Icons.settings),
-                    tooltip: '設定',
-                    onPressed: _openSettings,
+                  _OverflowMenu(
+                    onOpenUrl: _openThreadFromUrl,
+                    onOpenSettings: _openSettings,
                   ),
                   const SizedBox(width: 4),
                 ],
@@ -902,6 +892,112 @@ class _ThreadListScreenState extends State<ThreadListScreen>
         onTap: () => _openThread(threads[i]),
         onLongPress: () => _showThreadActions(threads[i]),
       ),
+    );
+  }
+}
+
+/// 画面下部の操作バー。検索・絞り込み・並び替え＋「スレを立てる」を片手で届く
+/// 位置にまとめる。検索中は同じ場所を検索欄に差し替えて、操作を下部で完結させる。
+class _BottomActionBar extends StatelessWidget {
+  const _BottomActionBar({
+    required this.searchOpen,
+    required this.search,
+    required this.onToggleSearch,
+    required this.onSearchChanged,
+    required this.onSearchClear,
+    required this.filter,
+    required this.onPickFilter,
+    required this.sort,
+    required this.onPickSort,
+    required this.onNewThread,
+  });
+
+  final bool searchOpen;
+  final TextEditingController search;
+  final VoidCallback onToggleSearch;
+  final ValueChanged<String> onSearchChanged;
+  final VoidCallback onSearchClear;
+  final ThreadFilter filter;
+  final VoidCallback onPickFilter;
+  final ThreadSort sort;
+  final VoidCallback onPickSort;
+  final VoidCallback onNewThread;
+
+  @override
+  Widget build(BuildContext context) {
+    if (searchOpen) {
+      // 検索欄はキーボードのすぐ上（下部）に出す。Scaffold が bottomNavigationBar
+      // をキーボードの上へ押し上げるので、片手でそのまま入力できる。
+      return BottomAppBar(
+        height: 72,
+        padding: const EdgeInsets.only(left: 8, right: 4),
+        child: Row(
+          children: [
+            Expanded(
+              child: _ThreadSearchField(
+                controller: search,
+                onChanged: onSearchChanged,
+                onClear: onSearchClear,
+              ),
+            ),
+            IconButton(
+              tooltip: '検索を閉じる',
+              icon: const Icon(Icons.search_off),
+              onPressed: onToggleSearch,
+            ),
+          ],
+        ),
+      );
+    }
+    return BottomAppBar(
+      height: 64,
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Row(
+        children: [
+          _SearchButton(active: false, onPressed: onToggleSearch),
+          _FilterButton(filter: filter, onPressed: onPickFilter),
+          _SortButton(sort: sort, onPressed: onPickSort),
+          const Spacer(),
+          FilledButton.icon(
+            onPressed: onNewThread,
+            icon: const Icon(Icons.add),
+            label: const Text('スレを立てる'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 上部の ⋮ メニュー。低頻度な「URL からスレを開く」「設定」をまとめる。
+class _OverflowMenu extends StatelessWidget {
+  const _OverflowMenu({required this.onOpenUrl, required this.onOpenSettings});
+  final VoidCallback onOpenUrl;
+  final VoidCallback onOpenSettings;
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<int>(
+      tooltip: 'メニュー',
+      onSelected: (value) => value == 0 ? onOpenUrl() : onOpenSettings(),
+      itemBuilder: (context) => const [
+        PopupMenuItem(
+          value: 0,
+          child: ListTile(
+            leading: Icon(Icons.link),
+            title: Text('URLからスレを開く'),
+            contentPadding: EdgeInsets.zero,
+          ),
+        ),
+        PopupMenuItem(
+          value: 1,
+          child: ListTile(
+            leading: Icon(Icons.settings),
+            title: Text('設定'),
+            contentPadding: EdgeInsets.zero,
+          ),
+        ),
+      ],
     );
   }
 }
