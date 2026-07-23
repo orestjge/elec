@@ -1699,6 +1699,12 @@ class _ThreadSearchField extends StatelessWidget {
   final VoidCallback? onNext;
   final VoidCallback onClose;
 
+  /// 検索インプットの枠。全状態で枠線を消し、角丸だけ一覧の検索欄に合わせる。
+  static final _searchBorder = OutlineInputBorder(
+    borderRadius: BorderRadius.circular(14),
+    borderSide: BorderSide.none,
+  );
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -1713,14 +1719,16 @@ class _ThreadSearchField extends StatelessWidget {
             decoration: InputDecoration(
               hintText: 'スレ内検索',
               isDense: true,
-              prefixIcon: const Icon(Icons.search),
+              // 一覧の検索欄と同じ「検索インプット」の見た目に揃える（角丸14・
+              // 枠なし・prefix は onSurfaceVariant）。塗りは不透明面なので M3 標準の
+              // surfaceContainerHighest のまま（ガラス面の一覧は onSurface@0.06）。
+              prefixIcon: Icon(Icons.search, color: scheme.onSurfaceVariant),
               suffixText: matchLabel,
               filled: true,
               fillColor: scheme.surfaceContainerHighest,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-                borderSide: BorderSide.none,
-              ),
+              border: _searchBorder,
+              enabledBorder: _searchBorder,
+              focusedBorder: _searchBorder,
               contentPadding: const EdgeInsets.symmetric(
                 horizontal: 12,
                 vertical: 10,
@@ -2630,9 +2638,11 @@ class _ComposerState extends State<_Composer> {
       child: Container(
         decoration: BoxDecoration(
           color: scheme.surface,
+          // 上辺は面を分けるだけの控えめな線に。浮遊感のある方向性に合わせ、
+          // 区切り線（outlineVariant@0.4）より薄くして主張を抑える。
           border: Border(
             top: BorderSide(
-              color: scheme.outlineVariant.withValues(alpha: 0.5),
+              color: scheme.outlineVariant.withValues(alpha: 0.25),
             ),
           ),
         ),

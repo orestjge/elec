@@ -177,7 +177,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('スレを立てる'));
+    await tester.tap(find.byTooltip('スレを立てる'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).at(0), '立てたスレ');
     await tester.enterText(find.byType(TextField).at(1), '本文');
@@ -212,7 +212,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('スレを立てる'));
+    await tester.tap(find.byTooltip('スレを立てる'));
     await tester.pumpAndSettle();
     // 入力は生の文字列。
     await tester.enterText(find.byType(TextField).at(0), 'A&B<C');
