@@ -50,11 +50,12 @@ class ThreadTile extends StatelessWidget {
     // 既読スレはタイトルを少し落ち着かせて未読と区別する。
     final titleColor = isRead ? scheme.onSurfaceVariant : scheme.onSurface;
     final titleStyle = theme.textTheme.titleMedium?.copyWith(
+      fontSize: 14,
       fontWeight: isRead ? FontWeight.w500 : FontWeight.w600,
       height: 1.3,
       color: titleColor,
     );
-    final titleLineHeight = _lineHeight(titleStyle, fallbackFontSize: 16);
+    final titleLineHeight = _lineHeight(titleStyle, fallbackFontSize: 14);
 
     return Material(
       color: isOwn
@@ -70,13 +71,13 @@ class ThreadTile extends StatelessWidget {
                 : null,
           ),
           child: Padding(
-            padding: EdgeInsets.fromLTRB(isOwn ? 10 : 14, 14, 16, 14),
+            padding: EdgeInsets.fromLTRB(isOwn ? 8 : 12, 8, 14, 8),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // 左端の状態マーカー。タイトル 1 行目の中央に合わせる。
                 Padding(
-                  padding: const EdgeInsets.only(right: 10),
+                  padding: const EdgeInsets.only(right: 8),
                   child: _StatusMark(
                     isRead: isRead,
                     lineHeight: titleLineHeight,
@@ -111,9 +112,10 @@ class ThreadTile extends StatelessWidget {
                           ],
                         ],
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 4),
                       DefaultTextStyle.merge(
                         style: theme.textTheme.labelMedium?.copyWith(
+                          fontSize: 11,
                           color: metaColor,
                         ),
                         child: Row(
@@ -124,7 +126,7 @@ class ThreadTile extends StatelessWidget {
                               color: momentumColor,
                               emphasized: isHot,
                             ),
-                            const SizedBox(width: 14),
+                            const SizedBox(width: 10),
                             _Metric(
                               icon: Icons.forum_outlined,
                               label: formatCompact(thread.resCount),
@@ -222,12 +224,12 @@ class _StatusMark extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     // 既読でも同じ幅を確保してタイトルの左端を揃える。
     return SizedBox(
-      width: 9,
+      width: 8,
       height: lineHeight,
       child: Center(
         child: SizedBox(
-          width: 9,
-          height: 9,
+          width: 8,
+          height: 8,
           child: isRead
               ? null
               : DecoratedBox(
@@ -287,7 +289,7 @@ class _Metric extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 15, color: color),
+        Icon(icon, size: 13, color: color),
         const SizedBox(width: 3),
         Text(
           label,
