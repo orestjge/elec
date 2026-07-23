@@ -951,27 +951,34 @@ class _BottomActionBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (searchOpen) {
-      // 検索欄はキーボードのすぐ上（下部）に出す。Scaffold が bottomNavigationBar
-      // をキーボードの上へ押し上げるので、片手でそのまま入力できる。
-      return _GlassBar(
-        // チップ表示時と同じ高さにして、検索の開閉でバーが上下しないようにする。
-        height: 58,
-        padding: const EdgeInsets.only(left: 12, right: 4),
-        child: Row(
-          children: [
-            Expanded(
-              child: _ThreadSearchField(
-                controller: search,
-                onChanged: onSearchChanged,
-                onClear: onSearchClear,
+      // 検索欄はキーボードのすぐ上（下部）に出す。Scaffold は bottomNavigationBar
+      // をキーボードの上へは押し上げない（持ち上がるのは body と FAB だけ）ため、
+      // このままではキーボードに隠れてしまう。キーボードの高さ分だけ下に余白を
+      // 足して、検索欄をその上へ押し上げ、片手でそのまま入力できるようにする。
+      return AnimatedPadding(
+        duration: const Duration(milliseconds: 150),
+        curve: Curves.easeOut,
+        padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+        child: _GlassBar(
+          // チップ表示時と同じ高さにして、検索の開閉でバーが上下しないようにする。
+          height: 58,
+          padding: const EdgeInsets.only(left: 12, right: 4),
+          child: Row(
+            children: [
+              Expanded(
+                child: _ThreadSearchField(
+                  controller: search,
+                  onChanged: onSearchChanged,
+                  onClear: onSearchClear,
+                ),
               ),
-            ),
-            IconButton(
-              tooltip: '検索を閉じる',
-              icon: const Icon(Icons.search_off),
-              onPressed: onToggleSearch,
-            ),
-          ],
+              IconButton(
+                tooltip: '検索を閉じる',
+                icon: const Icon(Icons.search_off),
+                onPressed: onToggleSearch,
+              ),
+            ],
+          ),
         ),
       );
     }
