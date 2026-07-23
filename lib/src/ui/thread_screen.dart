@@ -721,6 +721,7 @@ class _ThreadScreenState extends State<ThreadScreen>
                     onTapId: null,
                     onTapUrl: _openUrl,
                     isOwn: _history.isOwnPost(widget.threadKey, res.number),
+                    isReplyToOwn: _isReplyToOwnPost(res),
                     blurImages: guroMaskedResNumbers(
                       _state.res,
                     ).contains(res.number),
@@ -930,6 +931,7 @@ class _ThreadScreenState extends State<ThreadScreen>
                       onReply: _reply,
                       onLongPress: () => _showResActions(post),
                       isOwn: _history.isOwnPost(widget.threadKey, post.number),
+                      isReplyToOwn: _isReplyToOwnPost(post),
                       blurImages: guroMasked.contains(post.number),
                     );
                   },
@@ -1008,6 +1010,7 @@ class _ThreadScreenState extends State<ThreadScreen>
           onPickAndUploadFile: _pickAndUploadFile,
           onShowActions: _showResActions,
           isOwnPost: (n) => _history.isOwnPost(widget.threadKey, n),
+          isReplyToOwn: _isReplyToOwnPost,
           ng: _ng,
           revealedNg: _revealedNg,
           enabled: !_isStopped,
@@ -1087,6 +1090,16 @@ class _ThreadScreenState extends State<ThreadScreen>
 
   List<int> _referencedNumbers(Res res) {
     return referencedResNumbers(res.body);
+  }
+
+  /// このレスが自分のレスへ `>>N` で返信しているか（自分宛のレス）。自分自身の
+  /// レスは対象外にして、自分宛チップは他者からの返信だけに付ける。
+  bool _isReplyToOwnPost(Res res) {
+    if (_history.isOwnPost(widget.threadKey, res.number)) return false;
+    for (final n in _referencedNumbers(res)) {
+      if (_history.isOwnPost(widget.threadKey, n)) return true;
+    }
+    return false;
   }
 
   /// スレタイトルの全文を折り返して表示する（AppBar では省略されるため）。
@@ -1643,6 +1656,7 @@ class _ThreadScreenState extends State<ThreadScreen>
                           ),
                       onLongPress: () => _showResActions(item),
                       isOwn: _history.isOwnPost(widget.threadKey, item.number),
+                      isReplyToOwn: _isReplyToOwnPost(item),
                       blurImages: guroMasked.contains(item.number),
                       highlightQuery: searchQuery,
                       isCurrentMatch: item.number == currentMatchNumber,
@@ -2159,6 +2173,7 @@ class _ConversationSheet extends StatefulWidget {
     required this.onPickAndUploadFile,
     required this.onShowActions,
     required this.isOwnPost,
+    required this.isReplyToOwn,
     required this.ng,
     required this.revealedNg,
     required this.enabled,
@@ -2192,6 +2207,9 @@ class _ConversationSheet extends StatefulWidget {
   /// レス長押しでアクションメニューを出す。
   final ValueChanged<Res> onShowActions;
   final bool Function(int number) isOwnPost;
+
+  /// 自分のレスへ返信している（自分宛の）レスか。
+  final bool Function(Res res) isReplyToOwn;
 
   /// NG 判定に使う設定と、タップで一時表示にしたレス番号の集合（画面と共有）。
   final NgStore ng;
@@ -2328,6 +2346,7 @@ class _ConversationSheetState extends State<_ConversationSheet> {
                                 onLongPress: () =>
                                     widget.onShowActions(entry.res),
                                 isOwn: widget.isOwnPost(entry.res.number),
+                                isReplyToOwn: widget.isReplyToOwn(entry.res),
                                 blurImages: widget.guroMasked.contains(
                                   entry.res.number,
                                 ),
