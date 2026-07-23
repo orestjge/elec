@@ -832,7 +832,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
           onPointerCancel: _handlePointerCancel,
           child: CustomScrollView(
             slivers: [
-              SliverAppBar.large(
+              SliverAppBar.medium(
                 title: const Text('エッヂ'),
                 bottom: _searchOpen
                     ? PreferredSize(
