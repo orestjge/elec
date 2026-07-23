@@ -25,6 +25,7 @@ class PostItem extends StatelessWidget {
     this.onBodySelectionActiveChanged,
     this.onLongPress,
     this.isOwn = false,
+    this.isReplyToOwn = false,
     this.blurImages = false,
     this.highlightQuery = '',
     this.isCurrentMatch = false,
@@ -68,6 +69,9 @@ class PostItem extends StatelessWidget {
 
   /// このアプリから投稿したレスか。
   final bool isOwn;
+
+  /// 自分のレスへ `>>N` で返信しているレスか（自分宛のレス）。
+  final bool isReplyToOwn;
 
   /// この画像に「グロ」注意が付いており、サムネイルへモザイクを掛けるか。
   final bool blurImages;
@@ -113,12 +117,23 @@ class PostItem extends StatelessWidget {
             ? scheme.tertiaryContainer.withValues(alpha: 0.32)
             : isOwn
             ? scheme.secondaryContainer.withValues(alpha: 0.22)
+            : isReplyToOwn
+            ? scheme.primaryContainer.withValues(alpha: 0.2)
             : Colors.transparent,
+        // 自分宛のレスは左のアクセント帯で行ごと際立たせ、塗り背景の「自分」と
+        // 形の違いで見分けられるようにする（現在の一致レスが最優先）。
         border: isCurrentMatch
             ? Border(left: BorderSide(color: scheme.tertiary, width: 3))
+            : (isReplyToOwn && !isOwn)
+            ? Border(left: BorderSide(color: scheme.primary, width: 3))
             : null,
       ),
-      padding: EdgeInsets.fromLTRB(isCurrentMatch ? 13 : 16, 8, 16, 8),
+      padding: EdgeInsets.fromLTRB(
+        (isCurrentMatch || (isReplyToOwn && !isOwn)) ? 13 : 16,
+        8,
+        16,
+        8,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -130,6 +145,7 @@ class PostItem extends StatelessWidget {
             onTapId: onTapId,
             onReply: onReply,
             isOwn: isOwn,
+            isReplyToOwn: isReplyToOwn,
             highlightQuery: highlightQuery,
           ),
           if (body.isNotEmpty) ...[
@@ -228,6 +244,7 @@ class _Header extends StatelessWidget {
     required this.onTapId,
     required this.onReply,
     required this.isOwn,
+    required this.isReplyToOwn,
     this.highlightQuery = '',
   });
 
@@ -238,6 +255,7 @@ class _Header extends StatelessWidget {
   final ValueChanged<String>? onTapId;
   final ValueChanged<int>? onReply;
   final bool isOwn;
+  final bool isReplyToOwn;
   final String highlightQuery;
 
   @override
@@ -290,7 +308,16 @@ class _Header extends StatelessWidget {
                     ordinal: idOrdinal,
                     onTap: onTapId,
                   ),
-                if (isOwn) _OwnChip(color: scheme.secondary),
+                if (isOwn)
+                  _OwnChip(color: scheme.secondary)
+                else if (isReplyToOwn)
+                  _OwnChip(
+                    color: scheme.primary,
+                    onColor: scheme.onPrimary,
+                    label: '自分宛',
+                    icon: Icons.reply,
+                    filled: true,
+                  ),
               ],
             ),
           ),
@@ -386,28 +413,59 @@ class _NameLabel extends StatelessWidget {
 }
 
 class _OwnChip extends StatelessWidget {
-  const _OwnChip({required this.color});
+  const _OwnChip({
+    required this.color,
+    this.onColor,
+    this.label = '自分',
+    this.icon,
+    this.filled = false,
+  });
+
+  /// 枠線・文字色（[filled] のときは塗り色）。
   final Color color;
+
+  /// [filled] のときの文字・アイコン色（塗り色の上に載る色）。
+  final Color? onColor;
+  final String label;
+
+  /// ラベル左に添えるアイコン（自分宛の返信矢印など）。
+  final IconData? icon;
+
+  /// 塗りつぶしにするか。false なら枠線のみ。「自分」との形の違いを付ける。
+  final bool filled;
 
   @override
   Widget build(BuildContext context) {
+    final fg = filled ? (onColor ?? color) : color;
     // 高さ・幅とも中身に合わせて縮める。height + alignment を使うと Wrap 内で
     // 横いっぱいに広がってしまうため、上下パディングでピル高さを作る。
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: color.withValues(alpha: 0.55)),
+        color: filled ? color : null,
+        border: filled
+            ? null
+            : Border.all(color: color.withValues(alpha: 0.55)),
       ),
-      child: Text(
-        '自分',
-        style: TextStyle(
-          color: color,
-          fontSize: 11,
-          height: 1,
-          leadingDistribution: TextLeadingDistribution.even,
-          fontWeight: FontWeight.w700,
-        ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 12, color: fg),
+            const SizedBox(width: 3),
+          ],
+          Text(
+            label,
+            style: TextStyle(
+              color: fg,
+              fontSize: 11,
+              height: 1,
+              leadingDistribution: TextLeadingDistribution.even,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
       ),
     );
   }

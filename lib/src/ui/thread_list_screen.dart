@@ -780,16 +780,20 @@ class _ThreadListScreenState extends State<ThreadListScreen>
     // 立てたら一覧を更新して新スレを見えるようにする。
     if (createdTitle != null && mounted) {
       await _refresh(force: true);
-      await _markOwnCreatedThread(createdTitle, beforeKeys);
+      final created = await _markOwnCreatedThread(createdTitle, beforeKeys);
+      // 自分で立てたスレはそのまま開いて、書き込み結果を確認しやすくする。
+      if (created != null && mounted) {
+        await _openThread(created);
+      }
     }
   }
 
-  Future<void> _markOwnCreatedThread(
+  Future<ThreadSummary?> _markOwnCreatedThread(
     String title,
     Set<String> beforeKeys,
   ) async {
     final state = _state;
-    if (state == null) return;
+    if (state == null) return null;
     // subject 上のタイトルは HTML エンティティ化されている（`&`→`&amp;`、絵文字は
     // `&#…;` 等）。入力タイトルは生なので、デコードしてから突き合わせる。
     final candidates = state.threads.where(
@@ -797,13 +801,14 @@ class _ThreadListScreenState extends State<ThreadListScreen>
           !beforeKeys.contains(t.key) &&
           decodeEntities(t.title).trim() == title,
     );
-    if (candidates.isEmpty) return;
+    if (candidates.isEmpty) return null;
     final created = candidates.reduce(
       (a, b) => a.keyAsInt >= b.keyAsInt ? a : b,
     );
     await _history.rememberThread(created);
     await _history.markOwnThread(created.key);
     if (mounted) setState(_reorder);
+    return created;
   }
 
   Future<void> _rememberThreads(List<ThreadSummary> threads) async {
