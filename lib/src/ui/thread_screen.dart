@@ -894,10 +894,9 @@ class _ThreadScreenState extends State<ThreadScreen>
                 ),
               const Divider(height: 1),
               Expanded(
-                child: ListView.separated(
+                child: ListView.builder(
                   controller: controller,
                   itemCount: posts.length,
-                  separatorBuilder: (_, _) => const Divider(height: 1),
                   itemBuilder: (context, i) {
                     final post = posts[i];
                     if (_ng.matches(post) &&
@@ -1627,42 +1626,34 @@ class _ThreadScreenState extends State<ThreadScreen>
               if (item is! Res) return const _NewArrivalLine();
               final ngHidden =
                   _ng.matches(item) && !_revealedNg.contains(item.number);
-              return Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (ngHidden)
-                    _NgPlaceholder(
-                      number: item.number,
-                      onReveal: () =>
-                          setState(() => _revealedNg.add(item.number)),
-                      onLongPress: () => _showResActions(item),
-                    )
-                  else
-                    PostItem(
-                      res: item,
-                      idCount: idCounts[item.id] ?? 1,
-                      idOrdinal: idOrdinals[item.number] ?? 1,
-                      onTapId: _showIdPosts,
-                      onTapRes: _showResPopup,
-                      onTapResRange: _showConversationRange,
-                      onTapUrl: _openUrl,
-                      replyCount: replies[item.number] ?? 0,
-                      onTapReplies: _showReplies,
-                      onReply: _reply,
-                      onBodySelectionActiveChanged: (active) =>
-                          _handleBodySelectionActiveChanged(
-                            item.number,
-                            active,
-                          ),
-                      onLongPress: () => _showResActions(item),
-                      isOwn: _history.isOwnPost(widget.threadKey, item.number),
-                      isReplyToOwn: _isReplyToOwnPost(item),
-                      blurImages: guroMasked.contains(item.number),
-                      highlightQuery: searchQuery,
-                      isCurrentMatch: item.number == currentMatchNumber,
-                    ),
-                  const Divider(height: 1),
-                ],
+              // レス間は線を引かず、スレ一覧と同じく余白だけで区切る。各レスは
+              // 番号・名前の見出し行が始点の目印になる。
+              if (ngHidden) {
+                return _NgPlaceholder(
+                  number: item.number,
+                  onReveal: () => setState(() => _revealedNg.add(item.number)),
+                  onLongPress: () => _showResActions(item),
+                );
+              }
+              return PostItem(
+                res: item,
+                idCount: idCounts[item.id] ?? 1,
+                idOrdinal: idOrdinals[item.number] ?? 1,
+                onTapId: _showIdPosts,
+                onTapRes: _showResPopup,
+                onTapResRange: _showConversationRange,
+                onTapUrl: _openUrl,
+                replyCount: replies[item.number] ?? 0,
+                onTapReplies: _showReplies,
+                onReply: _reply,
+                onBodySelectionActiveChanged: (active) =>
+                    _handleBodySelectionActiveChanged(item.number, active),
+                onLongPress: () => _showResActions(item),
+                isOwn: _history.isOwnPost(widget.threadKey, item.number),
+                isReplyToOwn: _isReplyToOwnPost(item),
+                blurImages: guroMasked.contains(item.number),
+                highlightQuery: searchQuery,
+                isCurrentMatch: item.number == currentMatchNumber,
               );
             },
           ),
@@ -2315,7 +2306,6 @@ class _ConversationSheetState extends State<_ConversationSheet> {
                         highlighted: entry.highlighted,
                         depth: entry.depth,
                         refs: entry.refs,
-                        showDivider: i < widget.entries.length - 1,
                         child: ngHidden
                             ? _NgPlaceholder(
                                 number: entry.res.number,
@@ -2392,13 +2382,11 @@ class _ConversationPost extends StatelessWidget {
     required this.depth,
     required this.refs,
     required this.highlighted,
-    required this.showDivider,
   });
   final Widget child;
   final int depth;
   final List<int> refs;
   final bool highlighted;
-  final bool showDivider;
 
   /// インデントを付ける最大の深さ。これ以上深くなっても字下げは増やさない。
   /// 深いツリーで本文幅（＝ヘッダ行）が潰れて表示が破綻するのを防ぐ。
@@ -2447,11 +2435,6 @@ class _ConversationPost extends StatelessWidget {
                     ),
                   ),
                 child,
-                if (showDivider)
-                  Divider(
-                    height: 1,
-                    color: scheme.outlineVariant.withValues(alpha: 0.65),
-                  ),
               ],
             ),
           ),

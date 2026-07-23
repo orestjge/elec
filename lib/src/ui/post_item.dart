@@ -89,7 +89,7 @@ class PostItem extends StatelessWidget {
 
     if (res.isAbone) {
       return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
         child: Text(
           '${res.number} あぼーん',
           style: theme.textTheme.bodyMedium?.copyWith(
@@ -130,9 +130,9 @@ class PostItem extends StatelessWidget {
       ),
       padding: EdgeInsets.fromLTRB(
         (isCurrentMatch || (isReplyToOwn && !isOwn)) ? 13 : 16,
-        8,
+        6,
         16,
-        8,
+        6,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -149,10 +149,15 @@ class PostItem extends StatelessWidget {
             highlightQuery: highlightQuery,
           ),
           if (body.isNotEmpty) ...[
-            const SizedBox(height: 4),
+            const SizedBox(height: 3),
             ResBody(
               text: body,
-              style: theme.textTheme.bodyLarge?.copyWith(height: 1.45),
+              // 本文は一覧のタイトル（14px）寄りに詰めつつ、読む主役テキスト
+              // なので 1px 大きい 15px・行高 1.4 に留めて読みやすさを確保する。
+              style: theme.textTheme.bodyLarge?.copyWith(
+                fontSize: 15,
+                height: 1.4,
+              ),
               onTapRes: (n) => onTapRes?.call(n),
               onTapResRange: (numbers) => onTapResRange?.call(numbers),
               onTapUrl: (u) => onTapUrl?.call(u),
