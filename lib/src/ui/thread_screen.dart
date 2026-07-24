@@ -2316,6 +2316,9 @@ class _ConversationSheetState extends State<_ConversationSheet> {
                       key: _keys[entry.res.number],
                       child: _ConversationPost(
                         highlighted: entry.highlighted,
+                        isReplyToOwn:
+                            widget.isReplyToOwn(entry.res) &&
+                            !widget.isOwnPost(entry.res.number),
                         depth: entry.depth,
                         refs: entry.refs,
                         child: ngHidden
@@ -2349,6 +2352,7 @@ class _ConversationSheetState extends State<_ConversationSheet> {
                                     widget.onShowActions(entry.res),
                                 isOwn: widget.isOwnPost(entry.res.number),
                                 isReplyToOwn: widget.isReplyToOwn(entry.res),
+                                showReplyToOwnAccent: false,
                                 blurImages: widget.guroMasked.contains(
                                   entry.res.number,
                                 ),
@@ -2394,11 +2398,13 @@ class _ConversationPost extends StatelessWidget {
     required this.depth,
     required this.refs,
     required this.highlighted,
+    required this.isReplyToOwn,
   });
   final Widget child;
   final int depth;
   final List<int> refs;
   final bool highlighted;
+  final bool isReplyToOwn;
 
   /// インデントを付ける最大の深さ。これ以上深くなっても字下げは増やさない。
   /// 深いツリーで本文幅（＝ヘッダ行）が潰れて表示が破綻するのを防ぐ。
@@ -2408,47 +2414,57 @@ class _ConversationPost extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final indent = math.min(depth, _maxIndentLevels) * 18.0;
-    return Container(
-      decoration: BoxDecoration(
-        color: highlighted
-            ? scheme.primaryContainer.withValues(alpha: 0.18)
-            : Colors.transparent,
-        border: highlighted
-            ? Border(left: BorderSide(color: scheme.primary, width: 4))
-            : null,
-      ),
-      child: Padding(
-        padding: EdgeInsets.only(left: indent),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            border: depth > 0
-                ? Border(
-                    left: BorderSide(
-                      color: scheme.outlineVariant.withValues(alpha: 0.8),
-                      width: 2,
-                    ),
-                  )
-                : null,
-          ),
-          child: Padding(
-            padding: EdgeInsets.only(left: depth > 0 ? 8 : 0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (refs.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                    child: Text(
-                      '返信先 ${refs.map((n) => '>>$n').join(' ')}',
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                        fontWeight: FontWeight.w600,
-                      ),
+    final accentColor = highlighted
+        ? scheme.primary
+        : isReplyToOwn
+        ? scheme.primary
+        : null;
+    final borderColor =
+        accentColor ?? scheme.outlineVariant.withValues(alpha: 0.8);
+    final borderWidth = accentColor != null
+        ? 4.0
+        : depth > 0
+        ? 2.0
+        : 0.0;
+    final contentLeftPadding = accentColor != null
+        ? (depth > 0 ? 6.0 : 12.0)
+        : depth > 0
+        ? 8.0
+        : 0.0;
+
+    return Padding(
+      padding: EdgeInsets.only(left: indent),
+      child: Container(
+        decoration: BoxDecoration(
+          color: highlighted
+              ? scheme.primaryContainer.withValues(alpha: 0.18)
+              : isReplyToOwn
+              ? scheme.primaryContainer.withValues(alpha: 0.2)
+              : Colors.transparent,
+          border: borderWidth > 0
+              ? Border(
+                  left: BorderSide(color: borderColor, width: borderWidth),
+                )
+              : null,
+        ),
+        child: Padding(
+          padding: EdgeInsets.only(left: contentLeftPadding),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (refs.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                  child: Text(
+                    '返信先 ${refs.map((n) => '>>$n').join(' ')}',
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
-                child,
-              ],
-            ),
+                ),
+              child,
+            ],
           ),
         ),
       ),

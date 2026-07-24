@@ -26,6 +26,7 @@ class PostItem extends StatelessWidget {
     this.onLongPress,
     this.isOwn = false,
     this.isReplyToOwn = false,
+    this.showReplyToOwnAccent = true,
     this.blurImages = false,
     this.highlightQuery = '',
     this.isCurrentMatch = false,
@@ -73,6 +74,9 @@ class PostItem extends StatelessWidget {
   /// 自分のレスへ `>>N` で返信しているレスか（自分宛のレス）。
   final bool isReplyToOwn;
 
+  /// 自分宛レスの左アクセント帯をこのレス内で描くか。
+  final bool showReplyToOwnAccent;
+
   /// この画像に「グロ」注意が付いており、サムネイルへモザイクを掛けるか。
   final bool blurImages;
 
@@ -111,6 +115,9 @@ class PostItem extends StatelessWidget {
 
     // 現在ジャンプ中の一致レスは、左のアクセント帯と薄い背景でひと目で分かる
     // ようにする（左パディングを帯の分だけ詰めて本文位置は揃える）。
+    final showAccent =
+        isCurrentMatch || (showReplyToOwnAccent && isReplyToOwn && !isOwn);
+
     final content = Container(
       decoration: BoxDecoration(
         color: isCurrentMatch
@@ -124,16 +131,11 @@ class PostItem extends StatelessWidget {
         // 形の違いで見分けられるようにする（現在の一致レスが最優先）。
         border: isCurrentMatch
             ? Border(left: BorderSide(color: scheme.tertiary, width: 3))
-            : (isReplyToOwn && !isOwn)
+            : (showReplyToOwnAccent && isReplyToOwn && !isOwn)
             ? Border(left: BorderSide(color: scheme.primary, width: 3))
             : null,
       ),
-      padding: EdgeInsets.fromLTRB(
-        (isCurrentMatch || (isReplyToOwn && !isOwn)) ? 13 : 16,
-        6,
-        16,
-        6,
-      ),
+      padding: EdgeInsets.fromLTRB(showAccent ? 13 : 16, 6, 16, 6),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
