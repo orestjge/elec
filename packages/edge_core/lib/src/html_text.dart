@@ -6,6 +6,12 @@
 library;
 
 final _brRe = RegExp(r'<br\s*/?>', caseSensitive: false);
+final _scriptStyleRe = RegExp(
+  r'<(script|style)\b[^>]*>[\s\S]*?</\1\s*>',
+  caseSensitive: false,
+);
+final _commentRe = RegExp(r'<!--[\s\S]*?-->');
+final _declarationRe = RegExp(r'<![A-Z][^>]*>', caseSensitive: false);
 final _tagRe = RegExp(r'</?[a-zA-Z][^>]*>');
 final _numRefRe = RegExp(r'&#([xX]?)([0-9a-fA-F]+);');
 
@@ -42,6 +48,8 @@ String decodeEntities(String input) {
 /// HTML を表示用のプレーンテキストにする。本文向け。
 ///
 /// - `<br>` / `<br/>` → 改行
+/// - `<script>` / `<style>` は中身ごと除去
+/// - HTML コメント / doctype 宣言を除去
 /// - 残りのタグ（`<b>`、`</b>` など）は除去
 /// - エンティティをデコード
 ///
@@ -50,6 +58,9 @@ String decodeEntities(String input) {
 /// タグ除去が食う事故が起きる。
 String htmlToText(String html) {
   var s = html.replaceAll(_brRe, '\n');
+  s = s.replaceAll(_scriptStyleRe, '');
+  s = s.replaceAll(_commentRe, '');
+  s = s.replaceAll(_declarationRe, '');
   s = s.replaceAll(_tagRe, '');
   return decodeEntities(s);
 }

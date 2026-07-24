@@ -130,8 +130,8 @@ class DatFetcher {
         );
 
       case final s when _isRedirect(s):
-        // 閲覧中に dat落ちした。過去ログ（kako）へ飛ばされたので辿る。
-        return _followRedirect(url, resp);
+        // 閲覧中に 30x。過去ログ（kako）なら dat落ち、ホスト移設なら透過追従。
+        return _followRedirect(url, resp, status: DatFetchStatus.refetched);
 
       default:
         throw HttpFetchException(resp.statusCode, url);
@@ -139,17 +139,30 @@ class DatFetcher {
   }
 
   static const _redirectStatuses = {301, 302, 303, 307, 308};
+  static const _maxRedirects = 3;
 
   static bool _isRedirect(int status) => _redirectStatuses.contains(status);
 
-  /// 30x を辿って移動先（過去ログ dat）を全取得する。dat落ちなので [DatState.pastLog]
-  /// を立てる。移動先が 404 なら過去ログにも無い＝ notFound。
-  Future<DatFetchResult> _followRedirect(Uri from, FetchResponse resp) async {
+  /// 30x を辿って移動先を全取得する。
+  ///
+  /// 遷移先が過去ログ（`/kako/`）なら **dat落ち**＝ [DatState.pastLog] を立てて
+  /// 停止表示にする。それ以外（5ch の `.net → .io` のようなホスト移設）は
+  /// **透過追従**して現行スレとして扱う。移動先が 404 なら notFound。
+  ///
+  /// [status] は透過追従時に付ける状態（初回なら initial、差分中の全再取得なら
+  /// refetched）。
+  Future<DatFetchResult> _followRedirect(
+    Uri from,
+    FetchResponse resp, {
+    DatFetchStatus status = DatFetchStatus.pastLog,
+    int hop = 0,
+  }) async {
     final location = resp.header('location');
-    if (location == null || location.isEmpty) {
+    if (location == null || location.isEmpty || hop >= _maxRedirects) {
       throw HttpFetchException(resp.statusCode, from);
     }
     final target = from.resolve(location);
+    final isKako = target.pathSegments.contains('kako');
     final next = await http.get(target);
     if (next.statusCode == 404) {
       return DatFetchResult(
@@ -158,14 +171,17 @@ class DatFetcher {
         status: DatFetchStatus.notFound,
       );
     }
+    if (_isRedirect(next.statusCode)) {
+      return _followRedirect(target, next, status: status, hop: hop + 1);
+    }
     if (next.statusCode != 200) {
       throw HttpFetchException(next.statusCode, target);
     }
     return _fromFullBody(
       next,
       lastModified: next.header('last-modified'),
-      status: DatFetchStatus.pastLog,
-      pastLog: true,
+      status: isKako ? DatFetchStatus.pastLog : status,
+      pastLog: isKako,
     );
   }
 
@@ -231,8 +247,8 @@ class DatFetcher {
       );
     }
     if (_isRedirect(resp.statusCode)) {
-      // dat落ち → 過去ログ（kako）へリダイレクト。辿って全取得する。
-      return _followRedirect(url, resp);
+      // 過去ログ（kako）なら dat落ち、ホスト移設なら透過追従して現行扱い。
+      return _followRedirect(url, resp, status: status);
     }
     if (resp.statusCode != 200) {
       throw HttpFetchException(resp.statusCode, url);

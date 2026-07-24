@@ -47,6 +47,27 @@ void main() {
       expect(htmlToText('名無し</b>(L20 NKP8)<b>'), '名無し(L20 NKP8)');
     });
 
+    test('doctype 宣言とコメントを除去する', () {
+      expect(
+        htmlToText(
+          '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">'
+          '<!--nobanner--><!-- 2ch_X:error -->ERROR!',
+        ),
+        'ERROR!',
+      );
+    });
+
+    test('script と style は中身ごと除去する', () {
+      expect(
+        htmlToText(
+          '書きこみました。'
+          '<script>(function(){window.__CF\$cv = {}})();</script>'
+          '<style>body{display:none}</style>',
+        ),
+        '書きこみました。',
+      );
+    });
+
     test('タグ除去とエンティティデコードを両方行う', () {
       expect(htmlToText('&lt;script&gt;<br>a&amp;b'), '<script>\na&b');
     });

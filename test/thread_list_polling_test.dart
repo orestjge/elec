@@ -497,6 +497,31 @@ void main() {
     expect(find.textContaining('本文', findRichText: true), findsOneWidget);
   });
 
+  testWidgets('一覧を右にスワイプすると板一覧（ドロワー）が開く', (tester) async {
+    final history = ReadHistory(MemoryReadHistoryStorage());
+    final fetcher = QueueFetcher([subjectOk('1.dat<>スレ (1)\n', 'LM1')]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadListScreen(
+          fetcher: fetcher,
+          pollInterval: const Duration(seconds: 15),
+          readHistory: history,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // ドロワーは最初は閉じている。
+    expect(find.text('URLで板を追加'), findsNothing);
+
+    await tester.drag(find.byType(CustomScrollView), const Offset(500, 0));
+    await tester.pumpAndSettle();
+
+    // 板追加の導線＝ドロワーが開いている。
+    expect(find.text('URLで板を追加'), findsOneWidget);
+  });
+
   testWidgets('一覧で長押し後の左ドラッグでは直近スレを開かない', (tester) async {
     final history = ReadHistory(MemoryReadHistoryStorage());
     await history.markLastViewedThread(

@@ -23,10 +23,16 @@ class NewThreadScreen extends StatefulWidget {
     this.attachmentUploader,
     this.pickAndUploadImage,
     this.pickAndUploadFile,
+    this.maxTitle,
+    this.maxBody,
   });
 
   final HttpFetcher? fetcher;
   final EdgeEndpoints endpoints;
+
+  /// スレタイ・本文の最大文字数（板の SETTING.TXT 実測値）。null なら既定値。
+  final int? maxTitle;
+  final int? maxBody;
   final AuthStore? authStore;
   final AuthLauncher authLauncher;
 
@@ -42,9 +48,12 @@ class NewThreadScreen extends StatefulWidget {
 }
 
 class _NewThreadScreenState extends State<NewThreadScreen> {
-  // SETTING.TXT の実測値。超過はサーバが弾くので手前で止める。
-  static const _titleMax = 192;
-  static const _bodyMax = 9192;
+  // SETTING.TXT の実測既定値。超過はサーバが弾くので手前で止める。板から実測値が
+  // 渡ればそれを使う（5ch は本文 4096・スレタイ 96〜128 とエッヂより小さい）。
+  static const _defaultTitleMax = 192;
+  static const _defaultBodyMax = 9192;
+  int get _titleMax => widget.maxTitle ?? _defaultTitleMax;
+  int get _bodyMax => widget.maxBody ?? _defaultBodyMax;
 
   late final HttpFetcher _fetcher;
   late final bool _ownsFetcher;
@@ -176,9 +185,14 @@ class _NewThreadScreenState extends State<NewThreadScreen> {
       // URL 挿入で末尾に付く改行は残さない。AA の末尾空白は保持したいので、
       // 落とすのは末尾の改行だけにする。
       message: _body.text.replaceAll(RegExp(r'\n+$'), ''),
-      tokens: _authStore.tokens,
+      tokens: _authStore.tokensFor(widget.endpoints.host),
+      referer: widget.endpoints.writeReferer(),
+      time: widget.endpoints.isFivech
+          ? '${DateTime.now().millisecondsSinceEpoch ~/ 1000}'
+          : null,
+      userAgent: widget.endpoints.writeUserAgent,
     );
-    await _authStore.setTokens(result.tokens);
+    await _authStore.setTokensFor(widget.endpoints.host, result.tokens);
     return result.outcome;
   }
 
@@ -219,10 +233,7 @@ class _NewThreadScreenState extends State<NewThreadScreen> {
             style: theme.textTheme.titleMedium?.copyWith(
               fontWeight: FontWeight.w600,
             ),
-            decoration: _filledInputDecoration(
-              scheme,
-              hintText: 'スレッドタイトル',
-            ),
+            decoration: _filledInputDecoration(scheme, hintText: 'スレッドタイトル'),
           ),
           _CharCount(length: _title.text.characters.length, max: _titleMax),
           const SizedBox(height: 12),
