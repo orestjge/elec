@@ -33,6 +33,10 @@ class SubjectFetcher {
 
   final HttpFetcher http;
 
+  static const _maxRedirects = 3;
+  static const _redirectStatuses = {301, 302, 303, 307, 308};
+  static bool _isRedirect(int status) => _redirectStatuses.contains(status);
+
   /// [metadent] が true なら `subject-metadent.txt` としてパースし、各スレの
   /// [ThreadSummary.metadent]（スレ立て人の識別子）を埋める。
   Future<SubjectFetchResult> fetch(
@@ -43,13 +47,26 @@ class SubjectFetcher {
     final headers = <String, String>{
       if (prev?.lastModified != null) 'If-Modified-Since': prev!.lastModified!,
     };
-    final resp = await http.get(url, headers: headers);
+    // 5ch は板ごとにホストが分散し、`.net → .io` を 308 で恒久リダイレクトする。
+    // 板追加時にホストを正規化するが、取りこぼしても読めるよう透過追従もする。
+    var target = url;
+    var resp = await http.get(target, headers: headers);
+    for (
+      var hop = 0;
+      _isRedirect(resp.statusCode) && hop < _maxRedirects;
+      hop++
+    ) {
+      final location = resp.header('location');
+      if (location == null || location.isEmpty) break;
+      target = target.resolve(location);
+      resp = await http.get(target, headers: headers);
+    }
 
     if (resp.statusCode == 304 && prev != null) {
       return SubjectFetchResult(state: prev, notModified: true);
     }
     if (resp.statusCode != 200) {
-      throw HttpFetchException(resp.statusCode, url);
+      throw HttpFetchException(resp.statusCode, target);
     }
     return SubjectFetchResult(
       state: SubjectState(

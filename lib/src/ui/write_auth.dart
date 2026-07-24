@@ -1,5 +1,6 @@
 import 'package:edge_core/edge_core.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../net/auth_launcher.dart';
 
@@ -13,20 +14,20 @@ Future<PostAccepted?> submitWithAuth({
   required BuildContext context,
   required AuthLauncher launcher,
   required Future<BbsCgiResult> Function() postOnce,
-  ValueChanged<String>? onRejected,
 }) async {
-  final messenger = ScaffoldMessenger.of(context);
   final outcome = await postOnce();
   switch (outcome) {
     case PostAccepted():
       return outcome;
     case PostRejected(:final message):
       final text = message.isEmpty ? '書き込めませんでした' : message;
-      if (onRejected == null) {
-        messenger.showSnackBar(SnackBar(content: Text(text)));
-      } else {
-        onRejected(text);
-      }
+      if (context.mounted) await showWriteErrorDialog(context, text);
+      return null;
+    case PostNeedsConfirm():
+      // 5ch の書き込み確認は BbsWriter が自動で通過するので、ここに来るのは
+      // 確認を突破できなかったとき（どんぐり未成立など）。案内を出して諦める。
+      const text = '書き込み確認を通過できませんでした（どんぐり等の条件を満たしていない可能性）';
+      if (context.mounted) await showWriteErrorDialog(context, text);
       return null;
     case PostNeedsAuth(:final authCode, :final authUrl):
       if (!context.mounted) return null;
@@ -34,10 +35,60 @@ Future<PostAccepted?> submitWithAuth({
         context: context,
         builder: (_) => AuthDialog(
           initialCode: authCode,
-          onOpen: () => launcher.open(authUrl),
+          authUrl: authUrl,
+          onOpen: launcher.open,
           onRetry: postOnce,
         ),
       );
+  }
+}
+
+Future<void> showWriteErrorDialog(BuildContext context, String message) {
+  return showDialog<void>(
+    context: context,
+    builder: (_) => WriteErrorDialog(message: message),
+  );
+}
+
+class WriteErrorDialog extends StatelessWidget {
+  const WriteErrorDialog({super.key, required this.message});
+
+  final String message;
+
+  Future<void> _copy(BuildContext context) async {
+    await Clipboard.setData(ClipboardData(text: message));
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('エラー内容をコピーしました')));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return AlertDialog(
+      title: const Text('書き込みエラー'),
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 560),
+        child: SingleChildScrollView(
+          child: SelectableText(
+            message,
+            style: TextStyle(color: theme.colorScheme.error),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton.icon(
+          onPressed: () => _copy(context),
+          icon: const Icon(Icons.copy),
+          label: const Text('コピー'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('閉じる'),
+        ),
+      ],
+    );
   }
 }
 
@@ -50,12 +101,14 @@ class AuthDialog extends StatefulWidget {
   const AuthDialog({
     super.key,
     required this.initialCode,
+    required this.authUrl,
     required this.onOpen,
     required this.onRetry,
   });
 
   final String initialCode;
-  final Future<bool> Function() onOpen;
+  final Uri authUrl;
+  final Future<bool> Function(Uri url) onOpen;
 
   /// 認証後の再送。最新の結果を返す（コードが更新されていれば反映する）。
   final Future<BbsCgiResult> Function() onRetry;
@@ -66,17 +119,26 @@ class AuthDialog extends StatefulWidget {
 
 class _AuthDialogState extends State<AuthDialog> {
   late String _code = widget.initialCode;
+  late Uri _authUrl = widget.authUrl;
   bool _busy = false;
   String? _message;
 
   Future<void> _open() async {
     setState(() => _busy = true);
-    final ok = await widget.onOpen();
+    final ok = await widget.onOpen(_authUrl);
     if (!mounted) return;
     setState(() {
       _busy = false;
       if (!ok) _message = 'ブラウザを開けませんでした';
     });
+  }
+
+  Future<void> _copyUrl() async {
+    await Clipboard.setData(ClipboardData(text: _authUrl.toString()));
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('認証URLをコピーしました')));
   }
 
   Future<void> _retry() async {
@@ -89,12 +151,13 @@ class _AuthDialogState extends State<AuthDialog> {
     switch (result) {
       case PostAccepted():
         Navigator.of(context).pop(result);
-      case PostNeedsAuth(:final authCode):
+      case PostNeedsAuth(:final authCode, :final authUrl):
         setState(() {
           _busy = false;
           final changed = authCode != _code;
           _code = authCode; // 期限切れで新コードになっていれば更新
-          _message = changed
+          _authUrl = authUrl;
+          _message = changed && authCode.isNotEmpty
               ? 'コードの期限が切れたため新しいコードに更新しました。もう一度ブラウザで認証してください。'
               : 'まだ認証が確認できません。ブラウザで認証を完了してから押してください。';
         });
@@ -102,6 +165,12 @@ class _AuthDialogState extends State<AuthDialog> {
         setState(() {
           _busy = false;
           _message = message.isEmpty ? '書き込めませんでした' : message;
+        });
+      case PostNeedsConfirm():
+        // eddist の認証フローでは通常起きない（5ch 専用）。念のため案内する。
+        setState(() {
+          _busy = false;
+          _message = '書き込み確認を通過できませんでした';
         });
     }
   }
@@ -111,39 +180,73 @@ class _AuthDialogState extends State<AuthDialog> {
     final theme = Theme.of(context);
     return AlertDialog(
       title: const Text('認証が必要です'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('ブラウザで認証ページを開き、下のコードを入力して認証してください。'),
-          const SizedBox(height: 16),
-          Center(
-            child: SelectableText(
-              _code,
-              style: theme.textTheme.headlineMedium?.copyWith(
-                fontWeight: FontWeight.bold,
-                letterSpacing: 6,
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 560),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                _code.isEmpty
+                    ? 'ブラウザで認証ページを開き、認証を完了してください。'
+                    : 'ブラウザで認証ページを開き、下のコードを入力して認証してください。',
               ),
-            ),
+              if (_code.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                Center(
+                  child: SelectableText(
+                    _code,
+                    style: theme.textTheme.headlineMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 6,
+                    ),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 12),
+              SelectableText(
+                _authUrl.toString(),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.primary,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _code.isEmpty
+                    ? '※ 同じ端末・同じ回線で認証してください。'
+                    : '※ コードの有効期限は約 5 分です。同じ端末・同じ回線で認証してください。',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: _busy ? null : _open,
+                    icon: const Icon(Icons.open_in_browser),
+                    label: const Text('認証ページを開く'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: _busy ? null : _copyUrl,
+                    icon: const Icon(Icons.copy),
+                    label: const Text('URLをコピー'),
+                  ),
+                ],
+              ),
+              if (_message != null) ...[
+                const SizedBox(height: 12),
+                SelectableText(
+                  _message!,
+                  style: TextStyle(color: theme.colorScheme.error),
+                ),
+              ],
+            ],
           ),
-          const SizedBox(height: 8),
-          Text(
-            '※ コードの有効期限は約 5 分です。同じ端末・同じ回線で認証してください。',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 12),
-          OutlinedButton.icon(
-            onPressed: _busy ? null : _open,
-            icon: const Icon(Icons.open_in_browser),
-            label: const Text('認証ページを開く'),
-          ),
-          if (_message != null) ...[
-            const SizedBox(height: 12),
-            Text(_message!, style: TextStyle(color: theme.colorScheme.error)),
-          ],
-        ],
+        ),
       ),
       actions: [
         TextButton(

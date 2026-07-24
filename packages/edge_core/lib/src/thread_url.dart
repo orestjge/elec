@@ -34,11 +34,15 @@ class ThreadRef {
   int get hashCode => Object.hash(board, threadKey, resSpec);
 
   @override
-  String toString() => 'ThreadRef($board/$threadKey${resSpec == null ? '' : '/$resSpec'})';
+  String toString() =>
+      'ThreadRef($board/$threadKey${resSpec == null ? '' : '/$resSpec'})';
 }
 
+/// 板キーとして妥当か（英数と `_` のみ）。板 URL 解析（[[board_url]]）でも使う。
+final boardKeyPattern = RegExp(r'^[0-9a-zA-Z_]+$');
+
 /// 板キーとして妥当か（英数と `_` のみ）。
-final _boardRe = RegExp(r'^[0-9a-zA-Z_]+$');
+final _boardRe = boardKeyPattern;
 
 /// スレッドキーとして妥当か（10 桁以上の数字。UNIX 秒）。
 final _keyRe = RegExp(r'^\d{9,}$');
@@ -80,9 +84,14 @@ ThreadRef? parseThreadUrl(Uri uri) {
   return null;
 }
 
-String _stripDat(String s) => s.endsWith('.dat') ? s.substring(0, s.length - 4) : s;
+String _stripDat(String s) =>
+    s.endsWith('.dat') ? s.substring(0, s.length - 4) : s;
 
-ThreadRef? _build({required String board, required String key, String? resSpec}) {
+ThreadRef? _build({
+  required String board,
+  required String key,
+  String? resSpec,
+}) {
   if (!_boardRe.hasMatch(board) || !_keyRe.hasMatch(key)) return null;
   return ThreadRef(board: board, threadKey: key, resSpec: resSpec);
 }

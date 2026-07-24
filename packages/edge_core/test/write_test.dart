@@ -16,14 +16,40 @@ List<int> unauthBody(String code) => sjis(
   ' https://bbs.eddibb.cc/auth-code</body></html>',
 );
 
-List<int> successBody() =>
-    sjis('<html><!-- 2ch_X:true --><title>書きこみました</title>'
-        '<body>書きこみました</body></html>');
+List<int> successBody() => sjis(
+  '<html><!-- 2ch_X:true --><title>書きこみました</title>'
+  '<body>書きこみました</body></html>',
+);
 
 List<int> rejectBody(String tag, String msg) => sjis(
   '<html><!-- 2ch_X:error -->'
   '<meta name="error_code" content="E-$tag">'
   '<body>エラー！<br>$msg</body></html>',
+);
+
+List<int> authUrlOnlyBody() => sjis(
+  '<html><head><title>ERROR</title></head>'
+  '<body>authentication required<br>'
+  'https://bbs.punipuni.eu/auth-code?token=abc.</body></html>',
+);
+
+List<int> legacyErrorBody() => sjis(
+  '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">'
+  '<html><body>ERROR!<br>'
+  '<!--nobanner--><!-- 2ch_X:error -->'
+  'ERROR: 書き込みに必要なレベルが足りていません。</body></html>',
+);
+
+List<int> legacySuccessWithChallengeBody() => sjis(
+  '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">'
+  '<html><body>'
+  '書きこみました。<br>'
+  '書きこみました。<br>'
+  '画面を切り替える'
+  '<script>'
+  "(function(){window.__CF\$cv={params:{r:'a20446e4ec767897'}};})();"
+  '</script>'
+  '</body></html>',
 );
 
 class FakePoster implements HttpPoster {
@@ -46,12 +72,52 @@ class FakePoster implements HttpPoster {
   }
 }
 
+/// 呼び出しごとに順に応答を返し、各リクエストを記録する（二段階 POST 検証用）。
+class QueuePoster implements HttpPoster {
+  QueuePoster(this._responses);
+  final List<FetchResponse> _responses;
+  final List<({Map<String, String> headers, String body})> calls = [];
+  int _i = 0;
+
+  @override
+  Future<FetchResponse> post(
+    Uri url, {
+    Map<String, String> headers = const {},
+    required String body,
+  }) async {
+    calls.add((headers: headers, body: body));
+    return _responses[_i++];
+  }
+}
+
+/// 5ch の「書き込み確認」ページ（どんぐり/クッキー）。hidden フォーム付き。
+List<int> confirmBody5ch() => sjis(
+  '<html><!-- 2ch_X:cookie --><head><title>書き込み確認</title></head>\n'
+  '<body>書き込み確認<br>\n'
+  '<form method="POST" action="../test/bbs.cgi">\n'
+  '<input type="hidden" name="bbs" value="news4vip">\n'
+  '<input type="hidden" name="key" value="1700000000">\n'
+  '<input type="hidden" name="time" value="1700000001">\n'
+  '<input type="hidden" name="FROM" value="">\n'
+  '<input type="hidden" name="mail" value="">\n'
+  '<input type="hidden" name="MESSAGE" value="&lt;test&gt;">\n'
+  '<input type="hidden" name="hash" value="abc123">\n'
+  '<input type="submit" value="上記全てを承諾して書き込む">\n'
+  '</form></body></html>',
+);
+
+/// 5ch の成功ページ。
+List<int> success5ch() => sjis(
+  '<html><!-- 2ch_X:true --><head><title>書きこみました</title></head>'
+  '<body>書きこみました</body></html>',
+);
+
 void main() {
   final bbsCgi = Uri.parse('https://bbs.eddibb.cc/test/bbs.cgi');
 
   group('AuthTokens', () {
     test('cookieHeader を組む', () {
-      const t = AuthTokens(edgeToken: 'E', tinkerToken: 'T');
+      final t = AuthTokens.eddist(edgeToken: 'E', tinkerToken: 'T');
       expect(t.cookieHeader, 'edge-token=E; tinker-token=T');
     });
 
@@ -69,20 +135,58 @@ void main() {
     });
 
     test('既存トークンは Set-Cookie に無ければ保持', () {
-      const prev = AuthTokens(edgeToken: 'E', tinkerToken: 'T');
+      final prev = AuthTokens.eddist(edgeToken: 'E', tinkerToken: 'T');
       final t = prev.updatedFrom(['tinker-token=NEW']);
       expect(t.edgeToken, 'E'); // 据え置き
       expect(t.tinkerToken, 'NEW');
     });
 
-    test('JSON 往復', () {
-      const t = AuthTokens(edgeToken: 'E', tinkerToken: 'T');
+    test('任意の Cookie（MonaTicket 等）も保持・送出する', () {
+      final t = AuthTokens.none.updatedFrom([
+        'MonaTicket=abc.def; Path=/; Max-Age=8640000',
+        'other=x; Path=/',
+      ]);
+      expect(t['MonaTicket'], 'abc.def');
+      expect(t.cookieHeader, contains('MonaTicket=abc.def'));
+      expect(t.cookieHeader, contains('other=x'));
+    });
+
+    test('Max-Age=0 の Set-Cookie は削除する（Broken MonaTicket 再植え）', () {
+      final prev = AuthTokens.none.updatedFrom(['MonaTicket=abc; Max-Age=100']);
+      expect(prev['MonaTicket'], 'abc');
+      final t = prev.updatedFrom(['MonaTicket=deleted; Max-Age=0']);
+      expect(t['MonaTicket'], isNull);
+    });
+
+    test('過去 Expires の Set-Cookie は削除する', () {
+      final prev = AuthTokens.none.updatedFrom(['MonaTicket=abc']);
+      final t = prev.updatedFrom([
+        'MonaTicket=x; Expires=Thu, 01-Jan-1970 00:00:00 GMT',
+      ], now: DateTime.utc(2026, 1, 1));
+      expect(t['MonaTicket'], isNull);
+    });
+
+    test('未来 Expires は保持する', () {
+      final t = AuthTokens.none.updatedFrom([
+        'MonaTicket=keep; Expires=Wed, 09 Jun 2100 10:18:14 GMT',
+      ], now: DateTime.utc(2026, 1, 1));
+      expect(t['MonaTicket'], 'keep');
+    });
+
+    test('JSON 往復（素の Cookie マップ）', () {
+      final t = AuthTokens.eddist(edgeToken: 'E', tinkerToken: 'T');
       final back = AuthTokens.fromJson(t.toJson());
       expect(back.edgeToken, 'E');
       expect(back.tinkerToken, 'T');
       // 空も往復できる。
       final empty = AuthTokens.fromJson(AuthTokens.none.toJson());
       expect(empty.hasEdgeToken, isFalse);
+    });
+
+    test('旧形式 {edge, tinker} も読める（移行）', () {
+      final back = AuthTokens.fromJson({'edge': 'E', 'tinker': 'T'});
+      expect(back.edgeToken, 'E');
+      expect(back.tinkerToken, 'T');
     });
   });
 
@@ -98,6 +202,27 @@ void main() {
         'submit=%8F%91%82%AB%8D%9E%82%DE&mail=&FROM=&'
         'MESSAGE=%82%DD%82%F1%82%C8%82%A2%82%E9&bbs=liveedge&key=1749045135',
       );
+    });
+  });
+
+  group('buildBbsCgiBody time（5ch）', () {
+    test('time を渡すと time フィールドが入る', () {
+      final body = buildBbsCgiBody(
+        board: 'news4vip',
+        threadKey: '1700000000',
+        message: 'x',
+        time: '1700000001',
+      );
+      expect(body, contains('&time=1700000001'));
+    });
+
+    test('time が null なら time フィールドは無い（eddist 従来どおり）', () {
+      final body = buildBbsCgiBody(
+        board: 'liveedge',
+        threadKey: '1',
+        message: 'x',
+      );
+      expect(body, isNot(contains('time=')));
     });
   });
 
@@ -156,12 +281,28 @@ void main() {
       expect((r as PostAccepted).resNum, isNull);
     });
 
+    test('成功: 0ch系の書きこみましたページも成功扱いにする', () {
+      final r = parseBbsCgiResult(200, legacySuccessWithChallengeBody());
+      expect(r, isA<PostAccepted>());
+    });
+
     test('未認証: コードと URL を取り出す', () {
       final r = parseBbsCgiResult(200, unauthBody('016227'));
       expect(r, isA<PostNeedsAuth>());
       r as PostNeedsAuth;
       expect(r.authCode, '016227');
       expect(r.authUrl.toString(), 'https://bbs.eddibb.cc/auth-code');
+    });
+
+    test('未認証: authentication required の URL-only 応答を取り出す', () {
+      final r = parseBbsCgiResult(200, authUrlOnlyBody());
+      expect(r, isA<PostNeedsAuth>());
+      r as PostNeedsAuth;
+      expect(r.authCode, isEmpty);
+      expect(
+        r.authUrl.toString(),
+        'https://bbs.punipuni.eu/auth-code?token=abc',
+      );
     });
 
     test('その他エラー: タグとメッセージ', () {
@@ -173,6 +314,48 @@ void main() {
       r as PostRejected;
       expect(r.errorCode, 'TooManyCreatingRes');
       expect(r.message, contains('短期間に書き込みすぎです'));
+    });
+
+    test('その他エラー: doctype とコメントはメッセージから除く', () {
+      final r = parseBbsCgiResult(200, legacyErrorBody());
+      expect(r, isA<PostRejected>());
+      final message = (r as PostRejected).message;
+      expect(message, contains('書き込みに必要なレベル'));
+      expect(message, isNot(contains('DOCTYPE')));
+      expect(message, isNot(contains('2ch_X')));
+      expect(message, isNot(contains('nobanner')));
+    });
+
+    test('3xx（landing へのリダイレクト）は Redirect エラーにする', () {
+      final r = parseBbsCgiResult(302, sjis('<html>Found</html>'));
+      expect(r, isA<PostRejected>());
+      expect((r as PostRejected).errorCode, 'Redirect');
+    });
+
+    test('5ch 書き込み確認（2ch_X:cookie）は PostNeedsConfirm', () {
+      final r = parseBbsCgiResult(200, confirmBody5ch());
+      expect(r, isA<PostNeedsConfirm>());
+      final fields = (r as PostNeedsConfirm).hiddenFields;
+      expect(fields['bbs'], 'news4vip');
+      expect(fields['key'], '1700000000');
+      expect(fields['hash'], 'abc123');
+      // HTML エンティティは復号される。
+      expect(fields['MESSAGE'], '<test>');
+      // submit（type=submit）は hidden ではないので拾わない。
+      expect(fields.containsKey('submit'), isFalse);
+    });
+  });
+
+  group('extractHiddenFields', () {
+    test('属性順・引用符の揺れに耐える', () {
+      final fields = extractHiddenFields(
+        "<input value='v1' type='hidden' name='a'>"
+        '<input name="b" type="hidden" value="x&amp;y">'
+        '<input type=hidden name=c value=z>',
+      );
+      expect(fields['a'], 'v1');
+      expect(fields['b'], 'x&y');
+      expect(fields['c'], 'z');
     });
   });
 
@@ -214,7 +397,7 @@ void main() {
         board: 'liveedge',
         threadKey: '123',
         message: 'やあ',
-        tokens: const AuthTokens(edgeToken: 'E1', tinkerToken: 'T1'),
+        tokens: AuthTokens.eddist(edgeToken: 'E1', tinkerToken: 'T1'),
       );
 
       expect(result.outcome, isA<PostAccepted>());
@@ -240,6 +423,75 @@ void main() {
 
       expect(result.outcome, isA<PostAccepted>());
       expect((result.outcome as PostAccepted).resNum, 7);
+    });
+  });
+
+  group('BbsWriter 5ch 二段階 POST', () {
+    final bbs5ch = Uri.parse('https://mi.5ch.io/test/bbs.cgi');
+    const referer = 'https://mi.5ch.io/test/read.cgi/news4vip/1700000000/';
+
+    test('確認ページを受けたら hidden を詰め直して自動再送し成功する', () async {
+      final poster = QueuePoster([
+        // Phase1: 確認ページ＋ MonaTicket 発行。
+        FetchResponse(
+          statusCode: 200,
+          bodyBytes: confirmBody5ch(),
+          setCookies: const ['MonaTicket=planted.jwt; Path=/; Max-Age=8640000'],
+        ),
+        // Phase2: 成功。
+        FetchResponse(statusCode: 200, bodyBytes: success5ch()),
+      ]);
+
+      final result = await BbsWriter(poster).post(
+        bbsCgi: bbs5ch,
+        board: 'news4vip',
+        threadKey: '1700000000',
+        message: '<test>',
+        referer: referer,
+      );
+
+      expect(result.outcome, isA<PostAccepted>());
+      expect(poster.calls, hasLength(2));
+
+      // 両フェーズで Referer を送る。
+      expect(poster.calls[0].headers['Referer'], referer);
+      expect(poster.calls[1].headers['Referer'], referer);
+
+      // Phase1 で発行された MonaTicket を Phase2 の Cookie で送り返す。
+      expect(
+        poster.calls[1].headers['Cookie'],
+        contains('MonaTicket=planted.jwt'),
+      );
+
+      // Phase2 の body は承諾 submit ＋ hidden 詰め直し。
+      final body2 = poster.calls[1].body;
+      expect(body2, contains('bbs=news4vip'));
+      expect(body2, contains('key=1700000000'));
+      expect(body2, contains('hash=abc123'));
+      expect(
+        body2,
+        isNot(contains('submit=%8F%91%82%AB%8D%9E%82%DE')),
+      ); // 「書き込む」ではない
+
+      // MonaTicket が保持される。
+      expect(result.tokens['MonaTicket'], 'planted.jwt');
+    });
+
+    test('確認が 2 回続いても無限ループせず結果を返す', () async {
+      final poster = QueuePoster([
+        FetchResponse(statusCode: 200, bodyBytes: confirmBody5ch()),
+        FetchResponse(statusCode: 200, bodyBytes: confirmBody5ch()),
+      ]);
+      final result = await BbsWriter(poster).post(
+        bbsCgi: bbs5ch,
+        board: 'news4vip',
+        threadKey: '1700000000',
+        message: 'x',
+        referer: referer,
+      );
+      // 2 回で打ち切り、最後の確認結果をそのまま返す（成功にはならない）。
+      expect(poster.calls, hasLength(2));
+      expect(result.outcome, isA<PostNeedsConfirm>());
     });
   });
 }

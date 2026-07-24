@@ -287,6 +287,10 @@ class _ThreadScreenState extends State<ThreadScreen>
 
   bool get _isStopped => _statusLabel != null;
 
+  /// 書き込み可能か。停止スレ（dat落ち・完走）でなく、かつ板が書き込みに対応
+  /// している（現状 eddist のみ。5ch 書き込みは Phase 2）こと。
+  bool get _canWrite => !_isStopped && widget.endpoints.supportsWrite;
+
   Future<void> _initialLoad() async {
     try {
       final r = await _dat.fetch(_url);
@@ -755,15 +759,17 @@ class _ThreadScreenState extends State<ThreadScreen>
                     _copyText(id, 'IDをコピーしました');
                   },
                 ),
-                ListTile(
-                  leading: const Icon(Icons.travel_explore),
-                  title: const Text('必死チェッカーで開く'),
-                  subtitle: const Text('kyodemo でこの ID の今日の他の書き込みを見る'),
-                  onTap: () {
-                    Navigator.pop(sheetContext);
-                    _openHissi(id);
-                  },
-                ),
+                // 必死チェッカーはエッヂ（kyodemo に対応板がある）だけ。
+                if (widget.endpoints.supportsHissi)
+                  ListTile(
+                    leading: const Icon(Icons.travel_explore),
+                    title: const Text('必死チェッカーで開く'),
+                    subtitle: const Text('kyodemo でこの ID の今日の他の書き込みを見る'),
+                    onTap: () {
+                      Navigator.pop(sheetContext);
+                      _openHissi(id);
+                    },
+                  ),
                 if (_ng.isNgId(id))
                   ListTile(
                     leading: const Icon(Icons.check_circle_outline),
@@ -856,11 +862,12 @@ class _ThreadScreenState extends State<ThreadScreen>
                   child: Wrap(
                     spacing: 4,
                     children: [
-                      TextButton.icon(
-                        onPressed: () => _openHissi(id),
-                        icon: const Icon(Icons.travel_explore, size: 18),
-                        label: const Text('必死チェッカー'),
-                      ),
+                      if (widget.endpoints.supportsHissi)
+                        TextButton.icon(
+                          onPressed: () => _openHissi(id),
+                          icon: const Icon(Icons.travel_explore, size: 18),
+                          label: const Text('必死チェッカー'),
+                        ),
                       TextButton.icon(
                         onPressed: () => _copyText(id, 'IDをコピーしました'),
                         icon: const Icon(Icons.copy, size: 18),
@@ -1012,7 +1019,7 @@ class _ThreadScreenState extends State<ThreadScreen>
           isReplyToOwn: _isReplyToOwnPost,
           ng: _ng,
           revealedNg: _revealedNg,
-          enabled: !_isStopped,
+          enabled: _canWrite,
         ),
       ),
     );
@@ -1419,9 +1426,15 @@ class _ThreadScreenState extends State<ThreadScreen>
       board: widget.endpoints.boardKey,
       threadKey: widget.threadKey,
       message: text,
-      tokens: _authStore.tokens,
+      tokens: _authStore.tokensFor(widget.endpoints.host),
+      referer: widget.endpoints.writeReferer(threadKey: widget.threadKey),
+      time: widget.endpoints.isFivech
+          ? '${DateTime.now().millisecondsSinceEpoch ~/ 1000}'
+          : null,
+      userAgent: widget.endpoints.writeUserAgent,
     );
-    await _authStore.setTokens(result.tokens); // edge/tinker を持ち回して永続化
+    // ホスト単位で Cookie（edge/tinker・MonaTicket）を持ち回して永続化。
+    await _authStore.setTokensFor(widget.endpoints.host, result.tokens);
     return result.outcome;
   }
 
@@ -1431,7 +1444,6 @@ class _ThreadScreenState extends State<ThreadScreen>
       context: context,
       launcher: widget.authLauncher,
       postOnce: () => _postOnce(text),
-      onRejected: _showSnack,
     );
     if (accepted != null && mounted) {
       final resNum = accepted.resNum;
@@ -1562,7 +1574,7 @@ class _ThreadScreenState extends State<ThreadScreen>
                 onSend: _submit,
                 onPickAndUploadImage: _pickAndUploadImage,
                 onPickAndUploadFile: _pickAndUploadFile,
-                enabled: !_isStopped,
+                enabled: _canWrite,
               ),
             ],
           ),

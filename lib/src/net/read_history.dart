@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:edge_core/edge_core.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'board.dart';
+
 /// 既読履歴とお気に入りの保存先の抽象。
 abstract interface class ReadHistoryStorage {
   Future<ReadHistorySnapshot> load();
@@ -75,9 +77,14 @@ class StoredThread {
 }
 
 class FileReadHistoryStorage implements ReadHistoryStorage {
-  FileReadHistoryStorage({Directory? directory}) : _override = directory;
+  FileReadHistoryStorage({Directory? directory, String? fileName})
+    : _override = directory,
+      _fileName = fileName ?? _defaultFileName;
   final Directory? _override;
-  static const _fileName = 'elec_read_history.json';
+
+  /// 既定板（エッヂ）のファイル名。移行不要でこのまま使い続ける。
+  static const _defaultFileName = 'elec_read_history.json';
+  final String _fileName;
 
   Future<File> _file() async {
     final dir = _override ?? await getApplicationSupportDirectory();
@@ -225,7 +232,36 @@ class ReadHistory {
   ReadHistory(this._storage, {DateTime Function()? now})
     : _now = now ?? DateTime.now;
 
+  /// 既定板（エッヂ）の共有インスタンス。`main` で [load] 済み。
   static final ReadHistory shared = ReadHistory(FileReadHistoryStorage());
+
+  /// エッヂ以外の板の履歴インスタンス（board id → 履歴）。
+  static final Map<String, ReadHistory> _byBoard = {};
+
+  /// 板ごとの既読履歴を読み込み済みで返す。
+  ///
+  /// スレキー（UNIX 秒）は板をまたぐと衝突し得るので、板ごとにファイルを分ける。
+  /// **既定板（エッヂ）は共有インスタンス＝既存ファイルのまま**で移行不要。他板は
+  /// `elec_read_history_{host}_{boardKey}.json` に保存する。
+  /// 既に読み込み済みの板履歴を返す（無ければ null）。同期的に使える経路
+  /// （既定板・切替済みの板）で FutureBuilder を挟まず即描画するための入口。
+  static ReadHistory? cachedFor(Board board) {
+    if (board.id == Board.eddibb.id) return shared;
+    return _byBoard[board.id];
+  }
+
+  static Future<ReadHistory> forBoard(Board board) async {
+    if (board.id == Board.eddibb.id) return shared;
+    final cached = _byBoard[board.id];
+    if (cached != null) return cached;
+    final safe = board.id.replaceAll(RegExp(r'[^0-9a-zA-Z_]+'), '_');
+    final history = ReadHistory(
+      FileReadHistoryStorage(fileName: 'elec_read_history_$safe.json'),
+    );
+    _byBoard[board.id] = history;
+    await history.load();
+    return history;
+  }
 
   final ReadHistoryStorage _storage;
   final DateTime Function() _now;

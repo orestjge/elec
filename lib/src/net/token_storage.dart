@@ -4,21 +4,24 @@ import 'dart:io';
 import 'package:edge_core/edge_core.dart';
 import 'package:path_provider/path_provider.dart';
 
-/// 書き込みトークンの保存先の抽象。
+import 'board.dart';
+
+/// 書き込み Cookie（ホスト単位）の保存先の抽象。
 ///
-/// いまは平文 JSON ファイル（[FileTokenStorage]）。トークンは認証情報なので、
-/// 将来は OS のセキュアストレージ（Keychain / KeyStore）に差し替えたい。
-/// その差し替えがこの 1 箇所で済むよう抽象化しておく。
+/// eddist は edge/tinker、5ch は MonaTicket（どんぐり）等を、**ホストごと**に
+/// 保持する。いまは平文 JSON ファイル（[FileTokenStorage]）。認証情報なので将来は
+/// OS のセキュアストレージ（Keychain / KeyStore）に差し替えたい。その差し替えが
+/// この 1 箇所で済むよう抽象化しておく。
 abstract interface class TokenStorage {
-  Future<AuthTokens> load();
-  Future<void> save(AuthTokens tokens);
+  Future<Map<String, AuthTokens>> load();
+  Future<void> save(Map<String, AuthTokens> byHost);
   Future<void> clear();
 }
 
 /// アプリのサポートディレクトリに JSON で保存する実装。
 ///
-/// **平文**。ローカル端末内なので当面は許容するが、セキュアストレージへの
-/// 移行が望ましい（TODO）。
+/// 形式は `{host: {cookieName: value}}`。**平文**。ローカル端末内なので当面は
+/// 許容するが、セキュアストレージへの移行が望ましい（TODO）。
 class FileTokenStorage implements TokenStorage {
   /// [directory] を渡すとその場所に保存する（テスト用）。省略時は
   /// `getApplicationSupportDirectory()`。
@@ -33,22 +36,37 @@ class FileTokenStorage implements TokenStorage {
   }
 
   @override
-  Future<AuthTokens> load() async {
+  Future<Map<String, AuthTokens>> load() async {
     try {
       final file = await _file();
-      if (!file.existsSync()) return AuthTokens.none;
+      if (!file.existsSync()) return {};
       final json = jsonDecode(await file.readAsString());
-      return AuthTokens.fromJson(json as Map<String, dynamic>);
+      if (json is! Map<String, dynamic>) return {};
+      // 旧形式（単一の {edge, tinker}）はエッヂのホストに移行する。
+      if (json.containsKey('edge') || json.containsKey('tinker')) {
+        return {Board.eddibbHost: AuthTokens.fromJson(json)};
+      }
+      final result = <String, AuthTokens>{};
+      json.forEach((host, value) {
+        if (value is Map<String, dynamic>) {
+          result[host] = AuthTokens.fromJson(value);
+        }
+      });
+      return result;
     } catch (_) {
       // 壊れていたら未認証扱いで続行する。
-      return AuthTokens.none;
+      return {};
     }
   }
 
   @override
-  Future<void> save(AuthTokens tokens) async {
+  Future<void> save(Map<String, AuthTokens> byHost) async {
     final file = await _file();
-    await file.writeAsString(jsonEncode(tokens.toJson()));
+    final json = <String, dynamic>{};
+    byHost.forEach((host, tokens) {
+      if (!tokens.isEmpty) json[host] = tokens.toJson();
+    });
+    await file.writeAsString(jsonEncode(json));
   }
 
   @override
@@ -60,15 +78,17 @@ class FileTokenStorage implements TokenStorage {
 
 /// メモリ保持のみ（テスト・一時利用）。
 class MemoryTokenStorage implements TokenStorage {
-  AuthTokens _tokens;
-  MemoryTokenStorage([this._tokens = AuthTokens.none]);
+  MemoryTokenStorage([Map<String, AuthTokens>? initial])
+    : _byHost = {...?initial};
+  Map<String, AuthTokens> _byHost;
 
   @override
-  Future<AuthTokens> load() async => _tokens;
+  Future<Map<String, AuthTokens>> load() async => Map.of(_byHost);
 
   @override
-  Future<void> save(AuthTokens tokens) async => _tokens = tokens;
+  Future<void> save(Map<String, AuthTokens> byHost) async =>
+      _byHost = Map.of(byHost);
 
   @override
-  Future<void> clear() async => _tokens = AuthTokens.none;
+  Future<void> clear() async => _byHost = {};
 }

@@ -56,9 +56,7 @@ class HttpClientFetcher implements HttpFetcher, HttpPoster {
     String? proxyHost,
     int? proxyPort,
   ) async {
-    final port = uri.port == 0
-        ? (uri.scheme == 'https' ? 443 : 80)
-        : uri.port;
+    final port = uri.port == 0 ? (uri.scheme == 'https' ? 443 : 80) : uri.port;
     final other = _preferred == io.InternetAddressType.IPv6
         ? io.InternetAddressType.IPv4
         : io.InternetAddressType.IPv6;
@@ -99,10 +97,7 @@ class HttpClientFetcher implements HttpFetcher, HttpPoster {
       e is http.ClientException; // IOClient は socket 例外をこれで包む
 
   @override
-  Future<FetchResponse> get(
-    Uri url, {
-    Map<String, String> headers = const {},
-  }) {
+  Future<FetchResponse> get(Uri url, {Map<String, String> headers = const {}}) {
     return _withFallback(() async {
       // 3xx を自動で追わない（HttpFetcher の規約）。dat落ち時の過去ログ
       // リダイレクトは DatFetcher 側で Location を見て辿るので、ここで
@@ -129,6 +124,9 @@ class HttpClientFetcher implements HttpFetcher, HttpPoster {
   }) {
     return _withFallback(() async {
       final req = await _io.postUrl(url);
+      // 3xx は自前で扱う（5ch の書き込みは `.net` で受ける。`.io` へ投げると
+      // landing へ 302 で飛ばされるので、黙って追従せず 30x をそのまま返す）。
+      req.followRedirects = false;
       req.headers.set('User-Agent', userAgent);
       req.headers.set('Content-Type', 'application/x-www-form-urlencoded');
       headers.forEach((k, v) => req.headers.set(k, v));

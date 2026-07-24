@@ -81,6 +81,28 @@ void main() {
     expect(second.state.lastModified, 'LM2');
   });
 
+  test('308 リダイレクト（.net→.io）を透過追従する', () async {
+    final f = FakeFetcher([
+      FetchResponse(
+        statusCode: 308,
+        bodyBytes: const [],
+        headers: {'location': 'https://mi.5ch.io/news4vip/subject.txt'},
+      ),
+      FetchResponse(
+        statusCode: 200,
+        bodyBytes: sjis('1.dat<>あ (10)\n'),
+        headers: {'last-modified': 'LM1'},
+      ),
+    ]);
+    final r = await SubjectFetcher(f).fetch(
+      Uri.parse('https://mi.5ch.net/news4vip/subject.txt'),
+    );
+
+    expect(r.notModified, isFalse);
+    expect(r.state.threads, hasLength(1));
+    expect(r.state.lastModified, 'LM1');
+  });
+
   test('200 以外・304 以外は例外', () async {
     final f = FakeFetcher([
       const FetchResponse(statusCode: 500, bodyBytes: []),

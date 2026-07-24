@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../net/auth_store.dart';
+import '../net/board.dart';
+import '../net/board_store.dart';
 import '../net/endpoints.dart';
 import '../net/http_fetcher.dart';
 import '../net/ng_store.dart';
@@ -44,12 +46,16 @@ enum ThreadFilter {
 class ThreadListScreen extends StatefulWidget {
   const ThreadListScreen({
     super.key,
+    this.board = Board.eddibb,
     this.fetcher,
     this.endpoints = const EdgeEndpoints(),
     this.pollInterval = const Duration(seconds: 5),
     this.readHistory,
     this.authStore,
   });
+
+  /// 表示中の板。タイトル・機能ゲート・ドロワーの現在選択に使う。
+  final Board board;
 
   /// 通信の実装。テストでフェイクを差せるよう注入可能。既定は本番実装。
   final HttpFetcher? fetcher;
@@ -75,6 +81,8 @@ class ThreadListScreen extends StatefulWidget {
 
 class _ThreadListScreenState extends State<ThreadListScreen>
     with WidgetsBindingObserver {
+  /// ドロワーをスワイプ（左→右）から開くために Scaffold を参照する。
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
   late final HttpFetcher _fetcher;
   late final bool _ownsFetcher;
   late final SubjectFetcher _subject;
@@ -175,8 +183,8 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   Future<void> _initialLoad() async {
     try {
       final r = await _subject.fetch(
-        widget.endpoints.subjectMetadentTxt,
-        metadent: true,
+        widget.endpoints.subjectListUrl,
+        metadent: widget.endpoints.supportsMetadent,
       );
       if (!mounted) return;
       await _rememberThreads(r.state.threads);
@@ -202,9 +210,9 @@ class _ThreadListScreenState extends State<ThreadListScreen>
     setState(() => _polling = true);
     try {
       final r = await _subject.fetch(
-        widget.endpoints.subjectMetadentTxt,
+        widget.endpoints.subjectListUrl,
         prev: _state,
-        metadent: true,
+        metadent: widget.endpoints.supportsMetadent,
       );
       if (!mounted) return;
       if (!r.notModified) {
@@ -228,9 +236,9 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   Future<void> _refresh({bool force = false}) async {
     try {
       final r = await _subject.fetch(
-        widget.endpoints.subjectMetadentTxt,
+        widget.endpoints.subjectListUrl,
         prev: force ? null : _state,
-        metadent: true,
+        metadent: widget.endpoints.supportsMetadent,
       );
       if (!mounted) return;
       if (!r.notModified) await _rememberThreads(r.state.threads);
@@ -602,18 +610,20 @@ class _ThreadListScreenState extends State<ThreadListScreen>
                 title: Text(isFavorite ? 'お気に入りを解除' : 'お気に入りに追加'),
                 onTap: () => Navigator.pop(sheetContext, 'fav'),
               ),
-              if (metadent == null)
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(20, 4, 20, 8),
-                  child: Text('このスレはスレ主情報を取得できませんでした'),
-                )
-              else
-                ListTile(
-                  leading: const Icon(Icons.person_off_outlined),
-                  title: const Text('このスレ主を NG'),
-                  subtitle: Text('スレ主 [$metadent★] のスレを一覧から隠します'),
-                  onTap: () => Navigator.pop(sheetContext, 'ng'),
-                ),
+              // スレ主 NG（metadent）はエッヂ (eddist) だけの機能。5ch では出さない。
+              if (widget.endpoints.supportsMetadent)
+                if (metadent == null)
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(20, 4, 20, 8),
+                    child: Text('このスレはスレ主情報を取得できませんでした'),
+                  )
+                else
+                  ListTile(
+                    leading: const Icon(Icons.person_off_outlined),
+                    title: const Text('このスレ主を NG'),
+                    subtitle: Text('スレ主 [$metadent★] のスレを一覧から隠します'),
+                    onTap: () => Navigator.pop(sheetContext, 'ng'),
+                  ),
               if (isRead)
                 ListTile(
                   leading: const Icon(Icons.history_toggle_off),
@@ -755,10 +765,17 @@ class _ThreadListScreenState extends State<ThreadListScreen>
     _swipeStartTimer?.cancel();
     if (!_trackingSwipe) return;
     _trackingSwipe = false;
-    final leftwardDistance = -_horizontalDragDistance;
-    if (leftwardDistance < _swipeDistanceThreshold) return;
-    if (leftwardDistance < _verticalDragDistance * 1.2) return;
-    _openLastViewedThread();
+    // 縦が優勢ならスクロール操作なので無視。
+    final horizontal = _horizontalDragDistance.abs();
+    if (horizontal < _swipeDistanceThreshold) return;
+    if (horizontal < _verticalDragDistance * 1.2) return;
+    if (_horizontalDragDistance < 0) {
+      // 右→左: 直近に見たスレを開く。
+      _openLastViewedThread();
+    } else {
+      // 左→右: 板一覧（ドロワー）を開く。
+      _scaffoldKey.currentState?.openDrawer();
+    }
   }
 
   void _handlePointerCancel(PointerCancelEvent event) {
@@ -774,6 +791,8 @@ class _ThreadListScreenState extends State<ThreadListScreen>
           fetcher: _fetcher,
           endpoints: widget.endpoints,
           authStore: widget.authStore,
+          maxTitle: widget.board.subjectMax,
+          maxBody: widget.board.messageMax,
         ),
       ),
     );
@@ -823,16 +842,23 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      key: _scaffoldKey,
+      // 左ドロワーから板を切り替え・追加する。左端スワイプ（既定）に加え、一覧上を
+      // 左→右にスワイプしても開けるようにする（_handlePointerUp）。
+      drawer: _BoardDrawer(currentBoardId: widget.board.id),
       // 下部バーはすりガラスにして、その背後をリストが流れる。extendBody で本文を
       // バーの下まで広げ、BackdropFilter が背後を拾えるようにする。
       extendBody: true,
       // 「スレを立てる」は独立して浮かせる。ガラスバーや本文と被りにくいよう、
-      // ラベル無しの丸 FAB にして浮遊物を小さく収める。
-      floatingActionButton: FloatingActionButton(
-        onPressed: _openNewThread,
-        tooltip: 'スレを立てる',
-        child: const Icon(Icons.add),
-      ),
+      // ラベル無しの丸 FAB にして浮遊物を小さく収める。書き込み未対応の板
+      // （5ch は Phase 2）では出さない。
+      floatingActionButton: widget.endpoints.supportsWrite
+          ? FloatingActionButton(
+              onPressed: _openNewThread,
+              tooltip: 'スレを立てる',
+              child: const Icon(Icons.add),
+            )
+          : null,
       // よく使う検索・絞り込み・並び替えは、片手で届く下部のバーにチップで
       // まとめる。設定・URL で開くは低頻度なので上の ⋮ に集約する。
       bottomNavigationBar: _BottomActionBar(
@@ -857,7 +883,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
           child: CustomScrollView(
             slivers: [
               SliverAppBar.medium(
-                title: const Text('エッヂ'),
+                title: Text(widget.board.title),
                 actions: [
                   _PollingIndicator(active: _polling),
                   _OverflowMenu(
@@ -958,7 +984,9 @@ class _BottomActionBar extends StatelessWidget {
       return AnimatedPadding(
         duration: const Duration(milliseconds: 150),
         curve: Curves.easeOut,
-        padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.viewInsetsOf(context).bottom,
+        ),
         child: _GlassBar(
           // チップ表示時と同じ高さにして、検索の開閉でバーが上下しないようにする。
           height: 58,
@@ -1150,6 +1178,173 @@ class _OverflowMenu extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// 左ドロワー。追加済みの板を切り替え、URL から新しい板を足す。
+///
+/// 起動＝現在板のスレ一覧、という体験は保ったまま、板の切替・追加をここに集約
+/// する（BBSMENU は持たない）。エッヂ（既定板）は削除できない。
+class _BoardDrawer extends StatelessWidget {
+  const _BoardDrawer({required this.currentBoardId});
+  final String currentBoardId;
+
+  Future<void> _addBoard(BuildContext context) async {
+    final store = BoardStore.shared;
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+    final clipboard = await Clipboard.getData(Clipboard.kTextPlain);
+    if (!context.mounted) return;
+    final controller = TextEditingController(
+      text: clipboard?.text?.trim() ?? '',
+    );
+    final input = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('URLで板を追加'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          keyboardType: TextInputType.url,
+          textInputAction: TextInputAction.done,
+          decoration: const InputDecoration(
+            hintText: 'https://mi.5ch.net/news4vip/',
+            helperText: '掲示板（板）の URL を貼り付けてください',
+          ),
+          onSubmitted: (value) => Navigator.pop(dialogContext, value),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('キャンセル'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, controller.text),
+            child: const Text('追加'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (input == null || input.trim().isEmpty) return;
+    // 追加は通信を伴うので待つ間の目印を出す。
+    messenger.showSnackBar(const SnackBar(content: Text('板を確認しています…')));
+    try {
+      final board = await store.addFromUrl(input);
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
+        SnackBar(content: Text('「${board.title}」を追加しました')),
+      );
+      navigator.pop(); // ドロワーを閉じる（切替は BoardStore の通知で反映）。
+    } on BoardAddException catch (e) {
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    } catch (_) {
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
+        const SnackBar(content: Text('板を追加できませんでした（通信エラー）')),
+      );
+    }
+  }
+
+  Future<void> _confirmRemove(BuildContext context, Board board) async {
+    final store = BoardStore.shared;
+    final messenger = ScaffoldMessenger.of(context);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('「${board.title}」を削除しますか？'),
+        content: const Text('板を一覧から外します。既読履歴は残ります。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('キャンセル'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('削除'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await store.remove(board.id);
+      messenger.showSnackBar(
+        SnackBar(content: Text('「${board.title}」を削除しました')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Drawer(
+      child: ListenableBuilder(
+        listenable: BoardStore.shared,
+        builder: (context, _) {
+          final boards = BoardStore.shared.boards;
+          return SafeArea(
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      '板',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: ListView(
+                    padding: EdgeInsets.zero,
+                    children: [
+                      for (final board in boards)
+                        ListTile(
+                          leading: Icon(
+                            board.id == currentBoardId
+                                ? Icons.check_circle
+                                : Icons.forum_outlined,
+                            color: board.id == currentBoardId
+                                ? scheme.primary
+                                : null,
+                          ),
+                          title: Text(board.title),
+                          subtitle: Text(
+                            board.host,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          selected: board.id == currentBoardId,
+                          trailing: board.id == Board.eddibb.id
+                              ? null
+                              : IconButton(
+                                  tooltip: '板を削除',
+                                  icon: const Icon(Icons.delete_outline),
+                                  onPressed: () =>
+                                      _confirmRemove(context, board),
+                                ),
+                          onTap: () async {
+                            Navigator.of(context).pop(); // ドロワーを閉じる
+                            await BoardStore.shared.select(board.id);
+                          },
+                        ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.add_link),
+                  title: const Text('URLで板を追加'),
+                  onTap: () => _addBoard(context),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
     );
   }
 }

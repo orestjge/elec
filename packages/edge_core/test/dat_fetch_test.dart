@@ -93,6 +93,25 @@ void main() {
       );
     });
 
+    test('ホスト移設: kako でない 308 は透過追従して現行扱い', () async {
+      // 5ch の .net → .io のようなホスト移設。pastLog は立てない。
+      final f = FakeFetcher([
+        redirect('https://mi.5ch.io/news4vip/dat/1700000000.dat', status: 308),
+        ok([...res1, ...res2], lastModified: 'LM1'),
+      ]);
+      final r = await DatFetcher(f).fetch(
+        Uri.parse('https://mi.5ch.net/news4vip/dat/1700000000.dat'),
+      );
+
+      expect(r.status, DatFetchStatus.initial);
+      expect(r.state.pastLog, isFalse);
+      expect(r.state.res, hasLength(2));
+      expect(
+        f.urls.last,
+        Uri.parse('https://mi.5ch.io/news4vip/dat/1700000000.dat'),
+      );
+    });
+
     test('dat落ち: 過去ログも 404 なら notFound', () async {
       final f = FakeFetcher([
         redirect('/liveedge/kako/1700/17000/1700000000.dat'),

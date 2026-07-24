@@ -4,7 +4,9 @@ import 'package:elec/src/net/auth_store.dart';
 import 'package:elec/src/net/read_history.dart';
 import 'package:elec/src/net/token_storage.dart';
 import 'package:elec/src/ui/thread_screen.dart';
+import 'package:elec/src/ui/write_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jis0208/jis0208.dart';
 
@@ -172,6 +174,149 @@ class StaleOnceAfterPostClient implements HttpFetcher, HttpPoster {
 }
 
 void main() {
+  testWidgets('コード無し認証ダイアログはURLを表示してコピーできる', (tester) async {
+    final copied = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied.add((call.arguments as Map)['text'] as String);
+        }
+        return null;
+      },
+    );
+    addTearDown(() {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      );
+    });
+
+    final authUrl = Uri.parse('https://bbs.punipuni.eu/auth-code?token=abc');
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AuthDialog(
+            initialCode: '',
+            authUrl: authUrl,
+            onOpen: (_) async => true,
+            onRetry: () async => PostNeedsAuth(authCode: '', authUrl: authUrl),
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('認証が必要です'), findsOneWidget);
+    expect(find.text(authUrl.toString()), findsOneWidget);
+    expect(find.text('URLをコピー'), findsOneWidget);
+
+    await tester.tap(find.text('URLをコピー'));
+    await tester.pumpAndSettle();
+
+    expect(copied, [authUrl.toString()]);
+    expect(find.text('認証URLをコピーしました'), findsOneWidget);
+  });
+
+  testWidgets('認証後の長い拒否エラーでもダイアログが溢れない', (tester) async {
+    tester.view.physicalSize = const Size(420, 620);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final authUrl = Uri.parse('https://bbs.punipuni.eu/auth');
+    const longError =
+        '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">\n\n'
+        'ERROR!\n\n'
+        '<!--nobanner-->\n'
+        '<!-- 2ch_X:error -->\n'
+        'ERROR: 書き込みに必要なレベルが足りていません。。トレーニングしてくださいぷい！'
+        'レベルが十分あるのに書き込めないときは忍法帖を再読込してもう一回書き込んでみて！\n'
+        'ホスト125-14-139-110.rev.home.ne.jp\n'
+        '名前：\n'
+        'E-mail：\n'
+        'こちらでリロードしてください。 GO!\n'
+        '0ch+ BBS 0.7.5 20220323';
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AuthDialog(
+            initialCode: '',
+            authUrl: authUrl,
+            onOpen: (_) async => true,
+            onRetry: () async =>
+                const PostRejected(errorCode: 'Unknown', message: longError),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('認証したので投稿'));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.textContaining('書き込みに必要なレベル'), findsOneWidget);
+  });
+
+  testWidgets('通常の書き込み拒否はダイアログで表示してコピーできる', (tester) async {
+    final copied = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied.add((call.arguments as Map)['text'] as String);
+        }
+        return null;
+      },
+    );
+    addTearDown(() {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      );
+    });
+
+    const message = 'ERROR: 書き込みに必要なレベルが足りていません。';
+    final client = ScriptedClient([
+      FetchResponse(
+        statusCode: 200,
+        bodyBytes: sjis(
+          '<html><!-- 2ch_X:error --><body>エラー！<br>$message</body></html>',
+        ),
+      ),
+    ]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadScreen(
+          threadKey: '123',
+          threadTitle: 'テスト',
+          fetcher: client,
+          authStore: AuthStore(MemoryTokenStorage()),
+          authLauncher: FakeLauncher(),
+          pollInterval: const Duration(seconds: 60),
+          readHistory: ReadHistory(MemoryReadHistoryStorage()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField), 'こんにちは');
+    await tester.tap(find.byIcon(Icons.send));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.text('書き込みエラー'), findsOneWidget);
+    expect(find.textContaining('書き込みに必要なレベル'), findsOneWidget);
+
+    await tester.tap(find.text('コピー'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(copied.single, contains('書き込みに必要なレベル'));
+    expect(find.text('エラー内容をコピーしました'), findsOneWidget);
+  });
+
   testWidgets('未認証→コード表示→認証後の再送で成功する', (tester) async {
     final client = ScriptedClient([
       // 1 回目: 未認証（edge-token を Set-Cookie）
