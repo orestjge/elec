@@ -59,6 +59,10 @@ dependencies:
   # 未対応なので再生カードにフォールバックする）。
   video_thumbnail: ^0.5.3
 
+  # mp4/webm 等の直リンクをアプリ内で再生する（Android: ExoPlayer、iOS/macOS:
+  # AVFoundation）。ブラウザへ飛ばさずスレの流れを切らずに見られるようにする。
+  video_player: ^2.9.2
+
   # レス投稿欄から端末内の画像を選択して Imgur にアップロードする。
   image_picker: ^1.1.2
   file_picker: ^11.0.2
@@ -70,6 +74,9 @@ dev_dependencies:
 
   # テストで SJIS フィクスチャを生成するため。
   jis0208: ^1.0.1
+
+  # 動画プレーヤーのテストで、ネイティブ実装をフェイクに差し替えるため。
+  video_player_platform_interface: ^6.7.0
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is

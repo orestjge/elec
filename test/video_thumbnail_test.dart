@@ -52,8 +52,17 @@ void main() {
     expect(calls, 2);
   });
 
-  test('非対応プラットフォームでは生成せず null', () async {
+  test('macOS も対応プラットフォーム（Runner のチャンネルで生成する）', () async {
     VideoThumbnails.debugTargetPlatform = TargetPlatform.macOS;
+    final frame = Uint8List.fromList([7]);
+    VideoThumbnails.generator = (url) async => frame;
+
+    expect(VideoThumbnails.isSupported, isTrue);
+    expect(await VideoThumbnails.resolve(Uri.parse('https://x/m.mp4')), frame);
+  });
+
+  test('非対応プラットフォームでは生成せず null', () async {
+    VideoThumbnails.debugTargetPlatform = TargetPlatform.linux;
     var calls = 0;
     VideoThumbnails.generator = (url) async {
       calls++;

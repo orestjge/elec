@@ -22,6 +22,7 @@ import 'image_urls.dart';
 import 'ng_screen.dart';
 import 'post_images.dart';
 import 'post_item.dart';
+import 'video_player_screen.dart';
 import 'write_auth.dart';
 
 /// スレッド画面。dat を差分ポーリングし、レスを番号順に並べる。
@@ -1238,6 +1239,16 @@ class _ThreadScreenState extends State<ThreadScreen>
     // 同じ板の別スレへのリンクはアプリ内で開く。それ以外（他板・他サイト）は
     // これまで通りブラウザへ。
     if (_openThreadLink(url)) return;
+    // mp4 等の直リンクは本文タップでもアプリ内プレーヤーで再生する
+    // （サムネイルのタップと同じ着地点）。
+    if (isVideoUrl(url)) {
+      openVideoPlayer(context, url, onOpenExternally: _openInBrowser);
+      return;
+    }
+    await _openInBrowser(url);
+  }
+
+  Future<void> _openInBrowser(Uri url) async {
     final ok = await widget.authLauncher.open(url);
     if (!ok && mounted) _showSnack('リンクを開けませんでした');
   }

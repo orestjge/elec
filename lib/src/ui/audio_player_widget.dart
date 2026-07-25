@@ -13,6 +13,10 @@ class AudioPlayerTile extends StatefulWidget {
 
   final Uri url;
 
+  /// いま鳴っているタイルがあれば一時停止する。動画プレーヤーなど、別のメディアが
+  /// 再生を始めるときに呼ぶ。
+  static Future<void> pauseActive() => _AudioPlayerTileState._pauseActive();
+
   @override
   State<AudioPlayerTile> createState() => _AudioPlayerTileState();
 }
@@ -20,6 +24,12 @@ class AudioPlayerTile extends StatefulWidget {
 class _AudioPlayerTileState extends State<AudioPlayerTile> {
   /// 現在（最後に）再生を開始したタイル。新しく再生を始める前に止める。
   static _AudioPlayerTileState? _active;
+
+  static Future<void> _pauseActive() async {
+    final player = _active?._player;
+    if (player == null || !player.playing) return;
+    await player.pause();
+  }
 
   AudioPlayer? _player;
   StreamSubscription<PlayerState>? _stateSub;
