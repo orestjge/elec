@@ -123,6 +123,41 @@ void main() {
     await tester.pump();
   });
 
+  testWidgets('再生中は進捗線だけ、タップで止めると操作一式を出す', (tester) async {
+    VideoPlayerPlatform.instance = _FakeVideoPlayerPlatform();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VideoPlayerScreen(url: Uri.parse('https://example.com/a.mp4')),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    // 再生中は映像に何も重ねない。下端の細い進捗線だけ。
+    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+    expect(find.byIcon(Icons.play_circle_fill), findsNothing);
+    expect(find.byType(Slider), findsNothing);
+
+    // 映像のどこをタップしても一時停止する。
+    await tester.tap(find.byType(AspectRatio));
+    await tester.pump();
+
+    expect(find.byIcon(Icons.play_circle_fill), findsOneWidget);
+    expect(find.byType(Slider), findsOneWidget);
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+
+    // 中央ボタンで再生に戻ると、また進捗線だけになる。
+    await tester.tap(find.byIcon(Icons.play_circle_fill));
+    await tester.pump();
+
+    expect(find.byIcon(Icons.play_circle_fill), findsNothing);
+    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
+
   testWidgets('ミュートを切り替えられ、次に開く動画にも引き継ぐ', (tester) async {
     final platform = _FakeVideoPlayerPlatform();
     VideoPlayerPlatform.instance = platform;

@@ -57,9 +57,6 @@ class VideoPlayerScreen extends StatefulWidget {
 class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   late final VideoPlayerController _controller;
 
-  /// コントロールを自動で隠すまでの時間。再生中だけ作動する。
-  static const _autoHide = Duration(seconds: 3);
-
   /// ミュートの選択はアプリ起動中は覚えておく。スレを流し見していると動画は
   /// 次々に開くので、そのたびに音が鳴る／消すのを繰り返さずに済む。
   static bool _mutedByDefault = false;
@@ -67,9 +64,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   bool _muted = _mutedByDefault;
   bool _ready = false;
   bool _failed = false;
-  bool _controlsVisible = true;
   bool _looping = false;
-  Timer? _hideTimer;
 
   /// シークバーをドラッグ中はつまみが再生位置で飛ばないよう固定する。
   double? _dragValue;
@@ -100,7 +95,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     // 本文の音声ミニプレーヤーが鳴っていたら止める（音が重ならないように）。
     await AudioPlayerTile.pauseActive();
     await _controller.play();
-    _scheduleHide();
   }
 
   /// 再生位置・バッファ状態の更新をそのまま画面へ反映する。
@@ -115,30 +109,16 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
   @override
   void dispose() {
-    _hideTimer?.cancel();
     _controller.removeListener(_onControllerUpdate);
     _controller.dispose();
     super.dispose();
   }
 
-  void _scheduleHide() {
-    _hideTimer?.cancel();
-    if (!_controller.value.isPlaying) return;
-    _hideTimer = Timer(_autoHide, () {
-      if (!mounted || !_controller.value.isPlaying) return;
-      setState(() => _controlsVisible = false);
-    });
-  }
-
-  void _toggleControls() {
-    setState(() => _controlsVisible = !_controlsVisible);
-    if (_controlsVisible) _scheduleHide();
-  }
-
+  /// 映像のどこをタップしても再生/一時停止する。操作の出し入れは再生状態に
+  /// 従うので（再生中＝進捗線だけ／停止中＝操作一式）、別のトグルは持たない。
   Future<void> _togglePlay() async {
     final value = _controller.value;
     if (value.isPlaying) {
-      _hideTimer?.cancel();
       await _controller.pause();
       return;
     }
@@ -147,10 +127,6 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       await _controller.seekTo(Duration.zero);
     }
     await _controller.play();
-    if (mounted) {
-      setState(() => _controlsVisible = true);
-      _scheduleHide();
-    }
   }
 
   Future<void> _toggleMuted() async {
@@ -205,7 +181,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     final value = _controller.value;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: _toggleControls,
+      onTap: _togglePlay,
       child: Stack(
         alignment: Alignment.center,
         children: [
@@ -215,24 +191,21 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
           ),
           // 読み込み待ちは操作の有無に関わらず出す（無反応に見せない）。
           if (value.isBuffering) const CircularProgressIndicator(),
-          AnimatedOpacity(
-            opacity: _controlsVisible ? 1 : 0,
-            duration: const Duration(milliseconds: 150),
-            child: IgnorePointer(
-              ignoring: !_controlsVisible,
-              child: _Controls(
-                value: value,
-                dragValue: _dragValue,
-                onTogglePlay: _togglePlay,
-                onDrag: (v) => setState(() => _dragValue = v),
-                onDragEnd: (v) async {
-                  await _controller.seekTo(Duration(milliseconds: v.round()));
-                  if (mounted) setState(() => _dragValue = null);
-                  _scheduleHide();
-                },
-              ),
+          // 再生中は映像の前に何も置かず、下端の細い進捗線だけにする。止めると
+          // 操作一式（中央ボタン・シークバー・時間）を出す。
+          if (value.isPlaying)
+            _ProgressLine(value: value)
+          else
+            _Controls(
+              value: value,
+              dragValue: _dragValue,
+              onTogglePlay: _togglePlay,
+              onDrag: (v) => setState(() => _dragValue = v),
+              onDragEnd: (v) async {
+                await _controller.seekTo(Duration(milliseconds: v.round()));
+                if (mounted) setState(() => _dragValue = null);
+              },
             ),
-          ),
         ],
       ),
     );
@@ -258,12 +231,13 @@ class _Failed extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const Icon(Icons.videocam_off_outlined, color: Colors.white54, size: 64),
-        const SizedBox(height: 12),
-        const Text(
-          '再生できませんでした',
-          style: TextStyle(color: Colors.white70),
+        const Icon(
+          Icons.videocam_off_outlined,
+          color: Colors.white54,
+          size: 64,
         ),
+        const SizedBox(height: 12),
+        const Text('再生できませんでした', style: TextStyle(color: Colors.white70)),
         const SizedBox(height: 12),
         TextButton.icon(
           onPressed: onOpen,
@@ -275,7 +249,8 @@ class _Failed extends StatelessWidget {
   }
 }
 
-/// 中央の再生/一時停止ボタンと、下部のシークバー。
+/// 止まっているときの操作一式（中央の大きな再生ボタン＋シークバー＋時間）。
+/// 再生中はこれを出さず、[_ProgressLine] だけにする。
 class _Controls extends StatelessWidget {
   const _Controls({
     required this.value,
@@ -304,65 +279,100 @@ class _Controls extends StatelessWidget {
     return Stack(
       fit: StackFit.expand,
       children: [
-        // 操作系を読みやすくする薄い暗幕。
-        const DecoratedBox(decoration: BoxDecoration(color: Colors.black26)),
+        // 次にすることが分かる大きなボタン。映像はタップしても同じ動きをする。
         Center(
           child: IconButton(
             iconSize: 64,
             color: Colors.white,
             onPressed: onTogglePlay,
             icon: Icon(
-              value.isPlaying
-                  ? Icons.pause_circle_filled
-                  : ended
-                  ? Icons.replay_circle_filled
-                  : Icons.play_circle_fill,
+              ended ? Icons.replay_circle_filled : Icons.play_circle_fill,
             ),
           ),
         ),
         Positioned(
-          left: 8,
-          right: 8,
-          bottom: 8,
-          child: Row(
-            children: [
-              Expanded(
-                child: SliderTheme(
-                  data: SliderTheme.of(context).copyWith(
-                    trackHeight: 3,
-                    activeTrackColor: Colors.white,
-                    inactiveTrackColor: Colors.white24,
-                    thumbColor: Colors.white,
-                    thumbShape: const RoundSliderThumbShape(
-                      enabledThumbRadius: 6,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          child: Container(
+            // シークバーが明るい映像に溶けないよう、下端だけ薄く落とす。
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Colors.transparent, Colors.black54],
+              ),
+            ),
+            padding: const EdgeInsets.fromLTRB(12, 24, 8, 4),
+            child: Row(
+              children: [
+                Expanded(
+                  child: SliderTheme(
+                    data: SliderTheme.of(context).copyWith(
+                      trackHeight: 3,
+                      activeTrackColor: Colors.white,
+                      inactiveTrackColor: Colors.white24,
+                      thumbColor: Colors.white,
+                      thumbShape: const RoundSliderThumbShape(
+                        enabledThumbRadius: 6,
+                      ),
+                      overlayShape: const RoundSliderOverlayShape(
+                        overlayRadius: 14,
+                      ),
                     ),
-                    overlayShape: const RoundSliderOverlayShape(
-                      overlayRadius: 14,
+                    child: Slider(
+                      value: sliderValue.clamp(0, maxMs == 0 ? 1 : maxMs),
+                      max: maxMs == 0 ? 1 : maxMs,
+                      onChanged: maxMs == 0 ? null : onDrag,
+                      onChangeEnd: maxMs == 0 ? null : onDragEnd,
                     ),
                   ),
-                  child: Slider(
-                    value: sliderValue.clamp(0, maxMs == 0 ? 1 : maxMs),
-                    max: maxMs == 0 ? 1 : maxMs,
-                    onChanged: maxMs == 0 ? null : onDrag,
-                    onChangeEnd: maxMs == 0 ? null : onDragEnd,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  '${formatVideoTime(Duration(milliseconds: sliderValue.round()))}'
+                  ' / ${formatVideoTime(duration)}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontFeatures: [FontFeature.tabularFigures()],
                   ),
                 ),
-              ),
-              const SizedBox(width: 4),
-              Text(
-                '${formatVideoTime(Duration(milliseconds: sliderValue.round()))}'
-                ' / ${formatVideoTime(duration)}',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 12,
-                  fontFeatures: [FontFeature.tabularFigures()],
-                ),
-              ),
-              const SizedBox(width: 8),
-            ],
+                const SizedBox(width: 8),
+              ],
+            ),
           ),
         ),
       ],
+    );
+  }
+}
+
+/// 再生中に下端へ出す細い進捗線。映像を隠さず、どこまで来たかだけ分かればよい
+/// ので操作は受けない（タップは映像と同じく再生/一時停止に流す）。
+class _ProgressLine extends StatelessWidget {
+  const _ProgressLine({required this.value});
+
+  final VideoPlayerValue value;
+
+  @override
+  Widget build(BuildContext context) {
+    final totalMs = value.duration.inMilliseconds;
+    final progress = totalMs <= 0
+        ? 0.0
+        : (value.position.inMilliseconds / totalMs).clamp(0.0, 1.0);
+    return Positioned(
+      left: 0,
+      right: 0,
+      bottom: 0,
+      child: IgnorePointer(
+        child: LinearProgressIndicator(
+          value: progress,
+          minHeight: 2,
+          backgroundColor: Colors.white24,
+          valueColor: const AlwaysStoppedAnimation(Colors.white70),
+        ),
+      ),
     );
   }
 }
