@@ -61,7 +61,7 @@ void main() {
 
   testWidgets('動画URLは非対応プラットフォームでは再生カードにする', (tester) async {
     addTearDown(() => VideoThumbnails.debugTargetPlatform = null);
-    VideoThumbnails.debugTargetPlatform = TargetPlatform.macOS;
+    VideoThumbnails.debugTargetPlatform = TargetPlatform.linux;
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(

@@ -176,7 +176,8 @@ class PostItem extends StatelessWidget {
               videoUrls: videos,
               audioUrls: audios,
               embedVideos: embeds,
-              onTapVideo: onTapUrl,
+              // 動画はプレーヤー側でブラウザへの逃げ道を持つので、ここでは
+              // 渡さない（onTapUrl 経由だと動画→プレーヤーの循環になる）。
               onTapEmbed: onTapUrl,
               blurImages: blurImages,
             ),

@@ -9,6 +9,8 @@ class MainFlutterWindow: NSWindow {
     self.setFrame(windowFrame, display: true)
 
     RegisterGeneratedPlugins(registry: flutterViewController)
+    // video_thumbnail プラグインが macOS 非対応なので、自前チャンネルで補う。
+    VideoThumbnailChannel.register(messenger: flutterViewController.engine.binaryMessenger)
 
     super.awakeFromNib()
   }

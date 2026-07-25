@@ -88,6 +88,23 @@ void main() {
     expect(urls('ただの本文です'), isEmpty);
   });
 
+  group('isVideoUrl', () {
+    bool video(String url) => isVideoUrl(Uri.parse(url));
+
+    test('動画拡張子はアプリ内プレーヤー対象', () {
+      expect(video('https://example.com/a.mp4'), isTrue);
+      expect(video('https://example.com/a.webm'), isTrue);
+      expect(video('https://example.com/a.MOV'), isTrue);
+      expect(video('https://example.com/a.m4v?x=1'), isTrue);
+    });
+
+    test('画像・音声・ページ URL は対象外', () {
+      expect(video('https://example.com/a.jpg'), isFalse);
+      expect(video('https://example.com/a.mp3'), isFalse);
+      expect(video('https://example.com/watch/mp4'), isFalse);
+    });
+  });
+
   group('videoSiteLabel', () {
     String label(String url) => videoSiteLabel(Uri.parse(url));
 

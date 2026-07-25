@@ -8,6 +8,7 @@ import 'audio_player_widget.dart';
 import 'embed_urls.dart';
 import 'image_urls.dart';
 import 'nico_thumbnail.dart';
+import 'video_player_screen.dart';
 import 'video_thumbnail.dart';
 
 /// レス本文に含まれる画像 URL のサムネイル群。タップで全画面表示。
@@ -18,7 +19,7 @@ class PostImages extends StatelessWidget {
     this.videoUrls = const [],
     this.audioUrls = const [],
     this.embedVideos = const [],
-    this.onTapVideo,
+    this.onOpenVideoExternally,
     this.onTapEmbed,
     this.onRemove,
     this.thumbSize = 160,
@@ -26,6 +27,8 @@ class PostImages extends StatelessWidget {
   });
 
   final List<Uri> urls;
+
+  /// 本文中の動画 URL。タップでアプリ内の全画面プレーヤーを開く。
   final List<Uri> videoUrls;
 
   /// 本文中の音声 URL。インラインのミニプレーヤーで再生する。
@@ -34,7 +37,10 @@ class PostImages extends StatelessWidget {
   /// YouTube / ニコニコ動画のリンク。タップで外部プレーヤーを開く。
   final List<EmbedVideo> embedVideos;
 
-  final ValueChanged<Uri>? onTapVideo;
+  /// アプリ内で再生できなかった動画をブラウザへ回すための逃げ道。
+  /// 未指定ならプレーヤーに「ブラウザで開く」を出さない。
+  final ValueChanged<Uri>? onOpenVideoExternally;
+
   final ValueChanged<Uri>? onTapEmbed;
 
   /// 指定すると各サムネイルに削除（×）ボタンを重ね、押すとその URL を渡す。
@@ -92,7 +98,7 @@ class PostImages extends StatelessWidget {
                     _VideoThumb(
                       url: url,
                       size: thumbSize,
-                      onTap: onTapVideo == null ? null : () => onTapVideo!(url),
+                      onOpenExternally: onOpenVideoExternally,
                     ),
                   ),
                 for (final video in embedVideos)
@@ -262,15 +268,25 @@ class _GuroMask extends StatelessWidget {
 }
 
 class _VideoThumb extends StatelessWidget {
-  const _VideoThumb({required this.url, required this.onTap, this.size = 160});
+  const _VideoThumb({
+    required this.url,
+    required this.onOpenExternally,
+    this.size = 160,
+  });
   final Uri url;
-  final VoidCallback? onTap;
+
+  /// プレーヤー側の「ブラウザで開く」に渡すハンドラ。
+  final ValueChanged<Uri>? onOpenExternally;
   final double size;
+
+  /// アプリ内の全画面プレーヤーを開く。ブラウザへは飛ばさない。
+  void _open(BuildContext context) =>
+      openVideoPlayer(context, url, onOpenExternally: onOpenExternally);
 
   @override
   Widget build(BuildContext context) {
-    // Android/iOS では先頭フレームをサムネイル生成して敷く。生成前・失敗・非対応
-    // プラットフォーム（macOS 等）では無地の再生カードにフォールバックする。
+    // Android/iOS/macOS では先頭フレームをサムネイル生成して敷く。生成前・失敗・
+    // 非対応プラットフォームでは無地の再生カードにフォールバックする。
     if (!VideoThumbnails.isSupported) return _card(context, frame: null);
     return FutureBuilder<Uint8List?>(
       future: VideoThumbnails.resolve(url),
@@ -281,7 +297,7 @@ class _VideoThumb extends StatelessWidget {
   Widget _card(BuildContext context, {required Uint8List? frame}) {
     final scheme = Theme.of(context).colorScheme;
     return InkWell(
-      onTap: onTap,
+      onTap: () => _open(context),
       borderRadius: BorderRadius.circular(10),
       child: Container(
         height: size,

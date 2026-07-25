@@ -1,16 +1,19 @@
 /// mp4 等の動画直リンクから先頭フレームのサムネイルを生成する。
 ///
-/// [video_thumbnail] プラグインが OS の API（Android: MediaMetadataRetriever、
-/// iOS: AVAssetImageGenerator）で動画を読み、1 フレームをデコードする。faststart
-/// ＋ Range 対応サーバー（X など web ホストの mp4）なら先頭キーフレームだけ取れる
-/// ので通信量は写真 1 枚程度で済む。
+/// Android/iOS は [video_thumbnail] プラグインが OS の API（Android:
+/// MediaMetadataRetriever、iOS: AVAssetImageGenerator）で動画を読み、1 フレームを
+/// デコードする。**macOS は同プラグインが非対応**なので、Runner 側に用意した
+/// メソッドチャンネル（`elec/video_thumbnail`・AVAssetImageGenerator）を使う。
+/// faststart ＋ Range 対応サーバー（X など web ホストの mp4）なら先頭キーフレーム
+/// だけ取れるので通信量は写真 1 枚程度で済む。
 ///
-/// **Android/iOS のみ対応。** macOS など未対応プラットフォームでは常に null を
-/// 返し、呼び出し側は再生カードにフォールバックする。結果はプロセス内でキャッシュ
-/// し、スクロールによる重複生成を避ける。
+/// それ以外のプラットフォームでは常に null を返し、呼び出し側は再生カードに
+/// フォールバックする。結果はプロセス内でキャッシュし、スクロールによる重複生成を
+/// 避ける。
 library;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:video_thumbnail/video_thumbnail.dart';
 
 /// サムネイル生成器。テストでフェイクへ差し替えられるよう関数型で持つ。
@@ -26,12 +29,22 @@ class VideoThumbnails {
   @visibleForTesting
   static TargetPlatform? debugTargetPlatform;
 
+  /// macOS 用のサムネイル生成チャンネル（Runner の VideoThumbnailChannel）。
+  static const _macChannel = MethodChannel('elec/video_thumbnail');
+
+  /// サムネイル表示枠（幅 160）に足りる解像度。小さめに絞って生成を軽く。
+  static const _maxWidth = 320;
+  static const _quality = 60;
+
   static final Map<String, Future<Uint8List?>> _cache = {};
 
-  /// このプラットフォームでサムネイル生成が可能か（Android/iOS のみ）。
+  /// このプラットフォームでサムネイル生成が可能か（Android/iOS/macOS）。
   static bool get isSupported {
-    final platform = debugTargetPlatform ?? defaultTargetPlatform;
-    return platform == TargetPlatform.android || platform == TargetPlatform.iOS;
+    return switch (debugTargetPlatform ?? defaultTargetPlatform) {
+      TargetPlatform.android || TargetPlatform.iOS || TargetPlatform.macOS =>
+        true,
+      _ => false,
+    };
   }
 
   /// [url] の先頭フレームを JPEG バイト列で返す。生成できなければ null。
@@ -54,13 +67,20 @@ class VideoThumbnails {
   static void clearCache() => _cache.clear();
 
   static Future<Uint8List?> _generate(Uri url) async {
+    final platform = debugTargetPlatform ?? defaultTargetPlatform;
     try {
+      if (platform == TargetPlatform.macOS) {
+        return await _macChannel.invokeMethod<Uint8List>('thumbnail', {
+          'url': url.toString(),
+          'maxWidth': _maxWidth,
+          'quality': _quality,
+        });
+      }
       return await VideoThumbnail.thumbnailData(
         video: url.toString(),
         imageFormat: ImageFormat.JPEG,
-        // サムネイル表示枠（幅 160）に足りる解像度。小さめに絞って生成を軽く。
-        maxWidth: 320,
-        quality: 60,
+        maxWidth: _maxWidth,
+        quality: _quality,
       );
     } catch (_) {
       // 非対応コーデック・到達不可・削除済みなどは無サムネ扱い。

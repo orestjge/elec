@@ -32,8 +32,11 @@ List<Uri> imageUrlsIn(String text) {
 
 /// [text] 中の動画 URL を出現順・重複除去で返す。
 List<Uri> videoUrlsIn(String text) {
-  return _mediaUrlsIn(text, (uri) => _videoExtRe.hasMatch(uri.path));
+  return _mediaUrlsIn(text, isVideoUrl);
 }
+
+/// [uri] が動画ファイルの直リンクか（アプリ内プレーヤーで開く対象か）。
+bool isVideoUrl(Uri uri) => _videoExtRe.hasMatch(uri.path);
 
 /// [text] 中の音声 URL を出現順・重複除去で返す。
 List<Uri> audioUrlsIn(String text) {
