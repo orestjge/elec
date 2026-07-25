@@ -47,5 +47,14 @@ void main() {
       expect(s.acorn, isNull);
       expect(s.hasAcorn, isFalse);
     });
+
+    test('したらばの EUC-JP setting.cgi をパースする', () {
+      final s = parseSettingTxt(
+        EucJpCodec().encode('BBS_TITLE=したらば板\nBBS_NONAME_NAME=名無しさん\n'),
+        encoding: BbsTextEncoding.eucJp,
+      );
+      expect(s.title, 'したらば板');
+      expect(s.defaultName, '名無しさん');
+    });
   });
 }

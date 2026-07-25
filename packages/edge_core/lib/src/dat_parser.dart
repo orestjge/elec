@@ -1,6 +1,7 @@
 import 'package:edge_sjis/edge_sjis.dart';
 
 import 'models.dart';
+import 'subject_parser.dart' show BbsTextEncoding, decodeBbsText;
 
 /// dat の日付+ID 欄をパースするための正規表現。
 ///
@@ -14,6 +15,15 @@ final _dateRe = RegExp(
 final _idRe = RegExp(r'ID:([^\s]+)');
 final _beRe = RegExp(r'BE:([^\s]+)');
 
+/// dat の行フォーマット。掲示板の系統でフィールドの並びが違う。
+enum DatFormat {
+  /// 5ch / eddist の dat。`name<>mail<>date ID:id<>body<>title`。
+  fivech,
+
+  /// したらば（`rawmode.cgi`）。`番号<>name<>mail<>date<>body<>title<>id`。
+  shitaraba,
+}
+
 /// dat 全体（SJIS バイト列）をパースして [Res] のリストにする。
 ///
 /// **バイト列を直接渡すこと。** チャンクごとに文字列へデコードしてから結合
@@ -21,12 +31,22 @@ final _beRe = RegExp(r'BE:([^\s]+)');
 /// [splitDatLines] により完全な行だけを取り出し、行単位でデコードする。
 ///
 /// [startNumber] は最初の行に振るレス番号（差分取得で途中から渡すとき用、
-/// 既定 1）。
-List<Res> parseDat(List<int> datBytes, {int startNumber = 1}) {
+/// 既定 1）。したらばは行頭にレス番号を持つのでそちらを優先する。
+List<Res> parseDat(
+  List<int> datBytes, {
+  int startNumber = 1,
+  BbsTextEncoding encoding = BbsTextEncoding.sjis,
+  DatFormat format = DatFormat.fivech,
+}) {
   final lines = splitDatLines(datBytes);
   final result = <Res>[];
   for (var i = 0; i < lines.length; i++) {
-    result.add(parseDatLine(decodeSjis(lines[i]), startNumber + i));
+    final line = decodeBbsText(lines[i], encoding);
+    result.add(
+      format == DatFormat.shitaraba
+          ? parseShitarabaDatLine(line, startNumber + i)
+          : parseDatLine(line, startNumber + i),
+    );
   }
   return result;
 }
@@ -91,6 +111,40 @@ Res parseDatLine(String line, int number) {
     body: body,
     kind: kind,
     threadTitle: title,
+  );
+}
+
+/// したらば（`rawmode.cgi`）の 1 行をパースする。
+///
+/// 行の形式: `番号<>名前<>メール<>日付<>本文<>スレタイ<>ID`
+///
+/// 5ch / eddist との違いは 3 点:
+/// - **行頭にレス番号がある**。削除されたレスは行ごと消えて番号が飛ぶので、
+///   行位置ではなくこの値を使う（[fallbackNumber] は番号が読めないとき用）。
+/// - 日付欄に `ID:` を含まない。ID は最終フィールドで、ID 非表示の板では空。
+/// - 本文は `<> {body} <>` のスペース詰めをしない。
+Res parseShitarabaDatLine(String line, int fallbackNumber) {
+  final parts = line.replaceAll('\r', '').split('<>');
+
+  String field(int i) => i < parts.length ? parts[i] : '';
+
+  final dateField = field(3);
+  final title = field(5);
+  // ID 欄は板の設定で `ID:xxx` と素の `xxx` の両方があり得る。
+  final rawId = field(6).trim();
+  final id = rawId.startsWith('ID:') ? rawId.substring(3) : rawId;
+
+  return Res(
+    number: int.tryParse(field(0).trim()) ?? fallbackNumber,
+    name: field(1),
+    mail: field(2),
+    dateText: _dateRe.firstMatch(dateField)?.group(1) ?? dateField,
+    dateTime: _parseJstDate(dateField),
+    id: id.isEmpty ? null : id,
+    beId: null,
+    body: field(4),
+    kind: ResKind.normal,
+    threadTitle: title.isEmpty ? null : title,
   );
 }
 

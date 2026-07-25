@@ -1,8 +1,10 @@
+import 'package:edge_core/edge_core.dart';
+
 import 'board.dart';
 
 /// 掲示板のエンドポイント。host / boardKey をここ 1 箇所に集約する。
 ///
-/// 5ch 互換（eddist / 5ch）の板を host + boardKey で駆動する。エッヂ固有の
+/// 5ch 互換（eddist / 5ch）としたらばの板を host + boardKey で駆動する。エッヂ固有の
 /// 経路（subject-metadent.txt・必死チェッカー・auth-code・client-config）は
 /// [kind] でゲートする。既定はエッヂ（liveedge）で、[EdgeEndpoints.forBoard]
 /// で任意の板に切り替える。
@@ -39,6 +41,16 @@ class EdgeEndpoints {
   /// 5ch 互換（どんぐり・二段階 POST）か。
   bool get isFivech => kind == BoardKind.fivech;
 
+  bool get isShitaraba => kind == BoardKind.shitaraba;
+
+  /// 板のワイヤ文字コード。したらばだけ EUC-JP、他は Windows-31J。
+  BbsTextEncoding get textEncoding =>
+      isShitaraba ? BbsTextEncoding.eucJp : BbsTextEncoding.sjis;
+
+  /// dat の行フォーマット。したらばは行頭にレス番号がある別形式。
+  DatFormat get datFormat =>
+      isShitaraba ? DatFormat.shitaraba : DatFormat.fivech;
+
   /// metadent（スレ立て人の識別子・スレ主 NG）を扱えるか。eddist のみ。
   bool get supportsMetadent => kind == BoardKind.eddist;
 
@@ -48,10 +60,9 @@ class EdgeEndpoints {
   bool get supportsHissi =>
       kind == BoardKind.eddist || kind == BoardKind.fivech;
 
-  /// 書き込み（レス・スレ立て）に対応しているか。eddist（auth-code）も
-  /// fivech（5ch 二段階＋どんぐり）も対応済み。板が読み取り専用なら投稿時に
-  /// サーバがエラーを返すので、UI は出しておく。
-  bool get supportsWrite => true;
+  /// 書き込み（レス・スレ立て）に対応しているか。したらばは bbs.cgi フローが
+  /// 異なるため、現時点では読み取り専用にする。
+  bool get supportsWrite => !isShitaraba;
 
   /// 5ch が書き込み時に要求する `Referer`。レスは read.cgi のスレ URL（末尾
   /// スラッシュ無し・Slevo に合わせる）、スレ立ては板トップ。板の host（bbsmenu
@@ -79,13 +90,19 @@ class EdgeEndpoints {
   /// スレ一覧に使う URL。eddist は metadent 付き、それ以外は素の subject.txt。
   Uri get subjectListUrl => supportsMetadent ? subjectMetadentTxt : subjectTxt;
 
-  Uri get settingTxt => Uri.https(host, '/$boardKey/SETTING.TXT');
+  Uri get settingTxt => isShitaraba
+      ? Uri.https(host, '/bbs/api/setting.cgi/$boardKey/')
+      : Uri.https(host, '/$boardKey/SETTING.TXT');
 
   /// 現行スレの dat。
-  Uri dat(String threadKey) => Uri.https(host, '/$boardKey/dat/$threadKey.dat');
+  Uri dat(String threadKey) => isShitaraba
+      ? Uri.https(host, '/bbs/rawmode.cgi/$boardKey/$threadKey/')
+      : Uri.https(host, '/$boardKey/dat/$threadKey.dat');
 
   /// ブラウザで開けるスレッド URL。
-  Uri thread(String threadKey) => Uri.https(host, '/$boardKey/$threadKey');
+  Uri thread(String threadKey) => isShitaraba
+      ? Uri.https(host, '/bbs/read.cgi/$boardKey/$threadKey/')
+      : Uri.https(host, '/$boardKey/$threadKey');
 
   /// 過去ログ（oyster/kako）。現行 dat が 404 のときのフォールバック。
   Uri kakoDat(String threadKey) {

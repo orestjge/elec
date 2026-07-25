@@ -64,5 +64,34 @@ void main() {
       expect(e.writeUserAgent, isNull);
       expect(e.writeReferer(threadKey: '1'), isNull);
     });
+
+    test('したらばは読み取り URL を専用経路にし書き込みは無効', () {
+      final e = EdgeEndpoints.forBoard(
+        const Board(
+          host: 'jbbs.shitaraba.net',
+          boardKey: 'otaku/18550',
+          title: 'x',
+          kind: BoardKind.shitaraba,
+        ),
+      );
+      expect(
+        e.subjectTxt.toString(),
+        'https://jbbs.shitaraba.net/otaku/18550/subject.txt',
+      );
+      expect(
+        e.settingTxt.toString(),
+        'https://jbbs.shitaraba.net/bbs/api/setting.cgi/otaku/18550/',
+      );
+      expect(
+        e.dat('1700000000').toString(),
+        'https://jbbs.shitaraba.net/bbs/rawmode.cgi/otaku/18550/1700000000/',
+      );
+      expect(
+        e.thread('1700000000').toString(),
+        'https://jbbs.shitaraba.net/bbs/read.cgi/otaku/18550/1700000000/',
+      );
+      expect(e.supportsWrite, isFalse);
+      expect(e.supportsHissi, isFalse);
+    });
   });
 }

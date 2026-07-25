@@ -5,6 +5,8 @@
 /// - `/{board}/{key}` （フロントの正規 URL。read.cgi はここへ 30x する）
 /// - `/{board}/dat/{key}.dat` （dat 直リンク）
 /// - `/{board}/kako/{th4}/{th5}/{key}.dat` （過去ログ dat）
+/// - `/bbs/read.cgi/{category}/{boardId}/{key}` （したらば）
+/// - `/bbs/rawmode.cgi/{category}/{boardId}/{key}` （したらば rawmode）
 ///
 /// ホストの一致判定はここではしない（板固定のアプリ側で、自ホスト・自板かを
 /// 照合してからアプリ内遷移に使う）。判別できなければ null。
@@ -62,6 +64,19 @@ ThreadRef? parseThreadUrl(Uri uri) {
     );
   }
 
+  // /bbs/read.cgi/{category}/{boardId}/{key}[/{pos}]
+  // /bbs/rawmode.cgi/{category}/{boardId}/{key}[/{pos}]
+  if (segs.length >= 5 &&
+      segs[0] == 'bbs' &&
+      (segs[1] == 'read.cgi' || segs[1] == 'rawmode.cgi')) {
+    return _buildShitaraba(
+      category: segs[2],
+      boardId: segs[3],
+      key: segs[4],
+      resSpec: segs.length >= 6 ? segs[5] : null,
+    );
+  }
+
   // /{board}/dat/{key}.dat
   if (segs.length == 3 && segs[1] == 'dat') {
     return _build(board: segs[0], key: _stripDat(segs[2]));
@@ -82,6 +97,23 @@ ThreadRef? parseThreadUrl(Uri uri) {
   }
 
   return null;
+}
+
+ThreadRef? _buildShitaraba({
+  required String category,
+  required String boardId,
+  required String key,
+  String? resSpec,
+}) {
+  if (!_boardRe.hasMatch(category) || !RegExp(r'^\d+$').hasMatch(boardId)) {
+    return null;
+  }
+  if (!_keyRe.hasMatch(key)) return null;
+  return ThreadRef(
+    board: '$category/$boardId',
+    threadKey: key,
+    resSpec: resSpec,
+  );
 }
 
 String _stripDat(String s) =>

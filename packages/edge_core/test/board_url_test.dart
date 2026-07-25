@@ -63,6 +63,26 @@ void main() {
       expect(r?.boardKey, 'livegalileo');
     });
 
+    test('したらば板トップからカテゴリと掲示板 ID を拾う', () {
+      final r = parse('https://jbbs.shitaraba.net/otaku/18550/');
+      expect(r?.host, 'jbbs.shitaraba.net');
+      expect(r?.boardKey, 'otaku/18550');
+    });
+
+    test('したらば subject.cgi から板を拾う', () {
+      final r = parse(
+        'https://jbbs.shitaraba.net/bbs/subject.cgi/otaku/18550/',
+      );
+      expect(r?.boardKey, 'otaku/18550');
+    });
+
+    test('したらば read.cgi から板を拾う', () {
+      final r = parse(
+        'https://jbbs.shitaraba.net/bbs/read.cgi/otaku/18550/1700000000/l50',
+      );
+      expect(r?.boardKey, 'otaku/18550');
+    });
+
     test('subback だけ・板が無ければ null', () {
       expect(parse('https://itest.5ch.io/subback/'), isNull);
       expect(parse('https://itest.5ch.io/subback'), isNull);

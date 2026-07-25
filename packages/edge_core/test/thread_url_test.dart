@@ -6,14 +6,18 @@ void main() {
 
   group('parseThreadUrl', () {
     test('read.cgi 形式（末尾スラッシュ）', () {
-      final r = parse('https://bbs.eddibb.cc/test/read.cgi/liveedge/1784559955/');
+      final r = parse(
+        'https://bbs.eddibb.cc/test/read.cgi/liveedge/1784559955/',
+      );
       expect(r?.board, 'liveedge');
       expect(r?.threadKey, '1784559955');
       expect(r?.resSpec, isNull);
     });
 
     test('read.cgi 形式（位置指定つき）', () {
-      final r = parse('https://bbs.eddibb.cc/test/read.cgi/liveedge/1784559955/l50');
+      final r = parse(
+        'https://bbs.eddibb.cc/test/read.cgi/liveedge/1784559955/l50',
+      );
       expect(r?.board, 'liveedge');
       expect(r?.threadKey, '1784559955');
       expect(r?.resSpec, 'l50');
@@ -32,7 +36,9 @@ void main() {
     });
 
     test('過去ログ kako dat', () {
-      final r = parse('https://bbs.eddibb.cc/liveedge/kako/1784/17845/1784559955.dat');
+      final r = parse(
+        'https://bbs.eddibb.cc/liveedge/kako/1784/17845/1784559955.dat',
+      );
       expect(r?.board, 'liveedge');
       expect(r?.threadKey, '1784559955');
     });
@@ -53,8 +59,27 @@ void main() {
     });
 
     test('他板でも解析はする（ホスト・板の照合は呼び出し側）', () {
-      final r = parse('https://bbs.eddibb.cc/test/read.cgi/experiment/1700000000/');
+      final r = parse(
+        'https://bbs.eddibb.cc/test/read.cgi/experiment/1700000000/',
+      );
       expect(r?.board, 'experiment');
+      expect(r?.threadKey, '1700000000');
+    });
+
+    test('したらば read.cgi 形式', () {
+      final r = parse(
+        'https://jbbs.shitaraba.net/bbs/read.cgi/otaku/18550/1700000000/l50',
+      );
+      expect(r?.board, 'otaku/18550');
+      expect(r?.threadKey, '1700000000');
+      expect(r?.resSpec, 'l50');
+    });
+
+    test('したらば rawmode 形式', () {
+      final r = parse(
+        'https://jbbs.shitaraba.net/bbs/rawmode.cgi/otaku/18550/1700000000/',
+      );
+      expect(r?.board, 'otaku/18550');
       expect(r?.threadKey, '1700000000');
     });
   });

@@ -12,6 +12,7 @@ import '../net/endpoints.dart';
 import '../net/http_fetcher.dart';
 import '../net/ng_store.dart';
 import '../net/read_history.dart';
+import 'board_catalog_screen.dart';
 import 'new_thread_screen.dart';
 import 'settings_screen.dart';
 import 'thread_screen.dart';
@@ -130,7 +131,10 @@ class _ThreadListScreenState extends State<ThreadListScreen>
     super.initState();
     _ownsFetcher = widget.fetcher == null;
     _fetcher = widget.fetcher ?? HttpClientFetcher();
-    _subject = SubjectFetcher(_fetcher);
+    _subject = SubjectFetcher(
+      _fetcher,
+      encoding: widget.endpoints.textEncoding,
+    );
     _history = widget.readHistory ?? ReadHistory.shared;
     _ng.addListener(_onNgChanged);
     WidgetsBinding.instance.addObserver(this);
@@ -1182,10 +1186,10 @@ class _OverflowMenu extends StatelessWidget {
   }
 }
 
-/// 左ドロワー。追加済みの板を切り替え、URL から新しい板を足す。
+/// 左ドロワー。追加済みの板を切り替え、URL や板リストから新しい板を足す。
 ///
 /// 起動＝現在板のスレ一覧、という体験は保ったまま、板の切替・追加をここに集約
-/// する（BBSMENU は持たない）。エッヂ（既定板）は削除できない。
+/// する。エッヂ（既定板）は削除できない。
 class _BoardDrawer extends StatelessWidget {
   const _BoardDrawer({required this.currentBoardId});
   final String currentBoardId;
@@ -1245,6 +1249,32 @@ class _BoardDrawer extends StatelessWidget {
       messenger.showSnackBar(
         const SnackBar(content: Text('板を追加できませんでした（通信エラー）')),
       );
+    }
+  }
+
+  /// 板リスト（5ch の BBSMENU・同じサーバの板リスト）から選んで追加する。
+  /// 追加は画面側でまとめて行うので、ここは結果の通知とドロワーを閉じるだけ。
+  Future<void> _addBoardFromCatalog(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+    final result = await navigator.push<BoardCatalogResult>(
+      MaterialPageRoute<BoardCatalogResult>(
+        builder: (_) => const BoardCatalogScreen(),
+      ),
+    );
+    if (result == null) return;
+    final added = result.added;
+    final failed = result.failed;
+    if (added.isEmpty && failed.isEmpty) return;
+    final message = switch ((added.length, failed.length)) {
+      (0, _) => '板を追加できませんでした（${failed.join('・')}）',
+      (1, 0) => '「${added.single.title}」を追加しました',
+      (final n, 0) => '$n 板を追加しました',
+      (final n, final f) => '$n 板を追加しました（$f 板は追加できませんでした）',
+    };
+    messenger.showSnackBar(SnackBar(content: Text(message)));
+    if (added.isNotEmpty) {
+      navigator.pop(); // ドロワーを閉じる（切替は BoardStore の通知で反映）。
     }
   }
 
@@ -1335,6 +1365,11 @@ class _BoardDrawer extends StatelessWidget {
                   ),
                 ),
                 const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.format_list_bulleted),
+                  title: const Text('板リストから追加'),
+                  onTap: () => _addBoardFromCatalog(context),
+                ),
                 ListTile(
                   leading: const Icon(Icons.add_link),
                   title: const Text('URLで板を追加'),

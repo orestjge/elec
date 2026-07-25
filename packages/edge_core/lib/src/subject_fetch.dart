@@ -29,9 +29,10 @@ class SubjectFetchResult {
 /// ため追記型では扱えない。`If-Modified-Since` で 304/200 を分けるのが正解
 /// （変化なしなら数百バイトで済む）。ポーリングでの定期取得を想定。
 class SubjectFetcher {
-  const SubjectFetcher(this.http);
+  const SubjectFetcher(this.http, {this.encoding = BbsTextEncoding.sjis});
 
   final HttpFetcher http;
+  final BbsTextEncoding encoding;
 
   static const _maxRedirects = 3;
   static const _redirectStatuses = {301, 302, 303, 307, 308};
@@ -70,7 +71,11 @@ class SubjectFetcher {
     }
     return SubjectFetchResult(
       state: SubjectState(
-        threads: parseSubject(resp.bodyBytes, metadent: metadent),
+        threads: parseSubject(
+          resp.bodyBytes,
+          metadent: metadent,
+          encoding: encoding,
+        ),
         lastModified: resp.header('last-modified'),
       ),
       notModified: false,

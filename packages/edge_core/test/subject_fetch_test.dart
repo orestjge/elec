@@ -4,6 +4,7 @@ import 'package:test/test.dart';
 
 final _win31j = Windows31JCodec();
 List<int> sjis(String s) => _win31j.encode(s);
+List<int> eucJp(String s) => EucJpCodec().encode(s);
 
 class FakeFetcher implements HttpFetcher {
   FakeFetcher(this._responses);
@@ -94,9 +95,9 @@ void main() {
         headers: {'last-modified': 'LM1'},
       ),
     ]);
-    final r = await SubjectFetcher(f).fetch(
-      Uri.parse('https://mi.5ch.net/news4vip/subject.txt'),
-    );
+    final r = await SubjectFetcher(
+      f,
+    ).fetch(Uri.parse('https://mi.5ch.net/news4vip/subject.txt'));
 
     expect(r.notModified, isFalse);
     expect(r.state.threads, hasLength(1));
@@ -111,5 +112,21 @@ void main() {
       () => SubjectFetcher(f).fetch(url),
       throwsA(isA<HttpFetchException>()),
     );
+  });
+
+  test('EUC-JP subject を取得してパースする', () async {
+    final f = FakeFetcher([
+      FetchResponse(
+        statusCode: 200,
+        bodyBytes: eucJp('1700000000.cgi,日本語スレ(10)\n'),
+      ),
+    ]);
+    final r = await SubjectFetcher(
+      f,
+      encoding: BbsTextEncoding.eucJp,
+    ).fetch(url);
+
+    expect(r.state.threads.single.title, '日本語スレ');
+    expect(r.state.threads.single.resCount, 10);
   });
 }
