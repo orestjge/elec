@@ -111,16 +111,83 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
 
     expect(find.byType(VideoPlayerScreen), findsOneWidget);
-    expect(find.text('movie.mp4'), findsOneWidget);
-    // ブラウザへは飛ばさない（逃げ道はプレーヤー内のボタンとして残す）。
+    // ブラウザへは飛ばさない（逃げ道は止めたときの操作バーに残す）。
     expect(opened, isEmpty);
-    expect(find.byIcon(Icons.open_in_browser), findsOneWidget);
     // 再生開始後は初期化スピナーが消え、再生面が出ている。
     expect(find.byType(AspectRatio), findsOneWidget);
+    await tester.tap(find.byType(AspectRatio));
+    await tester.pump();
+    expect(find.byIcon(Icons.open_in_browser), findsOneWidget);
 
     // 再生位置ポーリングのタイマーを止めるため、ツリーを畳んでから抜ける。
     await tester.pumpWidget(const SizedBox());
     await tester.pump();
+  });
+
+  testWidgets('再生中は進捗線だけ、タップで止めると操作一式を出す', (tester) async {
+    VideoPlayerPlatform.instance = _FakeVideoPlayerPlatform();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: VideoPlayerScreen(url: Uri.parse('https://example.com/a.mp4')),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    // 再生中は映像に何も重ねない。下端の細い進捗線だけ（閉じるも出さない）。
+    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+    expect(find.byIcon(Icons.play_circle_fill), findsNothing);
+    expect(find.byType(Slider), findsNothing);
+    expect(find.byIcon(Icons.close), findsNothing);
+
+    // 映像のどこをタップしても一時停止する。
+    await tester.tap(find.byType(AspectRatio));
+    await tester.pump();
+
+    expect(find.byIcon(Icons.play_circle_fill), findsOneWidget);
+    expect(find.byType(Slider), findsOneWidget);
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+    // ヘッダーの代わりに、止めたときだけ閉じる・補助操作が出る。
+    expect(find.byIcon(Icons.close), findsOneWidget);
+    expect(find.byIcon(Icons.volume_up), findsOneWidget);
+    expect(find.byIcon(Icons.repeat), findsOneWidget);
+
+    // 中央ボタンで再生に戻ると、また進捗線だけになる。
+    await tester.tap(find.byIcon(Icons.play_circle_fill));
+    await tester.pump();
+
+    expect(find.byIcon(Icons.play_circle_fill), findsNothing);
+    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
+
+  testWidgets('上下スワイプで閉じる（再生中でも抜けられる）', (tester) async {
+    VideoPlayerPlatform.instance = _FakeVideoPlayerPlatform();
+    VideoThumbnails.debugTargetPlatform = TargetPlatform.linux;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: PostImages(
+            urls: const [],
+            videoUrls: [Uri.parse('https://example.com/movie.mp4')],
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.byIcon(Icons.play_arrow_rounded));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(VideoPlayerScreen), findsOneWidget);
+
+    // 再生中は閉じるボタンを出さないので、スワイプが唯一の逃げ道になる。
+    await tester.drag(find.byType(AspectRatio), const Offset(0, 160));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(VideoPlayerScreen), findsNothing);
   });
 
   testWidgets('ミュートを切り替えられ、次に開く動画にも引き継ぐ', (tester) async {
@@ -134,8 +201,11 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
 
-    expect(find.byIcon(Icons.volume_up), findsOneWidget);
+    // ミュートは（ヘッダーではなく）止めたときの操作バーにある。
     expect(platform.volumes.last, 1);
+    await tester.tap(find.byType(AspectRatio));
+    await tester.pump();
+    expect(find.byIcon(Icons.volume_up), findsOneWidget);
 
     await tester.tap(find.byIcon(Icons.volume_up));
     await tester.pump();
@@ -153,8 +223,10 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
 
-    expect(find.byIcon(Icons.volume_off), findsOneWidget);
     expect(platform.volumes.last, 0);
+    await tester.tap(find.byType(AspectRatio));
+    await tester.pump();
+    expect(find.byIcon(Icons.volume_off), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox());
     await tester.pump();
