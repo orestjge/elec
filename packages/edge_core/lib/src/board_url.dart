@@ -12,6 +12,9 @@
 ///   `read.cgi` がパス途中に来る）
 /// - `https://host/subback/{board}[.html]`（5ch の subback スレ一覧ページ）
 /// - `https://host/{board}/{key}` や `.../dat/{key}.dat`（スレ URL）
+/// - `https://jbbs.shitaraba.net/{category}/{boardId}/`（したらば板トップ）
+/// - `https://jbbs.shitaraba.net/bbs/read.cgi/{category}/{boardId}/{key}/`
+/// - `https://jbbs.shitaraba.net/bbs/subject.cgi/{category}/{boardId}/`
 ///
 /// スレ URL・一覧ページを貼られても板だけを拾う。ホストは URL のものをそのまま
 /// 返す（5ch のインターフェースホスト itest 等の実サーバ解決は呼び出し側の責務）。
@@ -62,6 +65,10 @@ BoardRef? parseBoardUrl(Uri uri) {
   final segs = uri.pathSegments.where((s) => s.isNotEmpty).toList();
   if (segs.isEmpty) return null;
 
+  if (_isShitarabaHost(uri.host)) {
+    return _parseShitaraba(uri.host, segs);
+  }
+
   // read.cgi はパス途中にも現れる（5ch itest: `/{server}/test/read.cgi/{board}/…`）。
   // その次のセグメントが板キー。
   final rc = segs.indexOf('read.cgi');
@@ -90,3 +97,27 @@ BoardRef? _build(String host, String board) {
   if (!boardKeyPattern.hasMatch(board)) return null;
   return BoardRef(host: host, boardKey: board);
 }
+
+BoardRef? _parseShitaraba(String host, List<String> segs) {
+  // /bbs/read.cgi/{category}/{boardId}/{threadKey}/...
+  // /bbs/subject.cgi/{category}/{boardId}/
+  if (segs.length >= 4 && segs[0] == 'bbs') {
+    final cgi = segs[1];
+    if (cgi == 'read.cgi' || cgi == 'subject.cgi') {
+      return _buildShitaraba(host, segs[2], segs[3]);
+    }
+  }
+
+  // /{category}/{boardId}/ または /{category}/{boardId}/subject.txt
+  if (segs.length >= 2) return _buildShitaraba(host, segs[0], segs[1]);
+  return null;
+}
+
+BoardRef? _buildShitaraba(String host, String category, String boardId) {
+  if (!boardKeyPattern.hasMatch(category)) return null;
+  if (!RegExp(r'^\d+$').hasMatch(boardId)) return null;
+  return BoardRef(host: host, boardKey: '$category/$boardId');
+}
+
+bool _isShitarabaHost(String host) =>
+    host == 'jbbs.shitaraba.net' || host == 'jbbs.livedoor.jp';

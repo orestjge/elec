@@ -51,6 +51,13 @@ void main() {
       expect(parseSubjectLine('notadat<>x (1)'), isNull);
     });
 
+    test('したらば形式の行', () {
+      final e = parseSubjectLine('1700000000.cgi,雑談 (part2) スレ(99)')!;
+      expect(e.key, '1700000000');
+      expect(e.title, '雑談 (part2) スレ');
+      expect(e.resCount, 99);
+    });
+
     test('<> が無い行は弾く', () {
       expect(parseSubjectLine('garbage'), isNull);
     });
@@ -83,6 +90,23 @@ void main() {
         _win31j.encode('1.dat<>a (1)\n\n2.dat<>b (2)\n'),
       );
       expect(list.map((e) => e.key), ['1', '2']);
+    });
+
+    test('したらば形式の複数行をパースする', () {
+      final list = parseSubject(
+        _win31j.encode('1700000000.cgi,スレA(12)\n1700000001.cgi,スレB(3)\n'),
+      );
+      expect(list.map((e) => e.title), ['スレA', 'スレB']);
+      expect(list.map((e) => e.resCount), [12, 3]);
+    });
+
+    test('したらばの EUC-JP subject をパースする', () {
+      final list = parseSubject(
+        EucJpCodec().encode('1700000000.cgi,日本語スレ(12)\n'),
+        encoding: BbsTextEncoding.eucJp,
+      );
+      expect(list.single.title, '日本語スレ');
+      expect(list.single.resCount, 12);
     });
   });
 }

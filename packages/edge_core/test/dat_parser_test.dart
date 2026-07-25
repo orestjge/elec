@@ -9,6 +9,7 @@ final _win31j = Windows31JCodec();
 /// dat 1 行を SJIS バイト列にして返すヘルパ（末尾 LF 付き）。
 /// 本番コードではなくフィクスチャ生成用。
 List<int> datLine(String s) => [..._win31j.encode(s), 0x0A];
+List<int> eucDatLine(String s) => [...EucJpCodec().encode(s), 0x0A];
 
 void main() {
   group('parseDatLine — 通常レス', () {
@@ -102,6 +103,40 @@ void main() {
       // 最後の 1 バイトを削る = 不完全な行
       final truncated = full.sublist(0, full.length - 1);
       expect(parseDat(truncated), isEmpty);
+    });
+
+    test('したらばの EUC-JP dat をパースする', () {
+      // 実物（rawmode.cgi）の並び: 番号<>名前<>メール<>日付<>本文<>スレタイ<>ID
+      final res = parseDat(
+        eucDatLine(
+          '1<>名無しの紋さん<>sage<>2024/09/02(月) 04:37:47<>'
+          '避難所に次スレを立てました<br>元スレ<>日本語スレ<>',
+        ),
+        encoding: BbsTextEncoding.eucJp,
+        format: DatFormat.shitaraba,
+      );
+      expect(res.single.number, 1);
+      expect(res.single.name, '名無しの紋さん');
+      expect(res.single.mail, 'sage');
+      expect(res.single.dateText, '2024/09/02(月) 04:37:47');
+      expect(res.single.body, '避難所に次スレを立てました<br>元スレ');
+      expect(res.single.threadTitle, '日本語スレ');
+      expect(res.single.id, isNull); // ID 非表示の板は最終フィールドが空
+    });
+
+    test('したらばのレス番号は行位置ではなく行頭の値を使う', () {
+      // 削除されたレスは行ごと落ちるので、連番を振ると以降が全部ずれる。
+      final res = parseDat(
+        [
+          ...eucDatLine('690<>名無し<>sage<>2026/01/16(金) 21:07:04<>あ<><>'),
+          ...eucDatLine('692<>名無し<><>2026/01/23(金) 22:26:39<>い<><>ID:xyz'),
+        ],
+        encoding: BbsTextEncoding.eucJp,
+        format: DatFormat.shitaraba,
+      );
+      expect(res.map((r) => r.number), [690, 692]);
+      expect(res[1].id, 'xyz'); // `ID:` 接頭辞は剥がす
+      expect(res[0].dateTime, DateTime.utc(2026, 1, 16, 12, 7, 4));
     });
   });
 

@@ -10,10 +10,11 @@ environment:
   sdk: ^3.9.0
 
 dependencies:
+  # したらばの EUC-JP デコードに EucJpDecoder を直接使う。
+  jis0208: ^1.0.1
   edge_sjis:
     path: ../edge_sjis
 
 dev_dependencies:
-  jis0208: ^1.0.1
   lints: ^5.0.0
   test: ^1.25.0

@@ -188,7 +188,11 @@ class _ThreadScreenState extends State<ThreadScreen>
     super.initState();
     _ownsFetcher = widget.fetcher == null;
     _fetcher = widget.fetcher ?? HttpClientFetcher();
-    _dat = DatFetcher(_fetcher);
+    _dat = DatFetcher(
+      _fetcher,
+      encoding: widget.endpoints.textEncoding,
+      format: widget.endpoints.datFormat,
+    );
     _authStore = widget.authStore ?? AuthStore.shared;
     _history = widget.readHistory ?? ReadHistory.shared;
     _ng = widget.ngStore ?? NgStore.shared;

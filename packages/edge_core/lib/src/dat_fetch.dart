@@ -1,6 +1,7 @@
 import 'dat_parser.dart';
 import 'http.dart';
 import 'models.dart';
+import 'subject_parser.dart' show BbsTextEncoding;
 
 /// スレッドの取得状態。累積した dat のバイト列とパース済みレスを保持する。
 ///
@@ -78,9 +79,17 @@ enum DatFetchStatus {
 
 /// dat の差分取得を行う。純粋なロジックで、通信は [HttpFetcher] 越し。
 class DatFetcher {
-  const DatFetcher(this.http);
+  const DatFetcher(
+    this.http, {
+    this.encoding = BbsTextEncoding.sjis,
+    this.format = DatFormat.fivech,
+  });
 
   final HttpFetcher http;
+  final BbsTextEncoding encoding;
+
+  /// dat の行フォーマット。したらばだけ並びが違う。
+  final DatFormat format;
 
   /// [url] のスレッドを取得する。[prev] に直前の状態を渡すと差分取得になる。
   ///
@@ -219,7 +228,12 @@ class DatFetcher {
 
     final bytes = [...prev.bytes, ...appended];
     // 追記分だけをパースする。番号は既存レス数の続きから。
-    final newRes = parseDat(appended, startNumber: prev.res.length + 1);
+    final newRes = parseDat(
+      appended,
+      startNumber: prev.res.length + 1,
+      encoding: encoding,
+      format: format,
+    );
     final state = DatState(
       bytes: bytes,
       res: [...prev.res, ...newRes],
@@ -266,7 +280,7 @@ class DatFetcher {
     required DatFetchStatus status,
     bool pastLog = false,
   }) {
-    final res = parseDat(resp.bodyBytes);
+    final res = parseDat(resp.bodyBytes, encoding: encoding, format: format);
     return DatFetchResult(
       state: DatState(
         bytes: resp.bodyBytes,

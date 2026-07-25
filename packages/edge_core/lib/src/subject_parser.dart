@@ -1,17 +1,31 @@
 import 'package:edge_sjis/edge_sjis.dart';
+import 'package:jis0208/jis0208.dart';
 
 import 'models.dart';
+
+enum BbsTextEncoding { sjis, eucJp }
+
+final _eucJpDecoder = EucJpDecoder(allowMalformed: true);
+
+String decodeBbsText(List<int> bytes, BbsTextEncoding encoding) {
+  return switch (encoding) {
+    BbsTextEncoding.sjis => decodeSjis(bytes),
+    BbsTextEncoding.eucJp => _eucJpDecoder.convert(bytes),
+  };
+}
 
 /// `title [cap★] (resCount)` の末尾を分解する正規表現。
 ///
 /// 末尾から順に、任意の `[xxx★]`（cap 名）と必須の `(数字)`（レス数）。
 final _tailRe = RegExp(r'^(.*?)(?:\s\[([^\]]*)★\])?\s\((\d+)\)$');
+final _shitarabaTailRe = RegExp(r'^(.*?)\s*\((\d+)\)$');
 
 /// subject.txt（SJIS バイト列）をパースしてスレッド一覧にする。
 ///
 /// 各行の形式（`eddist-server/src/domain/thread_list.rs`）:
 /// - 通常: `{key}.dat<>{title} ({resCount})`
 /// - cap 付き: `{key}.dat<>{title} [{cap}★] ({resCount})`
+/// - したらば: `{key}.cgi,{title}({resCount})`
 ///
 /// [metadent] が true のときは `subject-metadent.txt` を想定し、`[xxx★]` を
 /// cap 名ではなくスレ立て人の metadent として [ThreadSummary.metadent] に入れる
@@ -19,8 +33,9 @@ final _tailRe = RegExp(r'^(.*?)(?:\s\[([^\]]*)★\])?\s\((\d+)\)$');
 List<ThreadSummary> parseSubject(
   List<int> subjectBytes, {
   bool metadent = false,
+  BbsTextEncoding encoding = BbsTextEncoding.sjis,
 }) {
-  final text = decodeSjis(subjectBytes);
+  final text = decodeBbsText(subjectBytes, encoding);
   final result = <ThreadSummary>[];
   for (final line in text.split('\n')) {
     if (line.isEmpty) continue;
@@ -35,7 +50,7 @@ List<ThreadSummary> parseSubject(
 /// [metadent] については [parseSubject] を参照。
 ThreadSummary? parseSubjectLine(String line, {bool metadent = false}) {
   final sep = line.indexOf('<>');
-  if (sep < 0) return null;
+  if (sep < 0) return _parseShitarabaSubjectLine(line);
 
   final left = line.substring(0, sep);
   final right = line.substring(sep + 2);
@@ -55,5 +70,27 @@ ThreadSummary? parseSubjectLine(String line, {bool metadent = false}) {
     resCount: int.parse(m.group(3)!),
     capName: metadent ? null : tag,
     metadent: metadent ? tag : null,
+  );
+}
+
+ThreadSummary? _parseShitarabaSubjectLine(String line) {
+  final sep = line.indexOf(',');
+  if (sep < 0) return null;
+
+  final left = line.substring(0, sep);
+  final right = line.substring(sep + 1);
+  if (!left.endsWith('.cgi')) return null;
+  final key = left.substring(0, left.length - 4);
+  if (key.isEmpty) return null;
+
+  final m = _shitarabaTailRe.firstMatch(right);
+  if (m == null) {
+    return ThreadSummary(key: key, title: right, resCount: 0, capName: null);
+  }
+  return ThreadSummary(
+    key: key,
+    title: m.group(1)!,
+    resCount: int.parse(m.group(2)!),
+    capName: null,
   );
 }

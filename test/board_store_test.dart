@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:edge_core/edge_core.dart';
 import 'package:elec/src/net/board.dart';
+import 'package:elec/src/net/board_catalog.dart';
 import 'package:elec/src/net/board_store.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jis0208/jis0208.dart';
@@ -30,6 +31,11 @@ FetchResponse subjectResp() => FetchResponse(
   bodyBytes: ascii.encode('1700000000.dat<>test thread (5)\n'),
 );
 
+FetchResponse shitarabaSubjectResp() => FetchResponse(
+  statusCode: 200,
+  bodyBytes: EucJpCodec().encode('1700000000.cgi,日本語スレ(5)\n'),
+);
+
 /// itest のようなインターフェースの HTML ページ（スレ一覧ではない）。
 FetchResponse htmlResp() => FetchResponse(
   statusCode: 200,
@@ -47,6 +53,7 @@ FetchResponse bbsmenuResp(String boardKey, String host, String boardName) =>
         jsonEncode({
           'menu_list': [
             {
+              'category_name': '実況ch',
               'category_content': [
                 {
                   'directory_name': boardKey,
@@ -141,6 +148,106 @@ void main() {
     expect(board.kind, BoardKind.fivech);
   });
 
+  test('5ch の BBSMENU をカテゴリ付き板リストとして取得できる', () async {
+    final store = BoardStore(MemoryBoardStorage());
+    final f = MapFetcher({
+      'https://menu.5ch.net/bbsmenu.json': bbsmenuResp(
+        'livegalileo',
+        'nova.5ch.io',
+        'なんでも実況G',
+      ),
+    });
+
+    final catalog = await store.fetchCatalog(
+      BoardCatalogSource.fivech,
+      fetcher: f,
+    );
+    final category = catalog.categories.single;
+    final entry = category.entries.single;
+
+    expect(catalog.sourceName, '5ch');
+    expect(category.name, '実況ch');
+    expect(entry.name, 'なんでも実況G');
+    expect(entry.boardKey, 'livegalileo');
+    expect(entry.host, 'nova.5ch.io');
+    expect(entry.id, 'nova.5ch.io/livegalileo');
+    expect(entry.url.toString(), 'https://nova.5ch.io/livegalileo/');
+  });
+
+  test('eddist の /api/boards を板リストとして取得できる', () async {
+    final store = BoardStore(MemoryBoardStorage());
+    final f = MapFetcher({
+      'https://bbs.eddibb.cc/api/boards': FetchResponse(
+        statusCode: 200,
+        bodyBytes: utf8.encode(
+          jsonEncode([
+            {'name': 'エッヂ', 'board_key': 'liveedge', 'default_name': 'エッヂの名無し'},
+            {'name': '試験板', 'board_key': 'experiment'},
+          ]),
+        ),
+      ),
+    });
+
+    final catalog = await store.fetchCatalog(
+      BoardCatalogSource.forHost(Board.eddibbHost, label: 'エッヂ'),
+      fetcher: f,
+    );
+    final entries = catalog.categories.single.entries;
+
+    expect(catalog.sourceName, 'エッヂ');
+    expect(entries.map((e) => e.name), ['エッヂ', '試験板']);
+    expect(entries.first.url.toString(), 'https://bbs.eddibb.cc/liveedge/');
+  });
+
+  test('/api/boards が無いサーバは bbsmenu.html にフォールバックする', () async {
+    final store = BoardStore(MemoryBoardStorage());
+    final f = MapFetcher({
+      'https://bbs.punipuni.eu/bbsmenu.html': FetchResponse(
+        statusCode: 200,
+        // 実物と同じ Shift_JIS・裸 href・板以外のリンク混じり。
+        bodyBytes: Windows31JCodec().encode(
+          '<html><body><font size="2">'
+          '<A HREF="https://punipuni.eu/">トップへ</A>'
+          '<BR><B>しゃわまんぷにぷに！</B><BR>'
+          '<A HREF=http://bbs.punipuni.eu/vaporeon/>ぷにぷに板</A><br>'
+          '<A HREF="http://bbs.punipuni.eu/leafeon/">なんでも実況L</A><br>'
+          '</font></body></html>',
+        ),
+      ),
+    });
+
+    final catalog = await store.fetchCatalog(
+      BoardCatalogSource.forHost('bbs.punipuni.eu'),
+      fetcher: f,
+    );
+    final category = catalog.categories.single;
+
+    // トップページへのリンクは板 URL ではないので落ちる。
+    expect(category.name, 'しゃわまんぷにぷに！');
+    expect(category.entries.map((e) => e.name), ['ぷにぷに板', 'なんでも実況L']);
+    expect(category.entries.first.boardKey, 'vaporeon');
+    expect(category.entries.first.host, 'bbs.punipuni.eu');
+  });
+
+  test('板リストを配信していないサーバはメッセージ付きで失敗する', () async {
+    final store = BoardStore(MemoryBoardStorage());
+    final f = MapFetcher(const {});
+
+    expect(
+      () => store.fetchCatalog(
+        BoardCatalogSource.forHost('example.com'),
+        fetcher: f,
+      ),
+      throwsA(
+        isA<BoardAddException>().having(
+          (e) => e.message,
+          'message',
+          contains('example.com'),
+        ),
+      ),
+    );
+  });
+
   test('エッヂのホストなら kind=eddist', () async {
     final store = BoardStore(MemoryBoardStorage());
     await store.load();
@@ -156,6 +263,34 @@ void main() {
     );
     expect(board.kind, BoardKind.eddist);
     expect(board.title, '試験板');
+  });
+
+  test('したらばの URL を追加すると kind=shitaraba で追加される', () async {
+    final store = BoardStore(MemoryBoardStorage());
+    await store.load();
+    final f = MapFetcher({
+      'https://jbbs.shitaraba.net/otaku/18550/subject.txt':
+          shitarabaSubjectResp(),
+      'https://jbbs.shitaraba.net/bbs/api/setting.cgi/otaku/18550/':
+          FetchResponse(
+            statusCode: 200,
+            bodyBytes: EucJpCodec().encode(
+              'BBS_TITLE=したらばテスト\nBBS_NONAME_NAME=名無しさん\n',
+            ),
+          ),
+    });
+
+    final board = await store.addFromUrl(
+      'https://jbbs.shitaraba.net/otaku/18550/',
+      fetcher: f,
+    );
+
+    expect(board.host, 'jbbs.shitaraba.net');
+    expect(board.boardKey, 'otaku/18550');
+    expect(board.title, 'したらばテスト');
+    expect(board.defaultName, '名無しさん');
+    expect(board.kind, BoardKind.shitaraba);
+    expect(store.current, board);
   });
 
   test('板の URL でなければ BoardAddException', () async {

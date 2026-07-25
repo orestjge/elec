@@ -6,6 +6,9 @@ enum BoardKind {
 
   /// 5ch 互換。どんぐり（MonaTicket）・二段階 POST。metadent 等は無い。
   fivech,
+
+  /// したらば掲示板。URL はカテゴリ＋掲示板 ID の 2 階層。
+  shitaraba,
 }
 
 /// 閲覧・書き込み対象の板。host / boardKey に加え、表示名やデフォルト名、種別を
@@ -33,6 +36,9 @@ class Board {
 
   /// エッヂ (eddist) のホスト。ここに一致すれば種別を eddist と判定する。
   static const eddibbHost = 'bbs.eddibb.cc';
+
+  /// したらばの掲示板ホスト。
+  static const shitarabaHost = 'jbbs.shitaraba.net';
 
   final String host;
   final String boardKey;

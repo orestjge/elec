@@ -1,4 +1,4 @@
-import 'package:edge_sjis/edge_sjis.dart';
+import 'subject_parser.dart' show BbsTextEncoding, decodeBbsText;
 
 /// `SETTING.TXT`（5ch 互換の板設定）をパースした値。
 ///
@@ -38,8 +38,11 @@ class BoardSetting {
 ///
 /// 1 行 1 項目・`key=value`。`=` を含まない行や空行は無視する。値に `=` が
 /// 含まれても最初の `=` だけで分割する。
-BoardSetting parseSettingTxt(List<int> bytes) {
-  final text = decodeSjis(bytes);
+BoardSetting parseSettingTxt(
+  List<int> bytes, {
+  BbsTextEncoding encoding = BbsTextEncoding.sjis,
+}) {
+  final text = decodeBbsText(bytes, encoding);
   final values = <String, String>{};
   for (final rawLine in text.split('\n')) {
     final line = rawLine.replaceAll('\r', '');
