@@ -29,4 +29,18 @@ void main() {
     expect(opened, [video.url]);
     expect(find.byType(EmbedPlayerScreen), findsNothing);
   });
+
+  test('YouTube の WebView リクエストには Referer を付ける', () {
+    final video = embedVideosIn('https://youtu.be/dQw4w9WgXcQ').single;
+
+    expect(embedPlayerRequestHeaders(video), {
+      'Referer': 'https://io.github.orestjge.elec/',
+    });
+  });
+
+  test('ニコニコの WebView リクエストには追加ヘッダーを付けない', () {
+    final video = embedVideosIn('https://www.nicovideo.jp/watch/sm9').single;
+
+    expect(embedPlayerRequestHeaders(video), isEmpty);
+  });
 }

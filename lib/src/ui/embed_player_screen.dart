@@ -84,7 +84,10 @@ class _EmbedPlayerScreenState extends State<EmbedPlayerScreen> {
           },
         ),
       )
-      ..loadRequest(widget.video.playerUrl);
+      ..loadRequest(
+        widget.video.playerUrl,
+        headers: embedPlayerRequestHeaders(widget.video),
+      );
   }
 
   Future<void> _close() => Navigator.of(context).maybePop();
@@ -120,8 +123,10 @@ class _EmbedPlayerScreenState extends State<EmbedPlayerScreen> {
                 Center(
                   child: _FailedEmbed(
                     label: widget.video.label,
-                    onRetry: () =>
-                        _controller.loadRequest(widget.video.playerUrl),
+                    onRetry: () => _controller.loadRequest(
+                      widget.video.playerUrl,
+                      headers: embedPlayerRequestHeaders(widget.video),
+                    ),
                     onOpenExternally: _openExternally,
                   ),
                 ),
@@ -165,6 +170,16 @@ class _EmbedPlayerScreenState extends State<EmbedPlayerScreen> {
       ),
     );
   }
+}
+
+@visibleForTesting
+Map<String, String> embedPlayerRequestHeaders(EmbedVideo video) {
+  if (video.kind != EmbedKind.youtube) return const {};
+  return const {
+    // YouTube embed は Android WebView など Referer が空になり得る環境で
+    // Error 153 になるため、アプリの origin を明示して読み込む。
+    'Referer': 'https://io.github.orestjge.elec/',
+  };
 }
 
 class _FailedEmbed extends StatelessWidget {
