@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:edge_core/edge_core.dart';
 import 'package:flutter/material.dart';
 
@@ -26,6 +28,10 @@ class NewThreadScreen extends StatefulWidget {
     this.pickAndUploadFile,
     this.maxTitle,
     this.maxBody,
+    this.initialTitle = '',
+    this.initialBody = '',
+    this.onDraftChanged,
+    this.onDraftCleared,
   });
 
   final HttpFetcher? fetcher;
@@ -34,6 +40,10 @@ class NewThreadScreen extends StatefulWidget {
   /// スレタイ・本文の最大文字数（板の SETTING.TXT 実測値）。null なら既定値。
   final int? maxTitle;
   final int? maxBody;
+  final String initialTitle;
+  final String initialBody;
+  final ValueChanged<NewThreadDraft>? onDraftChanged;
+  final VoidCallback? onDraftCleared;
   final AuthStore? authStore;
   final AuthLauncher authLauncher;
 
@@ -46,6 +56,15 @@ class NewThreadScreen extends StatefulWidget {
 
   @override
   State<NewThreadScreen> createState() => _NewThreadScreenState();
+}
+
+class NewThreadDraft {
+  const NewThreadDraft({this.title = '', this.body = ''});
+
+  final String title;
+  final String body;
+
+  bool get isEmpty => title.isEmpty && body.isEmpty;
 }
 
 class _NewThreadScreenState extends State<NewThreadScreen> {
@@ -61,16 +80,24 @@ class _NewThreadScreenState extends State<NewThreadScreen> {
   late final AuthStore _authStore;
   late final AttachmentUploader _uploader;
 
-  final _title = TextEditingController();
-  final _body = TextEditingController();
+  late final TextEditingController _title;
+  late final TextEditingController _body;
   final _bodyFocus = FocusNode();
   bool _sending = false;
   bool _uploadingImage = false;
   bool _uploadingFile = false;
+  bool _trackingSwipe = false;
+  double _horizontalDragDistance = 0;
+  double _verticalDragDistance = 0;
+  Timer? _swipeStartTimer;
+  static const double _swipeDistanceThreshold = 25;
+  static const Duration _swipeStartTimeout = Duration(milliseconds: 450);
 
   @override
   void initState() {
     super.initState();
+    _title = TextEditingController(text: widget.initialTitle);
+    _body = TextEditingController(text: widget.initialBody);
     _ownsFetcher = widget.fetcher == null;
     _fetcher = widget.fetcher ?? HttpClientFetcher();
     _authStore = widget.authStore ?? AuthStore.shared;
@@ -79,10 +106,16 @@ class _NewThreadScreenState extends State<NewThreadScreen> {
     _body.addListener(_onChanged);
   }
 
-  void _onChanged() => setState(() {});
+  void _onChanged() {
+    widget.onDraftChanged?.call(
+      NewThreadDraft(title: _title.text, body: _body.text),
+    );
+    setState(() {});
+  }
 
   @override
   void dispose() {
+    _swipeStartTimer?.cancel();
     _title.dispose();
     _body.dispose();
     _bodyFocus.dispose();
@@ -211,11 +244,43 @@ class _NewThreadScreenState extends State<NewThreadScreen> {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('スレッドを立てました')));
+        widget.onDraftCleared?.call();
         Navigator.of(context).pop(title); // 一覧を更新させ、自分のスレとして記録する
       }
     } finally {
       if (mounted) setState(() => _sending = false);
     }
+  }
+
+  void _handlePointerDown(PointerDownEvent event) {
+    _horizontalDragDistance = 0;
+    _verticalDragDistance = 0;
+    _trackingSwipe = true;
+    _swipeStartTimer?.cancel();
+    _swipeStartTimer = Timer(_swipeStartTimeout, () {
+      _trackingSwipe = false;
+    });
+  }
+
+  void _handlePointerMove(PointerMoveEvent event) {
+    if (!_trackingSwipe) return;
+    _horizontalDragDistance += event.delta.dx;
+    _verticalDragDistance += event.delta.dy.abs();
+  }
+
+  void _handlePointerUp(PointerUpEvent event) {
+    _swipeStartTimer?.cancel();
+    if (!_trackingSwipe) return;
+    _trackingSwipe = false;
+    if (_horizontalDragDistance < _swipeDistanceThreshold) return;
+    if (_horizontalDragDistance < _verticalDragDistance * 1.2) return;
+    final navigator = Navigator.of(context);
+    if (navigator.canPop()) navigator.pop();
+  }
+
+  void _handlePointerCancel(PointerCancelEvent event) {
+    _swipeStartTimer?.cancel();
+    _trackingSwipe = false;
   }
 
   @override
@@ -230,54 +295,61 @@ class _NewThreadScreenState extends State<NewThreadScreen> {
     final bodyStyle = composeBodyTextStyle(theme);
     return Scaffold(
       appBar: AppBar(title: const Text('スレを立てる')),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-        children: [
-          TextField(
-            controller: _title,
-            maxLength: _titleMax,
-            textInputAction: TextInputAction.next,
-            style: titleStyle,
-            decoration: composeFieldDecoration(
-              scheme: scheme,
-              hintText: 'スレッドタイトル',
-              textStyle: titleStyle,
-              // スレタイは 1 行なので、レス入力欄と同じ高さ（42）に収める。
-              // 行高 22（16×1.4）+ 10×2 = 42。
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 14,
-                vertical: 10,
+      body: Listener(
+        behavior: HitTestBehavior.translucent,
+        onPointerDown: _handlePointerDown,
+        onPointerMove: _handlePointerMove,
+        onPointerUp: _handlePointerUp,
+        onPointerCancel: _handlePointerCancel,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+          children: [
+            TextField(
+              controller: _title,
+              maxLength: _titleMax,
+              textInputAction: TextInputAction.next,
+              style: titleStyle,
+              decoration: composeFieldDecoration(
+                scheme: scheme,
+                hintText: 'スレッドタイトル',
+                textStyle: titleStyle,
+                // スレタイは 1 行なので、レス入力欄と同じ高さ（42）に収める。
+                // 行高 22（16×1.4）+ 10×2 = 42。
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 10,
+                ),
               ),
             ),
-          ),
-          _CharCount(length: _title.text.characters.length, max: _titleMax),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _body,
-            focusNode: _bodyFocus,
-            maxLength: _bodyMax,
-            minLines: 10,
-            maxLines: 24,
-            textInputAction: TextInputAction.newline,
-            // 本文はレス入力欄と同じ組み方（15px・行高 1.4）。
-            style: bodyStyle,
-            decoration: composeFieldDecoration(
-              scheme: scheme,
-              hintText: '本文を書く',
-              textStyle: bodyStyle,
+            _CharCount(length: _title.text.characters.length, max: _titleMax),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _body,
+              focusNode: _bodyFocus,
+              maxLength: _bodyMax,
+              minLines: 10,
+              maxLines: 24,
+              textInputAction: TextInputAction.newline,
+              // 本文はレス入力欄と同じ組み方（15px・行高 1.4）。
+              style: bodyStyle,
+              decoration: composeFieldDecoration(
+                scheme: scheme,
+                hintText: '本文を書く',
+                textStyle: bodyStyle,
+              ),
             ),
-          ),
-          _CharCount(length: _body.text.characters.length, max: _bodyMax),
-          const SizedBox(height: 12),
-          _AttachmentPreview(body: _body, onRemove: _removeUrl),
-          const SizedBox(height: 12),
-          Text(
-            'スレ立てには一定の書き込み実績と間隔制限があります',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: scheme.onSurfaceVariant,
+            _CharCount(length: _body.text.characters.length, max: _bodyMax),
+            const SizedBox(height: 12),
+            _AttachmentPreview(body: _body, onRemove: _removeUrl),
+            const SizedBox(height: 12),
+            Text(
+              'スレ立てには一定の書き込み実績と間隔制限があります',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
       bottomNavigationBar: _NewThreadActions(
         sending: _sending,

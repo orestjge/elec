@@ -33,14 +33,22 @@ enum ThreadSort {
   final IconData icon;
 }
 
+/// スレッド一覧に出す対象。下部バーのチップ列で直接切り替える。
 enum ThreadFilter {
-  current('現行', '現在一覧にあるスレを表示', Icons.forum_outlined),
-  history('履歴', '開いたことがあるスレ（dat落ちも含む）', Icons.history),
-  favorites('お気に入り', 'お気に入りに登録したスレ（dat落ちも含む）', Icons.star_border);
+  /// 現在一覧（subject.txt）にあるスレ。
+  current('現行', Icons.forum_outlined),
 
-  const ThreadFilter(this.label, this.description, this.icon);
+  /// 開いたことがあるスレのうち、未読レスが残っているもの。
+  unreadNew('新着あり', Icons.mark_chat_unread_outlined),
+
+  /// 開いたことがあるスレ（dat 落ちも含む）。
+  history('履歴', Icons.history),
+
+  /// お気に入りに登録したスレ（dat 落ちも含む）。
+  favorites('お気に入り', Icons.star_border);
+
+  const ThreadFilter(this.label, this.icon);
   final String label;
-  final String description;
   final IconData icon;
 }
 
@@ -95,10 +103,12 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   bool _loading = true;
   bool _polling = false; // 背景ポーリング中の控えめなインジケータ用
   ThreadFilter _filter = ThreadFilter.current;
+  NewThreadDraft _newThreadDraft = const NewThreadDraft();
 
   /// 表示ごとの既定の並び。現行は掲示板の定番＝最近レス順、履歴は最後に見た順。
   static const Map<ThreadFilter, ThreadSort> _defaultSort = {
     ThreadFilter.current: ThreadSort.bump,
+    ThreadFilter.unreadNew: ThreadSort.bump,
     ThreadFilter.history: ThreadSort.lastSeen,
     ThreadFilter.favorites: ThreadSort.lastSeen,
   };
@@ -292,6 +302,13 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   List<ThreadSummary> _filteredThreads(List<ThreadSummary> threads) {
     final filtered = switch (_filter) {
       ThreadFilter.current => threads,
+      // 新着ありは履歴と同じ母集団（dat 落ちの保存分も含む）から、未読レスが
+      // 残っているスレだけを残す。_newCount は未読（未オープン）スレでは 0 な
+      // ので、開いたことがある条件はこれだけで満たせる。
+      ThreadFilter.unreadNew => _withStoredThreads(
+        threads,
+        (key) => _history.isRead(key),
+      ).where((t) => _newCount(t) > 0).toList(),
       ThreadFilter.history => _withStoredThreads(
         threads.where((t) => _history.isRead(t.key)).toList(),
         (key) => _history.isRead(key),
@@ -448,53 +465,12 @@ class _ThreadListScreenState extends State<ThreadListScreen>
     }
   }
 
-  Future<void> _pickFilter() async {
-    final picked = await showModalBottomSheet<ThreadFilter>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      builder: (context) {
-        final scheme = Theme.of(context).colorScheme;
-        return SafeArea(
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
-                  child: Text(
-                    '表示',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                ),
-                for (final f in ThreadFilter.values)
-                  ListTile(
-                    leading: Icon(
-                      f.icon,
-                      color: f == _filter ? scheme.primary : null,
-                    ),
-                    title: Text(f.label),
-                    subtitle: Text(f.description),
-                    trailing: f == _filter
-                        ? Icon(Icons.check, color: scheme.primary)
-                        : null,
-                    selected: f == _filter,
-                    onTap: () => Navigator.pop(context, f),
-                  ),
-                const SizedBox(height: 8),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-    if (picked != null && picked != _filter) {
-      setState(() {
-        _filter = picked;
-        _reorder(); // 表示ごとに既定の並びが変わるので貼り直す
-      });
-    }
+  void _selectFilter(ThreadFilter picked) {
+    if (picked == _filter) return;
+    setState(() {
+      _filter = picked;
+      _reorder(); // 表示ごとに既定の並びが変わるので貼り直す
+    });
   }
 
   void _toggleSearch() {
@@ -797,6 +773,10 @@ class _ThreadListScreenState extends State<ThreadListScreen>
           authStore: widget.authStore,
           maxTitle: widget.board.subjectMax,
           maxBody: widget.board.messageMax,
+          initialTitle: _newThreadDraft.title,
+          initialBody: _newThreadDraft.body,
+          onDraftChanged: (draft) => _newThreadDraft = draft,
+          onDraftCleared: () => _newThreadDraft = const NewThreadDraft(),
         ),
       ),
     );
@@ -853,18 +833,15 @@ class _ThreadListScreenState extends State<ThreadListScreen>
       // 下部バーはすりガラスにして、その背後をリストが流れる。extendBody で本文を
       // バーの下まで広げ、BackdropFilter が背後を拾えるようにする。
       extendBody: true,
-      // 「スレを立てる」は独立して浮かせる。ガラスバーや本文と被りにくいよう、
-      // ラベル無しの丸 FAB にして浮遊物を小さく収める。書き込み未対応の板
-      // （5ch は Phase 2）では出さない。
+      // 「スレを立てる」は独立して浮かせる。通常 FAB（56）は下部バーに対して
+      // 大きく、小型 FAB（40）は埋もれ気味なので、中間の 48 にする。
       floatingActionButton: widget.endpoints.supportsWrite
-          ? FloatingActionButton(
-              onPressed: _openNewThread,
-              tooltip: 'スレを立てる',
-              child: const Icon(Icons.add),
-            )
+          ? _NewThreadFab(onPressed: _openNewThread)
           : null,
-      // よく使う検索・絞り込み・並び替えは、片手で届く下部のバーにチップで
-      // まとめる。設定・URL で開くは低頻度なので上の ⋮ に集約する。
+      // よく使う検索・絞り込みは、片手で届く下部のバーにチップでまとめる。
+      // 並べ替えは頻度が低いうえ、値のラベルが長い組み合わせ（例「最後に見た順」
+      // ＋「お気に入り」）で下部バーからはみ出すので上の AppBar に置く。設定・
+      // URL で開くはさらに低頻度なので上の ⋮ に集約する。
       bottomNavigationBar: _BottomActionBar(
         searchOpen: _searchOpen,
         search: _search,
@@ -872,9 +849,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
         onSearchChanged: (_) => setState(() {}),
         onSearchClear: () => setState(_search.clear),
         filter: _filter,
-        onPickFilter: _pickFilter,
-        sort: _sort,
-        onPickSort: _pickSort,
+        onSelectFilter: _selectFilter,
       ),
       body: RefreshIndicator(
         onRefresh: _refresh,
@@ -890,6 +865,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
                 title: Text(widget.board.title),
                 actions: [
                   _PollingIndicator(active: _polling),
+                  _SortButton(sort: _sort, onPressed: _pickSort),
                   _OverflowMenu(
                     onOpenUrl: _openThreadFromUrl,
                     onOpenSettings: _openSettings,
@@ -947,14 +923,58 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   }
 }
 
+class _NewThreadFab extends StatelessWidget {
+  const _NewThreadFab({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Tooltip(
+      message: 'スレを立てる',
+      child: Material(
+        color: scheme.primary,
+        elevation: 6,
+        shadowColor: scheme.shadow,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onPressed,
+          child: SizedBox.square(
+            dimension: 48,
+            child: Icon(Icons.add, size: 22, color: scheme.onPrimary),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// 下部バーの操作要素（チップ・検索欄）の高さ。チップと検索欄で同じ値を使い、
 /// 検索の開閉でバー内の見た目の高さが揃うようにする。M3 チップ本来のピル高さに
 /// 合わせた 32。
 const double _kBarControlHeight = 32;
 
-/// 画面下部の操作バー。検索・並び替え・絞り込みを、同じチップ形に揃えて片手で
-/// 届く位置に置く。並び替え・絞り込みは現在値＋▾で「今この値・タップで変更」と
-/// 分かるようにする。検索中は同じ場所を検索欄に差し替え、操作を下部で完結させる。
+/// バーの操作要素（チップ・検索欄）でアイコンの左右に取る余白。
+///
+/// チップと検索欄で同じ値を使い、下部バーの左パディングも開閉で揃えることで、
+/// 検索を開いても虫めがねが同じ位置のまま動かない。アイコンだけのチップでは
+/// 左右同値＝ピルのちょうど中心にアイコンが来る。
+const double _kSearchIconInset = 7;
+
+/// 検索アイコンとラベル/入力文字の間隔。
+const double _kSearchLabelGap = 6;
+
+/// TextField は prefixIcon と入力文字の間に内部余白が入るため、その分だけ詰める。
+const double _kSearchFieldIconTrailingInset = 2;
+
+/// 画面下部の操作バー。検索と表示の切り替えを、片手で届く位置にまとめる。
+///
+/// 表示はシートを挟まず、チップ列を 1 タップで切り替える。選択中だけラベルを出し、
+/// 残りはアイコンだけにして、狭い画面でも 4 つ並ぶようにする。検索中は同じ場所を
+/// 検索欄に差し替え、操作を下部で完結させる。並べ替えは頻度が低くラベルも長いので
+/// AppBar 側のアイコンに逃がしてある。
 class _BottomActionBar extends StatelessWidget {
   const _BottomActionBar({
     required this.searchOpen,
@@ -963,9 +983,7 @@ class _BottomActionBar extends StatelessWidget {
     required this.onSearchChanged,
     required this.onSearchClear,
     required this.filter,
-    required this.onPickFilter,
-    required this.sort,
-    required this.onPickSort,
+    required this.onSelectFilter,
   });
 
   final bool searchOpen;
@@ -974,9 +992,7 @@ class _BottomActionBar extends StatelessWidget {
   final ValueChanged<String> onSearchChanged;
   final VoidCallback onSearchClear;
   final ThreadFilter filter;
-  final VoidCallback onPickFilter;
-  final ThreadSort sort;
-  final VoidCallback onPickSort;
+  final ValueChanged<ThreadFilter> onSelectFilter;
 
   @override
   Widget build(BuildContext context) {
@@ -993,8 +1009,9 @@ class _BottomActionBar extends StatelessWidget {
         ),
         child: _GlassBar(
           // チップ表示時と同じ高さにして、検索の開閉でバーが上下しないようにする。
+          // 左パディングもチップ表示時と同じにして、虫めがねの位置を合わせる。
           height: 58,
-          padding: const EdgeInsets.only(left: 12, right: 4),
+          padding: const EdgeInsets.only(left: 10, right: 4),
           child: Row(
             children: [
               Expanded(
@@ -1004,42 +1021,82 @@ class _BottomActionBar extends StatelessWidget {
                   onClear: onSearchClear,
                 ),
               ),
-              IconButton(
-                tooltip: '検索を閉じる',
-                icon: const Icon(Icons.search_off),
-                onPressed: onToggleSearch,
+              const SizedBox(width: 4),
+              SizedBox.square(
+                dimension: _kBarControlHeight,
+                child: IconButton(
+                  tooltip: '検索を閉じる',
+                  icon: const Icon(Icons.search_off),
+                  iconSize: 18,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints.tightFor(
+                    width: _kBarControlHeight,
+                    height: _kBarControlHeight,
+                  ),
+                  style: IconButton.styleFrom(
+                    foregroundColor: Theme.of(
+                      context,
+                    ).colorScheme.onSurfaceVariant,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  onPressed: onToggleSearch,
+                ),
               ),
             ],
           ),
         ),
       );
     }
-    // 検索は「動作」、並べ替え・表示は「現在値の選択」。役割が違うので左右に分け、
-    // 間を空けて視覚的に分離する。検索を左端、選択系を右端に寄せる。
+    // 検索は「動作」、表示は「現在の状態」。役割が違うので左端の検索と細い仕切り
+    // で分け、状態側は親指の届く右側にまとめる。
     return _GlassBar(
       height: 58,
       padding: const EdgeInsets.symmetric(horizontal: 10),
       child: Row(
         children: [
+          // 検索は中身が変わらないのでラベル付き。左端の余白も埋まる。
           _GlassChip(
             icon: Icons.search,
             label: '検索',
             tooltip: 'スレ検索',
             onPressed: onToggleSearch,
           ),
-          const Spacer(),
-          _GlassChip(
-            icon: sort.icon,
-            value: sort.label,
-            tooltip: '並べ替え',
-            onPressed: onPickSort,
-          ),
-          const SizedBox(width: 8),
-          _GlassChip(
-            icon: filter.icon,
-            value: filter.label,
-            tooltip: '表示',
-            onPressed: onPickFilter,
+          // 表示のチップ群は仕切りごと右（親指側）に寄せる。余白は検索との間に
+          // まとめて置き、仕切りがチップから離れて浮かないようにする。
+          Expanded(
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                const SizedBox(width: 10),
+                const _BarDivider(),
+                const SizedBox(width: 10),
+                // 文字を大きくする設定でもはみ出さないよう、入り切らなければ
+                // 横スクロールにする。
+                Flexible(
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    reverse: true,
+                    child: Row(
+                      children: [
+                        for (final f in ThreadFilter.values) ...[
+                          if (f != ThreadFilter.values.first)
+                            const SizedBox(width: 6),
+                          _GlassChip(
+                            icon: f.icon,
+                            // アイコンだけなので、長押しで名前が出るようにする。
+                            tooltip: f.label,
+                            selected: f == filter,
+                            onPressed: () => onSelectFilter(f),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -1108,47 +1165,143 @@ class _GlassBar extends StatelessWidget {
 }
 
 /// ガラスバー上のチップ。枠は付けず、弱いソフト塗りだけで「操作」と分かるように
-/// する。[value] を渡すと現在値＋▾（並び替え・絞り込み用）、[label] だけなら
-/// アイコン＋文字（検索用）。
+/// する。
+///
+/// [label] は中身が変わらないチップ（検索）にだけ付ける。状態で文字が出たり
+/// 消えたりすると、タップのたびにチップの幅＝隣の位置がズレて、続けて押すときに
+/// 狙いが外れる。表示の切り替えチップはアイコンだけの一定幅にして、今どれを
+/// 選んでいるかは幅ではなく塗りの濃さで示す。
 class _GlassChip extends StatelessWidget {
   const _GlassChip({
     required this.icon,
     required this.tooltip,
     required this.onPressed,
     this.label,
-    this.value,
+    this.selected = false,
   });
 
   final IconData icon;
   final String tooltip;
   final VoidCallback onPressed;
   final String? label;
-  final String? value;
+
+  /// 「今この状態」を表すチップ（表示の切り替え）。塗りと色を強める。
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final text = label;
+    final foreground = selected
+        ? scheme.onSecondaryContainer
+        : scheme.onSurfaceVariant;
+    // ActionChip は空ラベルでもラベル枠の余白が残り、アイコンがピルの中心から
+    // ずれる・高さが検索欄と揃わない。バーの操作要素は高さを
+    // [_kBarControlHeight] で統一したいので、素の Material で組む。
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        // 常時の塗りは選択中だけ。他は地のまま置き、ホバー・押下のときだけ
+        // InkWell の反応が出る（アイコンが並んでも画面がうるさくならない）。
+        color: selected ? scheme.secondaryContainer : Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onPressed,
+          child: SizedBox(
+            height: _kBarControlHeight,
+            child: Padding(
+              // アイコンだけのときは左右同じ余白＝ピルの中心にアイコンが来る。
+              padding: const EdgeInsets.symmetric(
+                horizontal: _kSearchIconInset,
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: 18, color: foreground),
+                  if (text != null) ...[
+                    const SizedBox(width: _kSearchLabelGap),
+                    Text(
+                      text,
+                      softWrap: false,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        color: foreground,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 下部バーの中で「動作（検索）」と「状態（表示）」を分ける細い仕切り。
+class _BarDivider extends StatelessWidget {
+  const _BarDivider();
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final showChevron = value != null;
-    // M3 のチップは本来ピル高さ 32dp（_kBarControlHeight）。shrinkWrap でタップ
-    // 判定の余分な余白を外すと、見えるピルと当たり判定がこの高さに揃い、検索欄
-    // （同じ 32）と一致する。SizedBox で外から潰すと当たり判定が崩れるので使わない。
-    return ActionChip(
-      tooltip: tooltip,
-      avatar: Icon(icon, size: 18, color: scheme.onSurfaceVariant),
-      label: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(label ?? value ?? ''),
-          if (showChevron) const Icon(Icons.arrow_drop_down, size: 18),
-        ],
+    return SizedBox(
+      height: 20,
+      child: VerticalDivider(
+        width: 1,
+        thickness: 1,
+        color: scheme.onSurface.withValues(alpha: 0.12),
       ),
-      labelPadding: EdgeInsets.only(left: 8, right: showChevron ? 2 : 8),
-      backgroundColor: scheme.onSurface.withValues(alpha: 0.06),
-      side: BorderSide.none,
-      elevation: 0,
-      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    );
+  }
+}
+
+/// AppBar の並べ替えボタン。
+///
+/// 「並べ替え」そのものを表す上下矢印を主役にして何のボタンか分かるようにし、
+/// 現在選んでいる並びのアイコン（シートの各項目と同じもの）を右下に小さく重ねて
+/// 「今どの並びか」も一目で分かるようにする。並びのアイコン単体では何のボタンか
+/// 読み取れないため、必ずこの組み合わせで出す。
+class _SortButton extends StatelessWidget {
+  const _SortButton({required this.sort, required this.onPressed});
+
+  final ThreadSort sort;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return IconButton(
+      tooltip: '並べ替え',
       onPressed: onPressed,
+      icon: SizedBox.square(
+        dimension: 24,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            const Positioned(top: 0, left: 0, child: Icon(Icons.swap_vert)),
+            // 主役の矢印と重なっても潰れないよう、AppBar と同じ色（theme.dart で
+            // surfaceTint 無しの surface）で背後を抜いてから小アイコンを載せる。
+            Positioned(
+              right: -3,
+              bottom: -3,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: scheme.surface,
+                  shape: BoxShape.circle,
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(1.5),
+                  child: Icon(sort.icon, size: 13, color: scheme.primary),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -1418,10 +1571,19 @@ class _ThreadSearchField extends StatelessWidget {
       decoration: InputDecoration(
         hintText: 'スレタイ検索',
         hintStyle: textStyle?.copyWith(color: scheme.onSurfaceVariant),
-        prefixIcon: Icon(Icons.search, color: scheme.onSurfaceVariant),
+        // 閉じているときの検索チップのアイコンと、大きさも位置もぴったり重なる
+        // ようにする（開いた瞬間に虫めがねが動かず、チップがそのまま入力欄に
+        // 伸びたように見える）。左の余白 [_kSearchIconInset] はチップのアイコン
+        // 位置に合わせた値で、バー側の左パディングと対で効く。
+        prefixIcon: Padding(
+          padding: const EdgeInsets.only(
+            left: _kSearchIconInset,
+            right: _kSearchFieldIconTrailingInset,
+          ),
+          child: Icon(Icons.search, size: 18, color: scheme.onSurfaceVariant),
+        ),
         // チップと同じ高さ（_kBarControlHeight）に固定する。
         prefixIconConstraints: const BoxConstraints(
-          minWidth: 40,
           minHeight: _kBarControlHeight,
         ),
         suffixIcon: controller.text.isEmpty
@@ -1468,6 +1630,7 @@ class _EmptyFilterView extends StatelessWidget {
         ? '該当するスレはありません'
         : switch (filter) {
             ThreadFilter.current => 'スレがありません',
+            ThreadFilter.unreadNew => '新着はありません',
             ThreadFilter.history => '履歴はありません',
             ThreadFilter.favorites => 'お気に入りはありません',
           };

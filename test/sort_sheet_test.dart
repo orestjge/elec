@@ -32,8 +32,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // AppBar の並べ替えボタン（既定の項目「最近レス順」）をタップ。
-    await tester.tap(find.text('最近レス順'));
+    // AppBar の並べ替えボタンをタップ。
+    await tester.tap(find.byTooltip('並べ替え'));
     await tester.pumpAndSettle();
 
     // シートの見出しと各項目・説明が見える。
