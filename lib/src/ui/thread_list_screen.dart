@@ -1056,48 +1056,32 @@ class _BottomActionBar extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 10),
       child: Row(
         children: [
-          // 検索は中身が変わらないのでラベル付き。左端の余白も埋まる。
-          _GlassChip(
-            icon: Icons.search,
-            label: '検索',
-            tooltip: 'スレ検索',
-            onPressed: onToggleSearch,
-          ),
-          // 表示のチップ群は仕切りごと右（親指側）に寄せる。余白は検索との間に
-          // まとめて置き、仕切りがチップから離れて浮かないようにする。
+          // 検索は中身が変わらないのでラベル付き。余った幅はここで全部使い、
+          // 開いたときに出る検索欄とほぼ同じ左端・同じ幅にして、チップがその場で
+          // 伸びたように見せる（押しやすさも稼げる）。
           Expanded(
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                const SizedBox(width: 10),
-                const _BarDivider(),
-                const SizedBox(width: 10),
-                // 文字を大きくする設定でもはみ出さないよう、入り切らなければ
-                // 横スクロールにする。
-                Flexible(
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    reverse: true,
-                    child: Row(
-                      children: [
-                        for (final f in ThreadFilter.values) ...[
-                          if (f != ThreadFilter.values.first)
-                            const SizedBox(width: 6),
-                          _GlassChip(
-                            icon: f.icon,
-                            // アイコンだけなので、長押しで名前が出るようにする。
-                            tooltip: f.label,
-                            selected: f == filter,
-                            onPressed: () => onSelectFilter(f),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-              ],
+            child: _GlassChip(
+              icon: Icons.search,
+              label: '検索',
+              tooltip: 'スレ検索',
+              onPressed: onToggleSearch,
             ),
           ),
+          // 表示のチップ群は仕切りごと右（親指側）に。アイコンだけの一定幅なので、
+          // 文字を大きくする設定でも幅は変わらず、あふれるのは検索側だけ。
+          const SizedBox(width: 10),
+          const _BarDivider(),
+          const SizedBox(width: 10),
+          for (final f in ThreadFilter.values) ...[
+            if (f != ThreadFilter.values.first) const SizedBox(width: 6),
+            _GlassChip(
+              icon: f.icon,
+              // アイコンだけなので、長押しで名前が出るようにする。
+              tooltip: f.label,
+              selected: f == filter,
+              onPressed: () => onSelectFilter(f),
+            ),
+          ],
         ],
       ),
     );
@@ -1164,6 +1148,24 @@ class _GlassBar extends StatelessWidget {
   }
 }
 
+/// ガラスバーに乗る小片（チップ・検索欄）に重ねる膜の濃さ。
+///
+/// 枠線やグラデーションは足さない。バーが [BackdropFilter] で背後を溶かして
+/// いること自体がガラスの表現で、その上の小片は「ほぼ同じ色だが背後の見え方が
+/// 違う」だけで存在を示す。
+const double _kGlassFilmAlpha = 0.06;
+
+/// 選択中のチップに焼き込むティントの濃さ。押す前の膜（[_kGlassFilmAlpha]）より
+/// 濃いが、これも canvas 色に焼き込むので、別色のボタンが現れるのではなく同じ
+/// ガラスの濃さが変わったように見える。現在地は主に文字色（primary）で示す。
+const double _kGlassSelectedTintAlpha = 0.16;
+
+/// ガラス上のホバー・押下の反応色。灰色の板が乗ったように見えないよう、明るい側
+/// （暗いテーマでは白）に寄せた薄い膜にする。
+Color _glassOverlay(ColorScheme scheme, Brightness brightness, double alpha) =>
+    (brightness == Brightness.dark ? Colors.white : scheme.onSurface)
+        .withValues(alpha: alpha);
+
 /// ガラスバー上のチップ。枠は付けず、弱いソフト塗りだけで「操作」と分かるように
 /// する。
 ///
@@ -1193,22 +1195,32 @@ class _GlassChip extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final text = label;
-    final foreground = selected
-        ? scheme.onSecondaryContainer
-        : scheme.onSurfaceVariant;
+    final foreground = selected ? scheme.primary : scheme.onSurfaceVariant;
     // ActionChip は空ラベルでもラベル枠の余白が残り、アイコンがピルの中心から
     // ずれる・高さが検索欄と揃わない。バーの操作要素は高さを
     // [_kBarControlHeight] で統一したいので、素の Material で組む。
+    final brightness = theme.brightness;
     return Tooltip(
       message: tooltip,
       child: Material(
-        // 常時の塗りは選択中だけ。他は地のまま置き、ホバー・押下のときだけ
-        // InkWell の反応が出る（アイコンが並んでも画面がうるさくならない）。
-        color: selected ? scheme.secondaryContainer : Colors.transparent,
+        // 押す前のチップは「不透明な surface ＋ 6% の膜」。色はバーの地とほぼ
+        // 同じだが、そこだけ背後のぼかしを遮るので、色ではなく透け感の差で
+        // ボタンだと分かる。半透明の膜だけにすると色差が出て輪郭が立つので、
+        // 必ず canvas 色に焼き込んでから置く。
+        color: Color.alphaBlend(
+          selected
+              ? scheme.primary.withValues(alpha: _kGlassSelectedTintAlpha)
+              : scheme.onSurface.withValues(alpha: _kGlassFilmAlpha),
+          theme.canvasColor,
+        ),
         borderRadius: BorderRadius.circular(12),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
           onTap: onPressed,
+          // 押した跡が灰色の板に見えないよう、ガラスが濡れる程度の薄い膜。
+          hoverColor: _glassOverlay(scheme, brightness, 0.08),
+          highlightColor: _glassOverlay(scheme, brightness, 0.06),
+          splashColor: _glassOverlay(scheme, brightness, 0.12),
           child: SizedBox(
             height: _kBarControlHeight,
             child: Padding(
@@ -1605,7 +1617,7 @@ class _ThreadSearchField extends StatelessWidget {
           minHeight: _kBarControlHeight,
         ),
         filled: true,
-        fillColor: scheme.onSurface.withValues(alpha: 0.06),
+        fillColor: scheme.onSurface.withValues(alpha: _kGlassFilmAlpha),
         isDense: true,
         // 高さを _kBarControlHeight（32）に収めるため上下パディングを詰める。
         contentPadding: const EdgeInsets.symmetric(vertical: 6),
