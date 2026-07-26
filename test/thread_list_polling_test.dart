@@ -225,7 +225,44 @@ void main() {
     expect(find.text('自分'), findsOneWidget);
   });
 
-  testWidgets('スレ立てボタンは小型FABのタップ領域で表示する', (tester) async {
+  testWidgets('スレ立て画面は右スワイプで戻り、下書きを維持する', (tester) async {
+    final fetcher = QueueFetcher([subjectOk('1.dat<>既存スレ (10)\n', 'LM1')]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadListScreen(
+          fetcher: fetcher,
+          pollInterval: const Duration(seconds: 15),
+          readHistory: ReadHistory(MemoryReadHistoryStorage()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('スレを立てる'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).at(0), '途中のタイトル');
+    await tester.enterText(find.byType(TextField).at(1), '途中の本文');
+    await tester.pump();
+
+    final gesture = await tester.startGesture(const Offset(24, 320));
+    await gesture.moveBy(const Offset(500, 0));
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(find.text('既存スレ'), findsOneWidget);
+    expect(find.text('スレッドタイトル'), findsNothing);
+
+    await tester.tap(find.byTooltip('スレを立てる'));
+    await tester.pumpAndSettle();
+
+    final title = tester.widget<TextField>(find.byType(TextField).at(0));
+    final body = tester.widget<TextField>(find.byType(TextField).at(1));
+    expect(title.controller!.text, '途中のタイトル');
+    expect(body.controller!.text, '途中の本文');
+  });
+
+  testWidgets('スレ立てボタンは中間サイズで表示する', (tester) async {
     final fetcher = QueueFetcher([subjectOk('1.dat<>既存スレ (10)\n', 'LM1')]);
 
     await tester.pumpWidget(

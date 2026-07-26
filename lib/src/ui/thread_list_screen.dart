@@ -103,6 +103,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   bool _loading = true;
   bool _polling = false; // 背景ポーリング中の控えめなインジケータ用
   ThreadFilter _filter = ThreadFilter.current;
+  NewThreadDraft _newThreadDraft = const NewThreadDraft();
 
   /// 表示ごとの既定の並び。現行は掲示板の定番＝最近レス順、履歴は最後に見た順。
   static const Map<ThreadFilter, ThreadSort> _defaultSort = {
@@ -772,6 +773,10 @@ class _ThreadListScreenState extends State<ThreadListScreen>
           authStore: widget.authStore,
           maxTitle: widget.board.subjectMax,
           maxBody: widget.board.messageMax,
+          initialTitle: _newThreadDraft.title,
+          initialBody: _newThreadDraft.body,
+          onDraftChanged: (draft) => _newThreadDraft = draft,
+          onDraftCleared: () => _newThreadDraft = const NewThreadDraft(),
         ),
       ),
     );
