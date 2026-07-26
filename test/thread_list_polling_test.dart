@@ -669,11 +669,15 @@ void main() {
     await gesture.up();
     await tester.pumpAndSettle();
 
+    // 長押しはレスメニューを開く操作なので、そのまま横に引いても一覧には戻らない。
+    expect(find.text('本文をコピー'), findsOneWidget);
     expect(find.text('1レス'), findsOneWidget);
-    expect(find.textContaining('本文', findRichText: true), findsOneWidget);
+    expect(find.text('エッヂ'), findsNothing);
   });
 
-  testWidgets('スレ本文の文字選択中は右ドラッグで一覧に戻らない', (tester) async {
+  // 本文の選択は一覧上ではなくレスメニューの中で行う（一覧側は bodySelectable:
+  // false）。その選択中に横へ引いても一覧に戻らないことを見る。
+  testWidgets('レスメニューで本文を選択中は右ドラッグで一覧に戻らない', (tester) async {
     final fetcher = QueueFetcher([
       subjectOk('1.dat<>選択中スレ (1)\n', 'LM1'),
       datOk(datLine('名無し<><>2025/11/03(月) 02:14:51.907 ID:aaa<> 本文 <>選択中スレ')),
@@ -692,6 +696,10 @@ void main() {
     await tester.tap(find.text('選択中スレ'));
     await tester.pumpAndSettle();
 
+    // 本文タップでレスメニューを開く。選択できる本文はこの中にある。
+    await tester.tap(find.textContaining('本文', findRichText: true));
+    await tester.pumpAndSettle();
+
     final bodyFinder = find.byWidgetPredicate(
       (widget) =>
           widget is SelectableText &&
@@ -708,6 +716,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('1レス'), findsOneWidget);
+    expect(find.text('エッヂ'), findsNothing);
     expect(bodyFinder, findsOneWidget);
   });
 }

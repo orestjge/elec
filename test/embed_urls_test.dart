@@ -27,6 +27,10 @@ void main() {
     final v = embedVideosIn('https://youtu.be/dQw4w9WgXcQ').single;
     expect(v.kind, EmbedKind.youtube);
     expect(v.id, 'dQw4w9WgXcQ');
+    expect(
+      v.playerUrl.toString(),
+      'https://www.youtube.com/embed/dQw4w9WgXcQ?playsinline=1&autoplay=1&rel=0',
+    );
     expect(v.thumbnailUrl, 'https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg');
   });
 
@@ -47,6 +51,7 @@ void main() {
     final v = embedVideosIn('https://www.nicovideo.jp/watch/sm9').single;
     expect(v.kind, EmbedKind.niconico);
     expect(v.id, 'sm9');
+    expect(v.playerUrl.toString(), 'https://www.nicovideo.jp/watch/sm9');
     expect(v.thumbnailUrl, isNull);
   });
 

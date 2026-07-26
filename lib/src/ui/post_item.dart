@@ -2,9 +2,11 @@ import 'package:edge_core/edge_core.dart';
 import 'package:flutter/material.dart';
 
 import 'embed_urls.dart';
+import 'embed_player_screen.dart';
 import 'id_color.dart';
 import 'image_urls.dart';
 import 'post_images.dart';
+import 'reply_tier.dart';
 import 'res_body.dart';
 
 /// スレッドの 1 レス。番号順タイムライン向けの密なレイアウト。
@@ -23,7 +25,9 @@ class PostItem extends StatelessWidget {
     this.onTapReplies,
     this.onReply,
     this.onBodySelectionActiveChanged,
+    this.onTap,
     this.onLongPress,
+    this.bodySelectable = true,
     this.isOwn = false,
     this.isReplyToOwn = false,
     this.showReplyToOwnAccent = true,
@@ -64,9 +68,14 @@ class PostItem extends StatelessWidget {
   /// 本文の文字選択状態が変わったとき。
   final ValueChanged<bool>? onBodySelectionActiveChanged;
 
+  /// レスをタップしたとき。本文や余白からレス単位のメニューを出すために使う。
+  final VoidCallback? onTap;
+
   /// レスを長押ししたとき。レス全体のコピーや ID 操作のメニューを出す。
-  /// 本文はタップで選択・リンク遷移に使うため、レス単位の操作は長押しに割り当てる。
   final VoidCallback? onLongPress;
+
+  /// 本文を範囲選択できるようにするか。通常一覧では false、メニュー内では true。
+  final bool bodySelectable;
 
   /// このアプリから投稿したレスか。
   final bool isOwn;
@@ -113,6 +122,15 @@ class PostItem extends StatelessWidget {
     final audios = audioUrlsIn(body);
     final embeds = embedVideosIn(body);
 
+    void openUrl(Uri url) {
+      final imageIndex = images.indexWhere((image) => image == url);
+      if (imageIndex >= 0) {
+        openImageViewer(context, images, initialIndex: imageIndex);
+        return;
+      }
+      onTapUrl?.call(url);
+    }
+
     // 現在ジャンプ中の一致レスは、左のアクセント帯と薄い背景でひと目で分かる
     // ようにする（左パディングを帯の分だけ詰めて本文位置は揃える）。
     final showAccent =
@@ -148,6 +166,8 @@ class PostItem extends StatelessWidget {
             onReply: onReply,
             isOwn: isOwn,
             isReplyToOwn: isReplyToOwn,
+            replyCount: replyCount,
+            onTapReplies: onTapReplies,
             highlightQuery: highlightQuery,
           ),
           if (body.isNotEmpty) ...[
@@ -162,7 +182,8 @@ class PostItem extends StatelessWidget {
               ),
               onTapRes: (n) => onTapRes?.call(n),
               onTapResRange: (numbers) => onTapResRange?.call(numbers),
-              onTapUrl: (u) => onTapUrl?.call(u),
+              onTapUrl: openUrl,
+              selectable: bodySelectable,
               onSelectionActiveChanged: onBodySelectionActiveChanged,
               highlightQuery: highlightQuery,
             ),
@@ -176,68 +197,81 @@ class PostItem extends StatelessWidget {
               videoUrls: videos,
               audioUrls: audios,
               embedVideos: embeds,
-              // 動画はプレーヤー側でブラウザへの逃げ道を持つので、ここでは
-              // 渡さない（onTapUrl 経由だと動画→プレーヤーの循環になる）。
-              onTapEmbed: onTapUrl,
+              onTapEmbed: (video) =>
+                  openEmbedPlayer(context, video, onOpenExternally: onTapUrl),
               blurImages: blurImages,
             ),
-          if (replyCount > 0) ...[
-            const SizedBox(height: 6),
-            _ReplyCountChip(
-              count: replyCount,
-              onTap: onTapReplies == null
-                  ? null
-                  : () => onTapReplies!(res.number),
-            ),
-          ],
         ],
       ),
     );
 
-    if (onLongPress == null) return content;
-    // 本文の文字選択・リンクタップは子側が受けるので、それ以外の余白・ヘッダを
-    // 長押しした場合にレス単位のメニューを出す。
+    if (onTap == null && onLongPress == null) return content;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
+      onTap: onTap,
       onLongPress: onLongPress,
       child: content,
     );
   }
 }
 
-/// このレスへの返信数を示すチップ。タップで返信一覧。
-class _ReplyCountChip extends StatelessWidget {
-  const _ReplyCountChip({required this.count, required this.onTap});
-  final int count;
-  final VoidCallback? onTap;
+/// レス番号。返信を集めたレスは番号ごと色を上げ、番号の右に件数を添える。
+///
+/// 視線の起点である番号に情報を置くので、流し読みしていても「ここで反応が
+/// 集まった」と気づける。段階の基準はスレマップの目印と共有する（[replyTierOf]）
+/// ので、マップで見つけた場所とレス本体の見た目が対応する。
+///
+/// 色は 1 段階だけ上げ、その上の段階は太さで示す。テキストなので淡い色にすると
+/// 読めなくなるため（マップのバーは面なので濃さ 2 段階で出せる）。
+class _ResNumber extends StatelessWidget {
+  const _ResNumber({
+    required this.number,
+    required this.replyCount,
+    required this.onTapReplies,
+  });
+
+  final int number;
+  final int replyCount;
+  final ValueChanged<int>? onTapReplies;
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final tier = replyTierOf(replyCount);
+    final color = tier == ReplyTier.none ? scheme.primary : scheme.error;
+    final weight = tier == ReplyTier.veryMany
+        ? FontWeight.w800
+        : FontWeight.w700;
+    final style = theme.textTheme.labelMedium?.copyWith(
+      color: color,
+      fontWeight: weight,
+      leadingDistribution: TextLeadingDistribution.even,
+    );
+
+    final label = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text('$number', style: style),
+        if (replyCount > 0) ...[
+          const SizedBox(width: 3),
+          // 受けた返信の数は吹き出し。返信する操作（ヘッダ右端）は矢印で、
+          // 「付いたもの」と「これからする操作」を形で分ける。
+          Icon(Icons.chat_bubble_outline, size: 11, color: color),
+          const SizedBox(width: 2),
+          Text('$replyCount', style: style),
+        ],
+      ],
+    );
+
+    if (replyCount == 0 || onTapReplies == null) return label;
+    // 件数を出しているときは、そこから返信一覧（会話ビュー）へ入れる。
     return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(6),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-        decoration: BoxDecoration(
-          color: scheme.secondaryContainer,
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.reply, size: 13, color: scheme.onSecondaryContainer),
-            const SizedBox(width: 4),
-            Text(
-              '返信 $count',
-              style: TextStyle(
-                fontSize: 12,
-                color: scheme.onSecondaryContainer,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
+      onTap: () => onTapReplies!(number),
+      borderRadius: BorderRadius.circular(4),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 2),
+        child: label,
       ),
     );
   }
@@ -253,6 +287,8 @@ class _Header extends StatelessWidget {
     required this.onReply,
     required this.isOwn,
     required this.isReplyToOwn,
+    this.replyCount = 0,
+    this.onTapReplies,
     this.highlightQuery = '',
   });
 
@@ -262,6 +298,8 @@ class _Header extends StatelessWidget {
   final int idOrdinal;
   final ValueChanged<String>? onTapId;
   final ValueChanged<int>? onReply;
+  final int replyCount;
+  final ValueChanged<int>? onTapReplies;
   final bool isOwn;
   final bool isReplyToOwn;
   final String highlightQuery;
@@ -288,13 +326,10 @@ class _Header extends StatelessWidget {
               children: [
                 _HeaderSlot(
                   height: lineHeight,
-                  child: Text(
-                    '${res.number}',
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      color: scheme.primary,
-                      fontWeight: FontWeight.w700,
-                      leadingDistribution: TextLeadingDistribution.even,
-                    ),
+                  child: _ResNumber(
+                    number: res.number,
+                    replyCount: replyCount,
+                    onTapReplies: onTapReplies,
                   ),
                 ),
                 // Wrap の子は Flexible にできないので、極端に長い名前だけは
@@ -303,7 +338,10 @@ class _Header extends StatelessWidget {
                   constraints: BoxConstraints(maxWidth: constraints.maxWidth),
                   child: _HeaderSlot(
                     height: lineHeight,
-                    child: _NameLabel(name: name, highlightQuery: highlightQuery),
+                    child: _NameLabel(
+                      name: name,
+                      highlightQuery: highlightQuery,
+                    ),
                   ),
                 ),
                 // チップは固定高さのスロットに入れない。狭いときは中身に応じて
@@ -331,19 +369,27 @@ class _Header extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 8),
-        _HeaderSlot(height: lineHeight, child: _TimeLabel(res: res)),
+        _HeaderSlot(
+          height: lineHeight,
+          child: _TimeLabel(res: res),
+        ),
         if (onReply != null) ...[
           const SizedBox(width: 4),
-          InkResponse(
-            onTap: () => onReply!(res.number),
-            radius: 18,
-            // 余白は左右対称にして、ハイライト円の中心とアイコン中心を合わせる。
-            child: Padding(
-              padding: const EdgeInsets.all(4),
-              child: Icon(
-                Icons.reply,
-                size: 17,
-                color: scheme.onSurfaceVariant,
+          // 押せるものなので説明を付ける（左端の吹き出し＝受けた返信の件数と
+          // 役割が違うことも、これで確かめられる）。
+          Tooltip(
+            message: 'このレスに返信',
+            child: InkResponse(
+              onTap: () => onReply!(res.number),
+              radius: 18,
+              // 余白は左右対称にして、ハイライト円の中心とアイコン中心を合わせる。
+              child: Padding(
+                padding: const EdgeInsets.all(4),
+                child: Icon(
+                  Icons.reply,
+                  size: 17,
+                  color: scheme.onSurfaceVariant,
+                ),
               ),
             ),
           ),
@@ -395,7 +441,12 @@ class _NameLabel extends StatelessWidget {
     final queryLower = highlightQuery.trim().toLowerCase();
     final Widget label;
     if (queryLower.isEmpty) {
-      label = Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: style);
+      label = Text(
+        name,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: style,
+      );
     } else {
       final spans = <InlineSpan>[];
       appendHighlighted(

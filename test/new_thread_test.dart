@@ -179,4 +179,66 @@ void main() {
       ),
     );
   });
+
+  // カウンタが 0 文字のときだけ消えると、1 文字目で下の入力欄が押し下げられる。
+  testWidgets('文字数カウンタは0文字でも出て、書き始めても入力欄が動かない', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NewThreadScreen(
+          fetcher: RecordingPoster(),
+          authStore: AuthStore(MemoryTokenStorage()),
+          authLauncher: FakeLauncher(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('0 / 192'), findsOneWidget);
+    final before = tester.getRect(find.byType(TextField).at(1));
+
+    await tester.enterText(find.byType(TextField).at(0), 'あ');
+    await tester.pump();
+
+    expect(find.text('1 / 192'), findsOneWidget);
+    expect(tester.getRect(find.byType(TextField).at(1)), before);
+  });
+
+  // デスクトップの既定の密度（compact）は InputDecoration の上下パディングと
+  // ボタンの最小サイズを 8 削るので、放っておくとスレタイ欄・添付・立てるが
+  // ばらばらの高さになる。レス入力欄と同じ 42 に揃っていることを見る。
+  testWidgets('スレ立ての入力欄と操作ボタンは同じ高さに揃う（デスクトップの密度でも）', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(visualDensity: VisualDensity.compact),
+        home: NewThreadScreen(
+          fetcher: RecordingPoster(),
+          authStore: AuthStore(MemoryTokenStorage()),
+          authLauncher: FakeLauncher(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    double heightOf(Finder f) => tester.getRect(f).height;
+    final title = heightOf(find.byType(TextField).first);
+    final attach = heightOf(
+      find.ancestor(
+        of: find.byIcon(Icons.image_outlined),
+        matching: find.byType(IconButton),
+      ),
+    );
+    // 「立てる」はタップ判定が実寸より大きいので、塗りの出る Material を見る。
+    final submit = heightOf(
+      find
+          .descendant(
+            of: find.byKey(const ValueKey('new-thread-submit')),
+            matching: find.byType(Material),
+          )
+          .first,
+    );
+
+    expect(title, 42);
+    expect(attach, 42);
+    expect(submit, 42);
+  });
 }

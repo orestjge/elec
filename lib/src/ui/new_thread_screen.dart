@@ -6,6 +6,7 @@ import '../net/auth_store.dart';
 import '../net/endpoints.dart';
 import '../net/http_fetcher.dart';
 import 'attachment_uploader.dart';
+import 'compose_style.dart';
 import 'embed_urls.dart';
 import 'image_urls.dart';
 import 'post_images.dart';
@@ -221,6 +222,12 @@ class _NewThreadScreenState extends State<NewThreadScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    // スレタイは本文より一段強く。行高を明示して、密度に関係なく高さを決める。
+    final titleStyle = theme.textTheme.titleMedium?.copyWith(
+      fontWeight: FontWeight.w600,
+      height: 1.4,
+    );
+    final bodyStyle = composeBodyTextStyle(theme);
     return Scaffold(
       appBar: AppBar(title: const Text('スレを立てる')),
       body: ListView(
@@ -230,10 +237,18 @@ class _NewThreadScreenState extends State<NewThreadScreen> {
             controller: _title,
             maxLength: _titleMax,
             textInputAction: TextInputAction.next,
-            style: theme.textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w600,
+            style: titleStyle,
+            decoration: composeFieldDecoration(
+              scheme: scheme,
+              hintText: 'スレッドタイトル',
+              textStyle: titleStyle,
+              // スレタイは 1 行なので、レス入力欄と同じ高さ（42）に収める。
+              // 行高 22（16×1.4）+ 10×2 = 42。
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 10,
+              ),
             ),
-            decoration: _filledInputDecoration(scheme, hintText: 'スレッドタイトル'),
           ),
           _CharCount(length: _title.text.characters.length, max: _titleMax),
           const SizedBox(height: 12),
@@ -244,7 +259,13 @@ class _NewThreadScreenState extends State<NewThreadScreen> {
             minLines: 10,
             maxLines: 24,
             textInputAction: TextInputAction.newline,
-            decoration: _filledInputDecoration(scheme, hintText: '本文を書く'),
+            // 本文はレス入力欄と同じ組み方（15px・行高 1.4）。
+            style: bodyStyle,
+            decoration: composeFieldDecoration(
+              scheme: scheme,
+              hintText: '本文を書く',
+              textStyle: bodyStyle,
+            ),
           ),
           _CharCount(length: _body.text.characters.length, max: _bodyMax),
           const SizedBox(height: 12),
@@ -270,28 +291,12 @@ class _NewThreadScreenState extends State<NewThreadScreen> {
   }
 }
 
-/// レス入力欄・スレ内検索欄と同じ filled + 角丸スタイル。アプリ内で入力欄の
-/// 見た目を1系統に揃えるための共通デコレーション。
-InputDecoration _filledInputDecoration(
-  ColorScheme scheme, {
-  required String hintText,
-}) {
-  return InputDecoration(
-    hintText: hintText,
-    counterText: '',
-    filled: true,
-    fillColor: scheme.surfaceContainerHighest,
-    border: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(12),
-      borderSide: BorderSide.none,
-    ),
-    isDense: true,
-    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-  );
-}
-
-/// 入力欄の下に出す控えめな文字数カウンタ。空欄では場所を取らず、上限に近づく
-/// と色で知らせる。上限自体は [TextField.maxLength] が弾く。
+/// 入力欄の下に出す控えめな文字数カウンタ。上限に近づくと色で知らせる。
+/// 上限自体は [TextField.maxLength] が弾く。
+///
+/// 0 文字でも出しっぱなしにする。書き始めた瞬間に現れる作りだと、その一文字で
+/// 下の入力欄が押し下げられて画面が跳ねるため。空のうちは色を落として、
+/// 場所は取りつつ視線は引かないようにする。
 class _CharCount extends StatelessWidget {
   const _CharCount({required this.length, required this.max});
 
@@ -300,19 +305,19 @@ class _CharCount extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (length == 0) return const SizedBox(height: 4);
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final near = length >= max * 0.9;
+    final color = near
+        ? scheme.error
+        : scheme.onSurfaceVariant.withValues(alpha: length == 0 ? 0.5 : 1);
     return Padding(
       padding: const EdgeInsets.only(top: 4, right: 4),
       child: Align(
         alignment: Alignment.centerRight,
         child: Text(
           '$length / $max',
-          style: theme.textTheme.bodySmall?.copyWith(
-            color: near ? scheme.error : scheme.onSurfaceVariant,
-          ),
+          style: theme.textTheme.bodySmall?.copyWith(color: color),
         ),
       ),
     );
@@ -344,9 +349,10 @@ class _NewThreadActions extends StatelessWidget {
       child: Container(
         decoration: BoxDecoration(
           color: scheme.surface,
+          // 上辺はレス入力欄のバーと同じ、面を分けるだけの控えめな線に。
           border: Border(
             top: BorderSide(
-              color: scheme.outlineVariant.withValues(alpha: 0.5),
+              color: scheme.outlineVariant.withValues(alpha: 0.25),
             ),
           ),
         ),
@@ -354,13 +360,14 @@ class _NewThreadActions extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
+            // 添付系はレス入力欄と同じ脇役の見た目（onSurfaceVariant・角丸14）。
             SizedBox(
-              width: 40,
-              height: 40,
+              width: kComposeControlHeight,
+              height: kComposeControlHeight,
               child: IconButton(
                 padding: EdgeInsets.zero,
-                visualDensity: VisualDensity.compact,
                 tooltip: '画像を追加',
+                style: composeQuietButtonStyle(scheme),
                 onPressed: onAttachImage,
                 icon: uploadingImage
                     ? const SizedBox(
@@ -368,16 +375,16 @@ class _NewThreadActions extends StatelessWidget {
                         height: 18,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Icon(Icons.image_outlined, size: 22),
+                    : const Icon(Icons.image_outlined, size: 21),
               ),
             ),
             SizedBox(
-              width: 40,
-              height: 40,
+              width: kComposeControlHeight,
+              height: kComposeControlHeight,
               child: IconButton(
                 padding: EdgeInsets.zero,
-                visualDensity: VisualDensity.compact,
                 tooltip: 'ファイルを添付',
+                style: composeQuietButtonStyle(scheme),
                 onPressed: onAttachFile,
                 icon: uploadingFile
                     ? const SizedBox(
@@ -385,16 +392,22 @@ class _NewThreadActions extends StatelessWidget {
                         height: 18,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
-                    : const Icon(Icons.attach_file, size: 22),
+                    : const Icon(Icons.attach_file, size: 21),
               ),
             ),
             const Spacer(),
+            // 立てるボタンは M3 既定のピル型だと入力欄の角丸から浮くので、
+            // 送信ボタンと同じ角丸14・高さ 42 に合わせる。
             FilledButton.icon(
               key: const ValueKey('new-thread-submit'),
               onPressed: onSubmit,
               style: FilledButton.styleFrom(
-                minimumSize: const Size(88, 40),
-                padding: const EdgeInsets.symmetric(horizontal: 16),
+                minimumSize: const Size(96, kComposeControlHeight),
+                padding: const EdgeInsets.symmetric(horizontal: 18),
+                shape: composeShape,
+                // 入力欄と同じ理由で密度を固定する。デスクトップの compact だと
+                // ここだけ 34 に縮み、隣の添付ボタン（42）とずれる。
+                visualDensity: VisualDensity.standard,
               ),
               icon: sending
                   ? const SizedBox(

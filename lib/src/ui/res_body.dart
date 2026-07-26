@@ -11,10 +11,9 @@ String trimUnlessAsciiArt(String text) =>
 /// AA（アスキーアート）らしい本文だけ、MS Pゴシック互換寄りの同梱フォントで
 /// 表示する。単発の顔文字まで巻き込まないよう、AA 記号を含む行数を見る。
 bool looksLikeAsciiArt(String text) {
-  final lines = text
-      .split('\n')
-      .where((line) => line.trim().isNotEmpty)
-      .toList(growable: false);
+  final lines = _textForAsciiArtDetection(
+    text,
+  ).split('\n').where((line) => line.trim().isNotEmpty).toList(growable: false);
   if (lines.isEmpty) return false;
 
   final textSize = lines.fold<int>(0, (sum, line) => sum + line.runes.length);
@@ -51,6 +50,12 @@ bool looksLikeAsciiArt(String text) {
   return metrics.width >= 32 &&
       metrics.symbolRatio >= 0.42 &&
       (metrics.hasRepeatedSymbol || metrics.hasWideSpacing);
+}
+
+String _textForAsciiArtDetection(String text) {
+  // URL は `/`, `:`, `?`, `&`, `=` などを多く含み、AA の構造記号として
+  // 誤カウントされやすい。AA 判定では本文の形だけを見たいので中立化する。
+  return text.replaceAll(linkUrlRe, ' ');
 }
 
 class _AsciiArtLineMetrics {
@@ -217,6 +222,7 @@ class ResBody extends StatefulWidget {
     required this.onTapUrl,
     this.onTapResRange,
     this.onSelectionActiveChanged,
+    this.selectable = true,
     this.style,
     this.highlightQuery = '',
   });
@@ -226,6 +232,10 @@ class ResBody extends StatefulWidget {
   final ValueChanged<List<int>>? onTapResRange;
   final ValueChanged<Uri> onTapUrl;
   final ValueChanged<bool>? onSelectionActiveChanged;
+
+  /// 本文を範囲選択できるようにするか。false でもリンク・レス参照タップは有効。
+  final bool selectable;
+
   final TextStyle? style;
 
   /// スレ内検索中の検索語（小文字化前でよい）。空でなければ本文の一致箇所を
@@ -354,13 +364,16 @@ class _ResBodyState extends State<ResBody> {
       addPlain(text.substring(last));
     }
 
-    final body = SelectableText.rich(
-      TextSpan(style: effectiveStyle, children: spans),
-      focusNode: _focusNode,
-      onSelectionChanged: (selection, cause) {
-        _setSelectionActive(!selection.isCollapsed);
-      },
-    );
+    final rootSpan = TextSpan(style: effectiveStyle, children: spans);
+    final body = widget.selectable
+        ? SelectableText.rich(
+            rootSpan,
+            focusNode: _focusNode,
+            onSelectionChanged: (selection, cause) {
+              _setSelectionActive(!selection.isCollapsed);
+            },
+          )
+        : Text.rich(rootSpan);
     if (!isAsciiArt) return body;
 
     return SingleChildScrollView(scrollDirection: Axis.horizontal, child: body);
