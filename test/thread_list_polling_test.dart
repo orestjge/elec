@@ -225,6 +225,23 @@ void main() {
     expect(find.text('自分'), findsOneWidget);
   });
 
+  testWidgets('スレ立てボタンは小型FABのタップ領域で表示する', (tester) async {
+    final fetcher = QueueFetcher([subjectOk('1.dat<>既存スレ (10)\n', 'LM1')]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadListScreen(
+          fetcher: fetcher,
+          pollInterval: const Duration(seconds: 15),
+          readHistory: ReadHistory(MemoryReadHistoryStorage()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(tester.getSize(find.byTooltip('スレを立てる')), const Size.square(48));
+  });
+
   testWidgets('表示フィルタで履歴とお気に入りを切り替える', (tester) async {
     final history = ReadHistory(MemoryReadHistoryStorage());
     await history.markRead('1', 10);
@@ -246,19 +263,121 @@ void main() {
     expect(find.text('履歴スレ'), findsOneWidget);
     expect(find.text('お気に入りスレ'), findsOneWidget);
 
-    await tester.tap(find.text('現行'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('お気に入り').last);
+    await tester.tap(find.byTooltip('お気に入り'));
     await tester.pumpAndSettle();
     expect(find.text('履歴スレ'), findsNothing);
     expect(find.text('お気に入りスレ'), findsOneWidget);
 
-    await tester.tap(find.text('お気に入り'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('履歴'));
+    await tester.tap(find.byTooltip('履歴'));
     await tester.pumpAndSettle();
     expect(find.text('履歴スレ'), findsOneWidget);
     expect(find.text('お気に入りスレ'), findsNothing);
+  });
+
+  testWidgets('狭い画面でも下部バーからはみ出さない', (tester) async {
+    // 幅 320（小型端末）で、表示チップ 4 つ＋検索を並べてもはみ出さないこと。
+    tester.view.physicalSize = const Size(320, 640);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final history = ReadHistory(MemoryReadHistoryStorage());
+    await history.setFavorite('1', true);
+    final fetcher = QueueFetcher([subjectOk('1.dat<>スレ (10)\n', 'LM1')]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadListScreen(
+          fetcher: fetcher,
+          pollInterval: const Duration(seconds: 15),
+          readHistory: history,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('お気に入り'));
+    await tester.pumpAndSettle();
+
+    // 4 つのチップと検索が並んだままであること。
+    for (final label in ['現行', '新着あり', '履歴', 'お気に入り']) {
+      expect(find.byTooltip(label), findsOneWidget);
+    }
+    // レイアウトのオーバーフロー（黄黒の縞）が出ていないこと。
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('表示を切り替えてもチップの位置は動かない', (tester) async {
+    final fetcher = QueueFetcher([subjectOk('1.dat<>スレ (10)\n', 'LM1')]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadListScreen(
+          fetcher: fetcher,
+          pollInterval: const Duration(seconds: 15),
+          readHistory: ReadHistory(MemoryReadHistoryStorage()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    const labels = ['現行', '新着あり', '履歴', 'お気に入り'];
+    List<Rect> chipRects() => [
+      for (final l in labels) tester.getRect(find.byTooltip(l)),
+    ];
+
+    final before = chipRects();
+    // どれを選んでも、選択チップが伸び縮みして隣がズレたりしない。
+    for (final l in labels.reversed) {
+      await tester.tap(find.byTooltip(l));
+      await tester.pumpAndSettle();
+      expect(chipRects(), before, reason: '$l を選んだあと');
+    }
+  });
+
+  testWidgets('新着あり表示は開いたスレのうち未読レスがあるものだけ残す', (tester) async {
+    final history = ReadHistory(MemoryReadHistoryStorage());
+    // 開いて 8 レスまで読んだスレ。subject では 10 レスなので新着 2。
+    await history.markRead('1', 8);
+    // 開いて全部読んだスレ。新着なし。
+    await history.markRead('2', 5);
+    // dat 落ちした保存済みスレ。保存時のレス数が既読を上回るので新着あり。
+    await history.rememberThread(
+      const ThreadSummary(
+        key: '9',
+        title: 'dat落ち新着スレ',
+        resCount: 30,
+        capName: null,
+      ),
+    );
+    await history.markRead('9', 28);
+    final fetcher = QueueFetcher([
+      subjectOk(
+        '1.dat<>新着ありスレ (10)\n2.dat<>読み切ったスレ (5)\n3.dat<>未読スレ (7)\n',
+        'LM1',
+      ),
+    ]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadListScreen(
+          fetcher: fetcher,
+          pollInterval: const Duration(seconds: 15),
+          readHistory: history,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('新着ありスレ'), findsOneWidget);
+    expect(find.text('未読スレ'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('新着あり'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('新着ありスレ'), findsOneWidget);
+    expect(find.text('dat落ち新着スレ'), findsOneWidget);
+    // 読み切ったスレも、一度も開いていないスレも出ない。
+    expect(find.text('読み切ったスレ'), findsNothing);
+    expect(find.text('未読スレ'), findsNothing);
   });
 
   testWidgets('履歴は既定で最後に見た順に並ぶ', (tester) async {
@@ -288,9 +407,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // 履歴表示に切り替える。
-    await tester.tap(find.text('現行'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('履歴').last);
+    await tester.tap(find.byTooltip('履歴'));
     await tester.pumpAndSettle();
 
     // 最後に開いたスレ弐が上（subject の並びとは逆）。
@@ -407,17 +524,13 @@ void main() {
     expect(find.text('dat落ち履歴スレ'), findsNothing);
     expect(find.text('dat落ちお気に入りスレ'), findsNothing);
 
-    await tester.tap(find.text('現行'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('履歴'));
+    await tester.tap(find.byTooltip('履歴'));
     await tester.pumpAndSettle();
     expect(find.text('dat落ち履歴スレ'), findsOneWidget);
     expect(find.text('dat落ち'), findsOneWidget);
     expect(find.text('dat落ちお気に入りスレ'), findsNothing);
 
-    await tester.tap(find.text('履歴'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('お気に入り'));
+    await tester.tap(find.byTooltip('お気に入り'));
     await tester.pumpAndSettle();
     expect(find.text('dat落ち履歴スレ'), findsNothing);
     expect(find.text('dat落ちお気に入りスレ'), findsOneWidget);
@@ -442,6 +555,36 @@ void main() {
     expect(find.text('完走'), findsOneWidget);
   });
 
+  testWidgets('検索を開いても虫めがねと文言の開始位置は動かない', (tester) async {
+    final fetcher = QueueFetcher([subjectOk('1.dat<>スレ (10)\n', 'LM1')]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadListScreen(
+          fetcher: fetcher,
+          pollInterval: const Duration(seconds: 15),
+          readHistory: ReadHistory(MemoryReadHistoryStorage()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 閉じているとき＝検索チップの中のアイコン。
+    final chipIcon = tester.getRect(find.byIcon(Icons.search));
+    final chipLabel = tester.getRect(find.text('検索'));
+
+    await tester.tap(find.byTooltip('スレ検索'));
+    await tester.pumpAndSettle();
+
+    // 開いたあと＝入力欄の先頭アイコンとヒント。左右の位置と縦中心が動かず、
+    // ヒントも閉じている時の「検索」と同じ左端から始まること。
+    final fieldIcon = tester.getRect(find.byIcon(Icons.search));
+    expect(fieldIcon.left, chipIcon.left);
+    expect(fieldIcon.right, chipIcon.right);
+    expect(fieldIcon.center.dy, chipIcon.center.dy);
+    expect(tester.getRect(find.text('スレタイ検索')).left, chipLabel.left);
+  });
+
   testWidgets('検索欄でスレタイを絞り込む', (tester) async {
     final fetcher = QueueFetcher([
       subjectOk('1.dat<>料理スレ (10)\n2.dat<>野球スレ (5)\n', 'LM1'),
@@ -460,7 +603,7 @@ void main() {
     expect(find.text('料理スレ'), findsOneWidget);
     expect(find.text('野球スレ'), findsOneWidget);
 
-    await tester.tap(find.text('検索'));
+    await tester.tap(find.byTooltip('スレ検索'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), '料理');
     await tester.pumpAndSettle();
