@@ -17,11 +17,14 @@ import '../net/imgur_uploader.dart';
 import '../net/ng_store.dart';
 import '../net/read_history.dart';
 import 'attachment_uploader.dart';
+import 'compose_style.dart';
 import 'embed_urls.dart';
 import 'image_urls.dart';
 import 'ng_screen.dart';
 import 'post_images.dart';
 import 'post_item.dart';
+import 'reply_tier.dart';
+import 'thread_map.dart';
 import 'video_player_screen.dart';
 import 'write_auth.dart';
 
@@ -666,6 +669,7 @@ class _ThreadScreenState extends State<ThreadScreen>
   /// 新しいルールで判定し直す。
   void _onNgChanged() {
     if (!mounted) return;
+    _markerKindCache.clear(); // あぼーん判定が変わるのでスレマップも組み直す
     setState(_revealedNg.clear);
   }
 
@@ -728,6 +732,14 @@ class _ThreadScreenState extends State<ThreadScreen>
                     idCount: idCount,
                     idOrdinal: idOrdinal,
                     onTapId: null,
+                    onTapRes: (n) {
+                      Navigator.pop(sheetContext);
+                      _showConversation(n, focusNumber: n);
+                    },
+                    onTapResRange: (numbers) {
+                      Navigator.pop(sheetContext);
+                      _showConversationRange(numbers);
+                    },
                     onTapUrl: _openUrl,
                     isOwn: _history.isOwnPost(widget.threadKey, res.number),
                     isReplyToOwn: _isReplyToOwnPost(res),
@@ -1101,6 +1113,76 @@ class _ThreadScreenState extends State<ThreadScreen>
 
   List<int> _referencedNumbers(Res res) {
     return referencedResNumbers(res.body);
+  }
+
+  // スレマップの目印はレス単位でキャッシュする。dat は追記のみで既存レスの本文は
+  // 変わらないので、スクロールのたびに全レスへ正規表現（メディア URL 抽出・NG
+  // 判定・`>>N` 解析）を掛け直さずに済む。設定が変わるとき（NG・自分のレス）
+  // だけ捨てる。
+  final _markerKindCache = <int, List<ThreadMapMarkerKind>?>{};
+  int _markerCacheOwnCount = 0;
+
+  /// ファストスクロールのトラックに出す目印を行インデックスで組む。つまみの
+  /// 縦位置と同じ index 基準なので、目印の高さへつまみを運べばその行に着く。
+  List<ThreadMapMarker> _mapMarkers(
+    List<Object> items,
+    List<Res> searchMatches,
+    Map<int, int> replyCounts,
+  ) {
+    final ownCount = _history.ownPostCount(widget.threadKey);
+    if (ownCount != _markerCacheOwnCount) {
+      _markerCacheOwnCount = ownCount;
+      _markerKindCache.clear();
+    }
+    final matched = searchMatches.map((r) => r.number).toSet();
+    final markers = <ThreadMapMarker>[];
+    for (var i = 0; i < items.length; i++) {
+      final item = items[i];
+      if (item is! Res) {
+        markers.add(ThreadMapMarker(i, ThreadMapMarkerKind.newArrival));
+        continue;
+      }
+      final kinds = _markerKindsFor(item, hasOwnPosts: ownCount > 0);
+      // あぼーんは中身が見えないので目印も出さない（飛んでも読めない）。
+      if (kinds == null) continue;
+      for (final kind in kinds) {
+        markers.add(ThreadMapMarker(i, kind));
+      }
+      // 返信数と検索一致は後から変わる（伸びる・打ち直す）ので、レス単位の
+      // キャッシュには入れずここで見る。どちらも Map 参照だけで済む。
+      switch (replyTierOf(replyCounts[item.number] ?? 0)) {
+        case ReplyTier.veryMany:
+          markers.add(ThreadMapMarker(i, ThreadMapMarkerKind.veryManyReplies));
+        case ReplyTier.many:
+          markers.add(ThreadMapMarker(i, ThreadMapMarkerKind.manyReplies));
+        case ReplyTier.none:
+          break;
+      }
+      if (matched.contains(item.number)) {
+        markers.add(ThreadMapMarker(i, ThreadMapMarkerKind.searchMatch));
+      }
+    }
+    return markers;
+  }
+
+  /// レス自体から決まる目印（自分のレス・自分宛）。あぼーんなら null＝目印を
+  /// 出さない。返信数と検索一致はレスの中身では決まらないので [_mapMarkers] 側。
+  List<ThreadMapMarkerKind>? _markerKindsFor(
+    Res res, {
+    required bool hasOwnPosts,
+  }) {
+    return _markerKindCache.putIfAbsent(res.number, () {
+      if (_ng.matches(res)) return null;
+      final kinds = <ThreadMapMarkerKind>[];
+      if (hasOwnPosts) {
+        if (_history.isOwnPost(widget.threadKey, res.number)) {
+          kinds.add(ThreadMapMarkerKind.own);
+        } else if (_isReplyToOwnPost(res)) {
+          kinds.add(ThreadMapMarkerKind.replyToOwn);
+        }
+      }
+      return kinds;
+    });
   }
 
   /// このレスが自分のレスへ `>>N` で返信しているか（自分宛のレス）。自分自身の
@@ -1675,7 +1757,9 @@ class _ThreadScreenState extends State<ThreadScreen>
                 onReply: _reply,
                 onBodySelectionActiveChanged: (active) =>
                     _handleBodySelectionActiveChanged(item.number, active),
+                onTap: () => _showResActions(item),
                 onLongPress: () => _showResActions(item),
+                bodySelectable: false,
                 isOwn: _history.isOwnPost(widget.threadKey, item.number),
                 isReplyToOwn: _isReplyToOwnPost(item),
                 blurImages: guroMasked.contains(item.number),
@@ -1696,6 +1780,7 @@ class _ThreadScreenState extends State<ThreadScreen>
               itemCount: items.length,
               onJump: _jumpToIndex,
               labelForIndex: _resLabelForIndex,
+              markers: _mapMarkers(items, searchMatches, replies),
             ),
           ),
         if (!_atBottom)
@@ -1803,12 +1888,16 @@ class _FastScroller extends StatefulWidget {
     required this.itemCount,
     required this.onJump,
     required this.labelForIndex,
+    this.markers = const [],
   });
 
   final ItemPositionsListener positions;
   final int itemCount;
   final void Function(int index) onJump;
   final String Function(int index) labelForIndex;
+
+  /// トラックに出すスレマップの目印。
+  final List<ThreadMapMarker> markers;
 
   @override
   State<_FastScroller> createState() => _FastScrollerState();
@@ -1817,8 +1906,18 @@ class _FastScroller extends StatefulWidget {
 class _FastScrollerState extends State<_FastScroller> {
   static const double _handleHeight = 52;
   static const double _handleWidth = 30;
+
+  /// ドラッグ中に目印へ吸い付く距離（論理ピクセル）。
+  static const double _snapDistance = 12;
+
+  /// 目印のタップ当たり判定。目印自体は数ピクセルなので指で押せる大きさに広げる。
+  static const double _tapTargetWidth = 22;
+  static const double _tapTargetHeight = 28;
   bool _dragging = false;
   double _fraction = 0;
+
+  /// いま吸い付いている目印。吹き出しの文言とつまみの位置に使う。
+  ThreadMapMarker? _snapped;
 
   // つまみはスクロール中・ドラッグ中だけ表示し、静止したら隠す。隠れている間は
   // 当たり判定も消し（IgnorePointer）、下にある返信ボタン等のタップを塞がない。
@@ -1908,11 +2007,64 @@ class _FastScrollerState extends State<_FastScroller> {
 
   /// つまみのドラッグ量 [dy] だけ位置を進め、その行へジャンプする。つまみ自体を
   /// つかんだ時だけ動かすので、トラック上の返信ボタン等のタップは邪魔しない。
+  ///
+  /// 近くに飛び先の目印があれば吸い付く。目印は数ピクセル幅しかなく、狙って
+  /// 止めるのは難しいため。[_fraction] は生の位置のまま持ち（吸着で書き換えると
+  /// 長いドラッグでずれていく）、つまみと飛び先だけ目印に寄せる。
   void _applyDelta(double dy, double travel) {
     if (travel <= 0) return;
     final fraction = (_fraction + dy / travel).clamp(0.0, 1.0);
-    setState(() => _fraction = fraction);
-    widget.onJump(_indexFor(fraction));
+    final index = _indexFor(fraction);
+    final snapped = _snapTarget(index, travel);
+    // 別の目印に乗り換えた瞬間だけ、吸い付いたことを触感で返す。
+    if (snapped != null && snapped.index != _snapped?.index) {
+      unawaited(HapticFeedback.selectionClick());
+    }
+    setState(() {
+      _fraction = fraction;
+      _snapped = snapped;
+    });
+    widget.onJump(snapped?.index ?? index);
+  }
+
+  /// [index] の近くにある目印。
+  ThreadMapMarker? _snapTarget(int index, double travel) {
+    if (widget.itemCount <= 1) return null;
+    // ピクセルでの許容距離を行インデックスに直す。
+    final tolerance = _snapDistance / travel * (widget.itemCount - 1);
+    ThreadMapMarker? best;
+    var bestDistance = double.infinity;
+    for (final marker in widget.markers) {
+      final distance = (marker.index - index).abs().toDouble();
+      if (distance > tolerance || distance >= bestDistance) continue;
+      best = marker;
+      bestDistance = distance;
+    }
+    return best;
+  }
+
+  /// 目印をタップしてその行へ飛ぶ。飛んだ先が分かるよう、目印は出したままにする。
+  void _jumpToMarker(ThreadMapMarker marker) {
+    unawaited(HapticFeedback.selectionClick());
+    widget.onJump(marker.index);
+    _reveal();
+  }
+
+  /// 吹き出しの文言。目印に吸い付いているときは何の目印かも出す（この大きさ
+  /// では色だけでは種別が読めないので、ここで答え合わせをする）。
+  String _bubbleLabel() {
+    final snapped = _snapped;
+    final label = widget.labelForIndex(snapped?.index ?? _indexFor(_fraction));
+    return switch (snapped?.kind) {
+      ThreadMapMarkerKind.newArrival => 'ここから新着',
+      ThreadMapMarkerKind.manyReplies => '返信$manyRepliesThreshold+ · $label',
+      ThreadMapMarkerKind.veryManyReplies =>
+        '返信$veryManyRepliesThreshold+ · $label',
+      ThreadMapMarkerKind.own => '自分 · $label',
+      ThreadMapMarkerKind.replyToOwn => '自分宛 · $label',
+      ThreadMapMarkerKind.searchMatch => '一致 · $label',
+      _ => label,
+    };
   }
 
   @override
@@ -1926,7 +2078,14 @@ class _FastScrollerState extends State<_FastScroller> {
           return ValueListenableBuilder<Iterable<ItemPosition>>(
             valueListenable: widget.positions.itemPositions,
             builder: (context, _, _) {
-              final fraction = _dragging ? _fraction : _currentFraction();
+              // 吸い付いている間はつまみも目印の高さに寄せる（掴んでいる位置は
+              // [_fraction] のまま持つので、離しても位置がずれていかない）。
+              final snappedFraction = _snapped == null || widget.itemCount <= 1
+                  ? null
+                  : _snapped!.index / (widget.itemCount - 1);
+              final fraction = _dragging
+                  ? (snappedFraction ?? _fraction)
+                  : _currentFraction();
               final top = travel <= 0 ? 0.0 : fraction * travel;
               // 表示中・ドラッグ中だけ見せる。隠れている間は当たり判定も消す。
               final shown = _visible || _dragging;
@@ -1936,6 +2095,46 @@ class _FastScrollerState extends State<_FastScroller> {
                 fit: StackFit.expand,
                 clipBehavior: Clip.none,
                 children: [
+                  // スレマップ。つまみと同じタイミングで出し入れし、静止したら
+                  // 一緒に消えるので普段の読みを邪魔しない。当たり判定は持たない。
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: AnimatedOpacity(
+                        opacity: shown ? 1 : 0,
+                        duration: const Duration(milliseconds: 200),
+                        child: CustomPaint(
+                          painter: ThreadMapPainter(
+                            markers: widget.markers,
+                            itemCount: widget.itemCount,
+                            handleHeight: _handleHeight,
+                            scheme: scheme,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  // 目印そのものをタップして飛べるようにする。当たり判定は
+                  // 「目印が見えている間」かつ「目印の位置だけ」に限る。トラック
+                  // 全面を塞ぐと、下に重なるレスの返信ボタン等が押せなくなる。
+                  if (travel > 0 && widget.itemCount > 1)
+                    for (final marker in widget.markers)
+                      Positioned(
+                        right: 0,
+                        width: _tapTargetWidth,
+                        height: _tapTargetHeight,
+                        top:
+                            _handleHeight / 2 +
+                            marker.index / (widget.itemCount - 1) * travel -
+                            _tapTargetHeight / 2,
+                        child: IgnorePointer(
+                          ignoring: !shown,
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () => _jumpToMarker(marker),
+                            child: const SizedBox.expand(),
+                          ),
+                        ),
+                      ),
                   // ドラッグ中はつまみの左にレス番号の吹き出しを出す。
                   if (_dragging)
                     Positioned(
@@ -1952,7 +2151,7 @@ class _FastScrollerState extends State<_FastScroller> {
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
-                            widget.labelForIndex(_indexFor(_fraction)),
+                            _bubbleLabel(),
                             style: TextStyle(
                               color: scheme.onInverseSurface,
                               fontWeight: FontWeight.w700,
@@ -1984,15 +2183,22 @@ class _FastScrollerState extends State<_FastScroller> {
                               _dragging = true;
                               _visible = true;
                               _fraction = _currentFraction();
+                              _snapped = null;
                             });
                           },
                           onPointerMove: (e) => _applyDelta(e.delta.dy, travel),
                           onPointerUp: (_) {
-                            setState(() => _dragging = false);
+                            setState(() {
+                              _dragging = false;
+                              _snapped = null;
+                            });
                             _reveal();
                           },
                           onPointerCancel: (_) {
-                            setState(() => _dragging = false);
+                            setState(() {
+                              _dragging = false;
+                              _snapped = null;
+                            });
                             _reveal();
                           },
                           child: Container(
@@ -2554,6 +2760,7 @@ class _ComposerState extends State<_Composer> {
     super.initState();
     // 本文中の URL から添付プレビューを作るので、テキスト変更で作り直す。
     widget.controller.addListener(_onTextChanged);
+    widget.focusNode.addListener(_onFocusChanged);
   }
 
   @override
@@ -2563,15 +2770,24 @@ class _ComposerState extends State<_Composer> {
       oldWidget.controller.removeListener(_onTextChanged);
       widget.controller.addListener(_onTextChanged);
     }
+    if (oldWidget.focusNode != widget.focusNode) {
+      oldWidget.focusNode.removeListener(_onFocusChanged);
+      widget.focusNode.addListener(_onFocusChanged);
+    }
   }
 
   @override
   void dispose() {
     widget.controller.removeListener(_onTextChanged);
+    widget.focusNode.removeListener(_onFocusChanged);
     super.dispose();
   }
 
   void _onTextChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void _onFocusChanged() {
     if (mounted) setState(() {});
   }
 
@@ -2667,7 +2883,9 @@ class _ComposerState extends State<_Composer> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final textStyle = composeBodyTextStyle(theme);
     final text = widget.controller.text;
     final imageUrls = imageUrlsIn(text);
     final videoUrls = videoUrlsIn(text);
@@ -2678,6 +2896,13 @@ class _ComposerState extends State<_Composer> {
         videoUrls.isNotEmpty ||
         audioUrls.isNotEmpty ||
         embedVideos.isNotEmpty;
+    // [_send] が受け付ける条件と同じ。送信ボタンの塗りをこれで切り替える。
+    final canSend =
+        widget.enabled &&
+        text.trim().isNotEmpty &&
+        !_sending &&
+        !_uploadingImage &&
+        !_uploadingFile;
     return SafeArea(
       top: false,
       child: Container(
@@ -2691,7 +2916,8 @@ class _ComposerState extends State<_Composer> {
             ),
           ),
         ),
-        padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+        // 送信ボタンが塗りを持つので、左右の余白は同じにして端を揃える。
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2723,31 +2949,53 @@ class _ComposerState extends State<_Composer> {
                     minLines: 1,
                     maxLines: 5,
                     textInputAction: TextInputAction.newline,
-                    decoration: InputDecoration(
-                      hintText: widget.enabled ? 'レスを書く' : '書き込み停止中',
-                      filled: true,
-                      fillColor: scheme.surfaceContainerHighest,
-                      // isDense で余分な最小高さを外し、1 行時の高さを送信ボタン
-                      // （44）に合わせる。
-                      isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 13,
-                      ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(24),
-                        borderSide: BorderSide.none,
-                      ),
-                    ),
+                    // 行高を明示すると 1 行時の高さがフォントに左右されず、
+                    // kComposeControlHeight にぴたりと収まる。
+                    style: textStyle,
+                    decoration:
+                        composeFieldDecoration(
+                          scheme: scheme,
+                          hintText: widget.enabled ? 'レスを書く' : '書き込み停止中',
+                          textStyle: textStyle,
+                          // 21（15×1.4）+ 10.5×2 = 42 = kComposeControlHeight。
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 10.5,
+                          ),
+                        ).copyWith(
+                          suffixIcon:
+                              widget.enabled && widget.focusNode.hasFocus
+                              ? IconButton(
+                                  tooltip: 'キーボードを閉じる',
+                                  icon: const Icon(
+                                    Icons.keyboard_hide,
+                                    size: 20,
+                                  ),
+                                  padding: EdgeInsets.zero,
+                                  style: composeQuietButtonStyle(scheme),
+                                  onPressed: widget.focusNode.unfocus,
+                                )
+                              : null,
+                          // ボタンの既定の最小サイズ（48）に入力欄が引っ張られると、
+                          // フォーカスした瞬間だけ欄が伸びて他のボタンとずれる。
+                          // 高さを行に合わせて固定し、出入りしても動かないようにする。
+                          suffixIconConstraints: const BoxConstraints.tightFor(
+                            width: 40,
+                            height: kComposeControlHeight,
+                          ),
+                        ),
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
+                // 添付系は入力欄に添えるだけの脇役なので、色を onSurfaceVariant に
+                // 落として送信ボタンとの主従をはっきりさせる。
                 SizedBox(
-                  width: 44,
-                  height: 44,
+                  width: kComposeControlHeight,
+                  height: kComposeControlHeight,
                   child: IconButton(
                     padding: EdgeInsets.zero,
                     tooltip: '画像を追加',
+                    style: composeQuietButtonStyle(scheme),
                     onPressed:
                         !widget.enabled ||
                             _sending ||
@@ -2761,15 +3009,16 @@ class _ComposerState extends State<_Composer> {
                             height: 18,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : const Icon(Icons.image_outlined, size: 22),
+                        : const Icon(Icons.image_outlined, size: 21),
                   ),
                 ),
                 SizedBox(
-                  width: 44,
-                  height: 44,
+                  width: kComposeControlHeight,
+                  height: kComposeControlHeight,
                   child: IconButton(
                     padding: EdgeInsets.zero,
                     tooltip: 'ファイルを添付',
+                    style: composeQuietButtonStyle(scheme),
                     onPressed:
                         !widget.enabled ||
                             _sending ||
@@ -2783,25 +3032,41 @@ class _ComposerState extends State<_Composer> {
                             height: 18,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : const Icon(Icons.attach_file, size: 22),
+                        : const Icon(Icons.attach_file, size: 21),
                   ),
                 ),
                 const SizedBox(width: 4),
-                // 送信ボタンは 1 行時の入力欄と同じ高さ（44）に固定。複数行に伸びた
-                // ら crossAxisAlignment.end で下端に留まる。
+                // 送信ボタンは 1 行時の入力欄と同じ高さに固定。複数行に伸びたら
+                // crossAxisAlignment.end で下端に留まる。丸ボタンだと入力欄の角丸
+                // （14）から浮くので、同じ角丸の四角に合わせる。
+                // 本文が空のうちは押しても何も起きない（[_send] が弾く）ので、
+                // 塗りも控えめにして「まだ送れない」ことを見た目でも伝える。
                 SizedBox(
-                  width: 44,
-                  height: 44,
-                  child: IconButton.filled(
+                  width: kComposeControlHeight,
+                  height: kComposeControlHeight,
+                  child: IconButton(
                     padding: EdgeInsets.zero,
+                    tooltip: '送信',
                     onPressed: !widget.enabled || _sending ? null : _send,
+                    style: IconButton.styleFrom(
+                      backgroundColor: canSend
+                          ? scheme.primary
+                          : Colors.transparent,
+                      foregroundColor: canSend
+                          ? scheme.onPrimary
+                          : scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                      shape: composeShape,
+                    ),
                     icon: _sending
-                        ? const SizedBox(
+                        ? SizedBox(
                             width: 18,
                             height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: scheme.onSurfaceVariant,
+                            ),
                           )
-                        : const Icon(Icons.send, size: 20),
+                        : const Icon(Icons.send, size: 19),
                   ),
                 ),
               ],

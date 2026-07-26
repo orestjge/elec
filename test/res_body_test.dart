@@ -22,6 +22,21 @@ void main() {
     );
   });
 
+  test('URL は AA 判定の記号として数えない', () {
+    expect(
+      looksLikeAsciiArt('https://example.com/a/b/c/d/e/f/g/h/i/j?x=1&y=2'),
+      isFalse,
+    );
+    expect(
+      looksLikeAsciiArt(
+        '動画\n'
+        'https://example.com/a/b/c/d/e/f/g/h/i/j?x=1&y=2\n'
+        'ttps://example.net/watch/abc_def-ghi?format=mp4',
+      ),
+      isFalse,
+    );
+  });
+
   test('普通のレスは前後の空白・空行を詰める', () {
     expect(trimUnlessAsciiArt('  前後に空白  '), '前後に空白');
     expect(trimUnlessAsciiArt('\n\n本文\n\n'), '本文');

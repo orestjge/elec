@@ -59,6 +59,25 @@ void main() {
     expect(find.text('1/3  a.jpg'), findsOneWidget);
   });
 
+  testWidgets('画像ビューアは上下スワイプで閉じられる', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: PostImages(urls: [Uri.parse('https://example.com/a.jpg')]),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byType(GestureDetector).first);
+    await tester.pumpAndSettle();
+    expect(find.text('a.jpg'), findsOneWidget);
+
+    await tester.drag(find.byType(PageView), const Offset(0, 140));
+    await tester.pumpAndSettle();
+
+    expect(find.text('a.jpg'), findsNothing);
+  });
+
   testWidgets('動画URLは非対応プラットフォームでは再生カードにする', (tester) async {
     addTearDown(() => VideoThumbnails.debugTargetPlatform = null);
     VideoThumbnails.debugTargetPlatform = TargetPlatform.linux;
@@ -106,10 +125,10 @@ void main() {
     expect(find.text('example.com'), findsOneWidget);
   });
 
-  testWidgets('YouTube/ニコニコは再生サムネイルとして表示しタップで外部を開く', (tester) async {
+  testWidgets('YouTube/ニコニコは再生サムネイルとして表示しタップを通知する', (tester) async {
     NicoThumbnails.clearCache();
     NicoThumbnails.fetcher = _StubFetcher();
-    final tapped = <Uri>[];
+    final tapped = <EmbedVideo>[];
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -130,6 +149,6 @@ void main() {
     expect(find.text('ニコニコ動画'), findsOneWidget);
 
     await tester.tap(find.text('ニコニコ動画'));
-    expect(tapped, [Uri.parse('https://www.nicovideo.jp/watch/sm9')]);
+    expect(tapped.single.url, Uri.parse('https://www.nicovideo.jp/watch/sm9'));
   });
 }

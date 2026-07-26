@@ -363,6 +363,10 @@ class ReadHistory {
   bool isOwnPost(String threadKey, int number) =>
       _ownPosts[threadKey]?.contains(number) ?? false;
 
+  /// このスレで自分のレスとして記録した件数。0 なら「自分宛」の判定（本文の
+  /// `>>N` 解析）自体を省ける。
+  int ownPostCount(String threadKey) => _ownPosts[threadKey]?.length ?? 0;
+
   Future<void> markOwnThread(String threadKey) async {
     final changed = _ownThreads.add(threadKey);
     final posts = _ownPosts.putIfAbsent(threadKey, () => <int>{});

@@ -2,7 +2,7 @@
 ///
 /// 動画ファイル（[imageUrlsIn]/[videoUrlsIn]）と違い、拡張子ではなくホストと
 /// パス形から判定する。抜き出した動画はサムネイルカードとして表示し、タップで
-/// 外部アプリ／ブラウザ（＝外部プレーヤー）を開く。
+/// アプリ内 WebView を開く。
 library;
 
 import 'link_urls.dart';
@@ -16,6 +16,7 @@ class EmbedVideo {
     required this.kind,
     required this.id,
     required this.url,
+    required this.playerUrl,
     this.thumbnailUrl,
   });
 
@@ -26,6 +27,9 @@ class EmbedVideo {
 
   /// タップ時に外部で開く正規化済み URL。
   final Uri url;
+
+  /// アプリ内 WebView で開く URL。YouTube は埋め込みプレーヤー URL。
+  final Uri playerUrl;
 
   /// サムネイル画像 URL。取得手段が無い場合（ニコニコ）は null。
   final String? thumbnailUrl;
@@ -101,6 +105,9 @@ EmbedVideo _youtube(String id) => EmbedVideo(
   kind: EmbedKind.youtube,
   id: id,
   url: Uri.parse('https://www.youtube.com/watch?v=$id'),
+  playerUrl: Uri.parse(
+    'https://www.youtube.com/embed/$id?playsinline=1&autoplay=1&rel=0',
+  ),
   thumbnailUrl: 'https://i.ytimg.com/vi/$id/hqdefault.jpg',
 );
 
@@ -111,5 +118,6 @@ EmbedVideo? _niconico(String rawId) {
     kind: EmbedKind.niconico,
     id: id,
     url: Uri.parse('https://www.nicovideo.jp/watch/$id'),
+    playerUrl: Uri.parse('https://www.nicovideo.jp/watch/$id'),
   );
 }

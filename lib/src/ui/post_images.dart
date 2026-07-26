@@ -11,6 +11,25 @@ import 'nico_thumbnail.dart';
 import 'video_player_screen.dart';
 import 'video_thumbnail.dart';
 
+/// 画像URL群を全画面ビューアで開く。
+void openImageViewer(
+  BuildContext context,
+  List<Uri> urls, {
+  int initialIndex = 0,
+}) {
+  if (urls.isEmpty) return;
+  Navigator.of(context).push(
+    PageRouteBuilder<void>(
+      transitionDuration: const Duration(milliseconds: 180),
+      reverseTransitionDuration: const Duration(milliseconds: 180),
+      pageBuilder: (_, _, _) =>
+          _ImageViewer(urls: urls, initialIndex: initialIndex),
+      transitionsBuilder: (_, animation, _, child) =>
+          FadeTransition(opacity: animation, child: child),
+    ),
+  );
+}
+
 /// レス本文に含まれる画像 URL のサムネイル群。タップで全画面表示。
 class PostImages extends StatelessWidget {
   const PostImages({
@@ -34,14 +53,14 @@ class PostImages extends StatelessWidget {
   /// 本文中の音声 URL。インラインのミニプレーヤーで再生する。
   final List<Uri> audioUrls;
 
-  /// YouTube / ニコニコ動画のリンク。タップで外部プレーヤーを開く。
+  /// YouTube / ニコニコ動画のリンク。タップでアプリ内 WebView を開く。
   final List<EmbedVideo> embedVideos;
 
   /// アプリ内で再生できなかった動画をブラウザへ回すための逃げ道。
   /// 未指定ならプレーヤーに「ブラウザで開く」を出さない。
   final ValueChanged<Uri>? onOpenVideoExternally;
 
-  final ValueChanged<Uri>? onTapEmbed;
+  final ValueChanged<EmbedVideo>? onTapEmbed;
 
   /// 指定すると各サムネイルに削除（×）ボタンを重ね、押すとその URL を渡す。
   /// 入力欄の添付プレビューで、本文から URL を取り消すために使う。
@@ -109,7 +128,7 @@ class PostImages extends StatelessWidget {
                       size: thumbSize,
                       onTap: onTapEmbed == null
                           ? null
-                          : () => onTapEmbed!(video.url),
+                          : () => onTapEmbed!(video),
                     ),
                   ),
               ],
@@ -179,13 +198,8 @@ class _ThumbState extends State<_Thumb> {
 
   Uri get _url => widget.urls[widget.index];
 
-  void _openViewer() => Navigator.of(context).push(
-    MaterialPageRoute<void>(
-      fullscreenDialog: true,
-      builder: (_) =>
-          _ImageViewer(urls: widget.urls, initialIndex: widget.index),
-    ),
-  );
+  void _openViewer() =>
+      openImageViewer(context, widget.urls, initialIndex: widget.index);
 
   @override
   Widget build(BuildContext context) {
@@ -374,7 +388,7 @@ class _VideoBadge extends StatelessWidget {
   }
 }
 
-/// YouTube / ニコニコ動画のサムネイルカード。タップで外部プレーヤーを開く。
+/// YouTube / ニコニコ動画のサムネイルカード。タップでアプリ内 WebView を開く。
 /// サムネイル画像が取れる場合（YouTube）は背景に敷き、無い場合（ニコニコ）は
 /// 無地の再生カードにする。
 class _EmbedThumb extends StatelessWidget {
@@ -507,6 +521,16 @@ class _ImageViewer extends StatefulWidget {
 class _ImageViewerState extends State<_ImageViewer> {
   late final PageController _page;
   late int _index;
+  final _activePointers = <int>{};
+  Duration? _dragStartTime;
+  double _dragDx = 0;
+  double _dragDy = 0;
+  bool _dragging = false;
+  bool _dragRejected = false;
+
+  static const _dismissDistance = 96.0;
+  static const _dismissVelocity = 700.0;
+  static const _dragSlop = 8.0;
 
   @override
   void initState() {
@@ -522,6 +546,80 @@ class _ImageViewerState extends State<_ImageViewer> {
   }
 
   Uri get _url => widget.urls[_index];
+
+  Future<void> _close() async {
+    final popped = await Navigator.of(context).maybePop();
+    if (popped || !mounted) return;
+    _resetDrag();
+  }
+
+  void _resetDrag() {
+    setState(() {
+      _dragStartTime = null;
+      _dragDx = 0;
+      _dragDy = 0;
+      _dragging = false;
+      _dragRejected = false;
+    });
+  }
+
+  void _onPointerDown(PointerDownEvent event) {
+    _activePointers.add(event.pointer);
+    if (_activePointers.length > 1) {
+      _resetDrag();
+      _dragRejected = true;
+      return;
+    }
+    _dragStartTime = event.timeStamp;
+    _dragDx = 0;
+    _dragDy = 0;
+    _dragging = false;
+    _dragRejected = false;
+  }
+
+  void _onPointerMove(PointerMoveEvent event) {
+    if (_activePointers.length != 1 || _dragRejected) return;
+    final nextDx = _dragDx + event.delta.dx;
+    final nextDy = _dragDy + event.delta.dy;
+    final absDx = nextDx.abs();
+    final absDy = nextDy.abs();
+    if (!_dragging && math.max(absDx, absDy) > _dragSlop) {
+      if (absDx > absDy) {
+        _dragRejected = true;
+        return;
+      }
+      _dragging = true;
+    }
+    if (!_dragging) {
+      _dragDx = nextDx;
+      _dragDy = nextDy;
+      return;
+    }
+    setState(() {
+      _dragDx = nextDx;
+      _dragDy = nextDy;
+    });
+  }
+
+  void _onPointerUp(PointerUpEvent event) {
+    _activePointers.remove(event.pointer);
+    if (_dragging) {
+      final elapsed = event.timeStamp - (_dragStartTime ?? event.timeStamp);
+      final seconds = elapsed.inMicroseconds / Duration.microsecondsPerSecond;
+      final velocity = seconds <= 0 ? 0 : _dragDy / seconds;
+      if (_dragDy.abs() > _dismissDistance ||
+          velocity.abs() > _dismissVelocity) {
+        _close();
+        return;
+      }
+    }
+    if (_activePointers.isEmpty) _resetDrag();
+  }
+
+  void _onPointerCancel(PointerCancelEvent event) {
+    _activePointers.remove(event.pointer);
+    if (_activePointers.isEmpty) _resetDrag();
+  }
 
   void _jumpBy(int delta) {
     if (widget.urls.length <= 1) return;
@@ -549,30 +647,52 @@ class _ImageViewerState extends State<_ImageViewer> {
           style: const TextStyle(fontSize: 14),
         ),
       ),
-      body: Stack(
-        children: [
-          PageView.builder(
-            controller: _page,
-            itemCount: widget.urls.length,
-            onPageChanged: (i) => setState(() => _index = i),
-            itemBuilder: (context, i) => _ZoomableImage(
-              url: widget.urls[i].toString(),
-              onDismiss: () => Navigator.of(context).pop(),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final height = constraints.maxHeight;
+          return Listener(
+            behavior: HitTestBehavior.translucent,
+            onPointerDown: _onPointerDown,
+            onPointerMove: _onPointerMove,
+            onPointerUp: _onPointerUp,
+            onPointerCancel: _onPointerCancel,
+            child: AnimatedSlide(
+              offset: Offset(0, height == 0 ? 0 : _dragDy / height),
+              duration: _dragging
+                  ? Duration.zero
+                  : const Duration(milliseconds: 180),
+              curve: Curves.easeOut,
+              child: Opacity(
+                opacity: (1 - _dragDy.abs() / 320).clamp(0.5, 1.0),
+                child: Stack(
+                  children: [
+                    PageView.builder(
+                      controller: _page,
+                      itemCount: widget.urls.length,
+                      onPageChanged: (i) => setState(() => _index = i),
+                      itemBuilder: (context, i) => _ZoomableImage(
+                        url: widget.urls[i].toString(),
+                        onDismiss: _close,
+                      ),
+                    ),
+                    if (multiple) ...[
+                      _NavButton(
+                        alignment: Alignment.centerLeft,
+                        icon: Icons.chevron_left,
+                        onPressed: () => _jumpBy(-1),
+                      ),
+                      _NavButton(
+                        alignment: Alignment.centerRight,
+                        icon: Icons.chevron_right,
+                        onPressed: () => _jumpBy(1),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
             ),
-          ),
-          if (multiple) ...[
-            _NavButton(
-              alignment: Alignment.centerLeft,
-              icon: Icons.chevron_left,
-              onPressed: () => _jumpBy(-1),
-            ),
-            _NavButton(
-              alignment: Alignment.centerRight,
-              icon: Icons.chevron_right,
-              onPressed: () => _jumpBy(1),
-            ),
-          ],
-        ],
+          );
+        },
       ),
     );
   }
