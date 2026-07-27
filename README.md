@@ -1,93 +1,61 @@
 # elec
 
-エッヂ（[bbs.eddibb.cc](https://bbs.eddibb.cc) / liveedge）を快適に読むための、非公式の Android / iPhone 向け掲示板ビューアです。リアルタイム寄りの自動更新・モダンな UI が特徴です。
-
-左のドロワーから **板の URL を貼り付けて他掲示板（5ch 互換）を追加**することもできます（起動時は既定でエッヂを表示）。他板でも**閲覧・書き込みの両方**に対応しています（5ch はどんぐりの状況により書き込めない場合があります）。
-
-> 個人開発の非公式クライアントです。掲示板の運営とは無関係です。
+エッヂ（[bbs.eddibb.cc](https://bbs.eddibb.cc) / liveedge）や5ch系掲示板向けのAndroid向け掲示板ビューア。サイドロードを使用すればiOSからもインストール可能です。
 
 ## インストール（Android）
 
 ### APK を直接インストール（おすすめ）
 
-1. [最新リリース](https://github.com/orestjge/elec/releases/latest)から APK をダウンロードします。
-   - **`elec-vX.Y.Z-arm64-v8a.apk`** … ほとんどの端末（おおむね2017年以降のスマホ）はこちら。
-   - **`elec-vX.Y.Z-universal.apk`** … どちらか分からない場合はこちら（サイズは大きめ）。
-2. ダウンロードした APK を開いてインストールします。
-   - 初回は「提供元不明のアプリ／不明なアプリのインストール」の許可を求められます。端末の指示に従って許可してください。
-3. 更新するときは、新しい APK を同じ手順で上書きインストールすればOKです（署名が同じなのでデータは保持されます）。
+1. [最新リリース](https://github.com/orestjge/elec/releases/latest)から APK をダウンロード。
+   - `elec-vX.Y.Z-arm64-v8a.apk` … ほとんどの端末（おおむね 2017 年以降）
+   - `elec-vX.Y.Z-universal.apk` … ↑が利用できない場合はこちら
+2. APK を開いてインストール。初回は「提供元不明のアプリ」の許可を求められます。
+3. 更新は新しい APK を上書きインストールするだけ（署名が同じなのでデータは保持されます）。
 
-### Google Play クローズドテストで入れる方法もあります
+### Google Play クローズドテスト
 
-Play ストア経由で**普通にインストール・自動更新したい**場合は、クローズドテストに参加する方法もあります（少し手順が多めです）。テスターとしてご協力いただけると助かります。以下の手順で参加できます。
+Play ストアから自動更新したい場合はこちら。
 
-1. まず、テスター用の Google グループに参加します。
-   - [https://groups.google.com/u/0/g/elec-beta/](https://groups.google.com/u/0/g/elec-beta/) を開き、**「グループに参加」** します。
-   - Google Play にログインしているアカウントと同じ Google アカウントで参加してください。
-2. グループに参加した状態で、Play ストアのページを開きます。
-   - [https://play.google.com/store/apps/details?id=io.github.orestjge.elec](https://play.google.com/store/apps/details?id=io.github.orestjge.elec)
-3. ストアページの案内に従って **インストール** します。以降は通常のアプリと同じように Play ストアから自動で更新されます。
+1. [テスター用 Google グループ](https://groups.google.com/u/0/g/elec-beta/)に参加（Play で使っているアカウントと同じもので）。
+2. [ストアページ](https://play.google.com/store/apps/details?id=io.github.orestjge.elec)を開いてインストール。
 
-> グループへの参加が反映されるまで少し時間がかかる場合があります。ストアページが開けない・インストールできないときは、しばらく待ってからお試しください。
-
-補足:
-- グループに参加すると、**参加したメールアドレスが開発者（管理者）には見えます**。ほかのメンバーには公開されません。
-- Google アカウントの**表示名が気になる場合は、参加時に表示名を変更**できます（本名などを伏せられます）。
-- 普段 Play ストアで使っていないアカウントで参加した場合は、**Play ストア側もそのアカウントに切り替えてから**インストールしてください（グループ参加とストアのアカウントが一致している必要があります）。
+> 参加が反映されるまで時間がかかることがあります。ストアページが開けないときは少し待ってからお試しください。
+> なお、参加したメールアドレスは開発者にのみ見えます（表示名は参加時に変更可能）。
 
 ## インストール（iPhone / iPad）
 
-App Store では配布していません。**AltStore** または **SideStore** を使って、無署名の IPA を自分の Apple ID でサイドロードします。
+App Store では配布していません。**AltStore** または **SideStore** で IPA をサイドロードします。（SideStoreがおすすめ）
 
-### 事前準備
-
-まず AltStore か SideStore のどちらかを端末にセットアップしておきます（初回のみ）。
-
-- **AltStore**（Mac / Windows が必要）… PC に AltServer をインストールし、iPhone に AltStore を導入します。→ [公式手順](https://altstore.io)
-- **SideStore**（PC 不要・Wi-Fi のみで更新できる）… → [公式手順](https://sidestore.io)
-
-無料の Apple ID でサイドロードする場合の制約（AltStore/SideStore 共通の仕様）:
-- インストールしたアプリは **7日で失効** します。AltStore/SideStore で定期的に再署名（更新）が必要です。
-- 同時にサイドロードできるアプリは **3つまで**。
-
-### ソースを追加してインストール
-
-1. AltStore / SideStore の **「Sources」→「+」** を開きます。
-2. 次の URL を追加します。
+1. どちらかを端末にセットアップ（初回のみ）。
+   - [AltStore](https://altstore.io) … Mac / Windows が必要
+   - [SideStore](https://sidestore.io) … PC 不要、Wi-Fi のみで更新可
+2. 「Sources」→「+」で次の URL を追加。
    ```
    https://raw.githubusercontent.com/orestjge/elec/altstore/source.json
    ```
-3. 追加したソースの中から **Elec** を選び、**GET / インストール** します。
-4. 更新版が出たら、同じく AltStore / SideStore 上から更新できます。
+3. ソース内の **Elec** を選んでインストール。更新も同じ画面から行えます。
 
-> IPA を直接入れたい場合は、[最新リリース](https://github.com/orestjge/elec/releases/latest)の **`elec-vX.Y.Z.ipa`** を AltStore / SideStore で開いてもインストールできます。
+> 無料の Apple ID では 7 日でアプリが失効し、同時にサイドロードできるのは 3 つまでです（AltStore / SideStore 共通の仕様）。
+> IPA を直接入れたい場合は、[最新リリース](https://github.com/orestjge/elec/releases/latest)の `elec-vX.Y.Z.ipa` を開いてもインストールできます。
 
 ## 開発
 
-Flutter 製です。
+Flutter 製です。プロトコルと Shift_JIS 処理は `packages/edge_core` / `packages/edge_sjis` に分離しています。
 
 ```sh
 flutter pub get
-flutter run      # macOS デスクトップ / Android 実機・エミュレータなど
-flutter test     # アプリのウィジェットテスト
-```
-
-画像アップロードの既定 Imgur Client ID をローカルビルドに入れる場合は、
-`.env.example` を `.env` にコピーして値を入れ、`--dart-define-from-file` で渡します。
-
-```sh
-cp .env.example .env
-# .env の ELEC_DEFAULT_IMGUR_CLIENT_ID=... を編集
-flutter run --dart-define-from-file=.env
-```
-
-プロトコルと Shift_JIS 処理は `packages/edge_core` / `packages/edge_sjis` に分離しています。
-
-```sh
+flutter run
+flutter test
 (cd packages/edge_core && dart test)
 (cd packages/edge_sjis && dart test)
 ```
 
-`main` へマージすると GitHub Actions が署名済み APK を自動ビルドし、Releases に公開します。
-Release ビルドで既定 Imgur Client ID を入れる場合は、GitHub Secrets に
-`ELEC_DEFAULT_IMGUR_CLIENT_ID` を登録します。
+画像アップロードの既定 Imgur Client ID をローカルビルドに入れる場合:
+
+```sh
+cp .env.example .env
+# ELEC_DEFAULT_IMGUR_CLIENT_ID=... を編集
+flutter run --dart-define-from-file=.env
+```
+
+`main` へマージすると GitHub Actions が署名済み APK をビルドし、Releases に公開します。Release ビルドで既定 Imgur Client ID を入れる場合は、GitHub Secrets に `ELEC_DEFAULT_IMGUR_CLIENT_ID` を登録します。
