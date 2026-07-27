@@ -1,5 +1,10 @@
+import 'dart:async';
+import 'dart:math' as math;
+
 import 'package:edge_core/edge_core.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'embed_urls.dart';
 import 'embed_player_screen.dart';
@@ -25,7 +30,6 @@ class PostItem extends StatelessWidget {
     this.onTapReplies,
     this.onReply,
     this.onBodySelectionActiveChanged,
-    this.onTap,
     this.onLongPress,
     this.bodySelectable = true,
     this.isOwn = false,
@@ -69,10 +73,11 @@ class PostItem extends StatelessWidget {
   /// 本文の文字選択状態が変わったとき。
   final ValueChanged<bool>? onBodySelectionActiveChanged;
 
-  /// レスをタップしたとき。本文や余白からレス単位のメニューを出すために使う。
-  final VoidCallback? onTap;
-
   /// レスを長押ししたとき。レス全体のコピーや ID 操作のメニューを出す。
+  ///
+  /// タップでは開かない。本文の `>>N` や URL を狙って触れただけ、スクロールを
+  /// 止めるために触れただけでメニューが出ると邪魔になるため。押している間は指の
+  /// 位置から沈み込みが広がって、離す前に「今どのレスを掴んでいるか」が分かる。
   final VoidCallback? onLongPress;
 
   /// 本文を範囲選択できるようにするか。通常一覧では false、メニュー内では true。
@@ -217,13 +222,8 @@ class PostItem extends StatelessWidget {
       ),
     );
 
-    if (onTap == null && onLongPress == null) return content;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      onLongPress: onLongPress,
-      child: content,
-    );
+    if (onLongPress == null) return content;
+    return _PressableRes(onLongPress: onLongPress!, child: content);
   }
 
   /// ヘッダに出す名前と、その見せ方（[text] が空ならヘッダに名前を出さない）。
@@ -260,6 +260,199 @@ class PostItem extends StatelessWidget {
     }
     return (text: name, muted: false);
   }
+}
+
+/// 長押しがメニューに繋がるまでの時間。既定の 500ms は「押しているのに何も
+/// 起きない」と感じる長さなので短くする。タップの判定（100ms）とは十分離れて
+/// いるので、触れただけでメニューが出ることはない。
+const _resLongPressDuration = Duration(milliseconds: 400);
+
+/// 触れてから沈み込みを広げ始めるまでの待ち時間。スクロールを始めるときの一瞬の
+/// 接触で行がチカチカしないよう、指を止めている間だけ広げる。
+///
+/// スクロールが確定するのは指が 18px 動いてからで、そこまでの時間は引き方次第。
+/// この待ち時間だけでは防ぎきれないので、指が動いたかどうかも併せて見る（[_move]）。
+const _pressSpreadDelay = Duration(milliseconds: 150);
+
+/// 指の位置からレスの端まで広がりきるまでの時間。ゆっくり見せたいので
+/// [_resLongPressDuration] より長いが、easeOutCubic の出足が速いぶん、メニューが
+/// 出る頃には端まで届いて見える。
+const _pressSpreadDuration = Duration(milliseconds: 450);
+
+/// 指を離してから沈み込みが消えるまでの時間。
+const _pressFadeOutDuration = Duration(milliseconds: 140);
+
+/// 指がこれだけ動いたらスワイプとみなして沈み込みを止める距離。
+///
+/// 長押しの判定が外れる距離（`kTouchSlop` = 18px）を待つと、スクロールを始めた
+/// 指の下で一瞬広がってしまうので、その手前で引く。指の細かい揺れでは消えない
+/// 程度には残す。
+const _pressMoveSlop = 8.0;
+
+/// レスを長押しでメニューへ繋ぐラッパ。押している間は指の位置から沈み込みが
+/// 広がり、離す前にどのレスを掴んでいるかが分かる（[PostItem.onLongPress] 参照）。
+class _PressableRes extends StatefulWidget {
+  const _PressableRes({required this.onLongPress, required this.child});
+
+  final VoidCallback onLongPress;
+  final Widget child;
+
+  @override
+  State<_PressableRes> createState() => _PressableResState();
+}
+
+class _PressableResState extends State<_PressableRes>
+    with TickerProviderStateMixin {
+  /// 沈み込みの半径（0＝指の位置、1＝レスの端まで）。
+  late final _spread = AnimationController(
+    vsync: this,
+    duration: _pressSpreadDuration,
+  );
+
+  /// 沈み込みの濃さ（1＝出ている）。離したらここだけ 0 へ落として消す。半径を
+  /// 縮めて戻すと、広げた動きを巻き戻すように見えてしまうため。
+  late final _fade = AnimationController(
+    vsync: this,
+    duration: _pressFadeOutDuration,
+  );
+
+  Timer? _timer;
+  Offset? _origin;
+
+  /// 指を置いた位置。ここから [_pressMoveSlop] 離れたらスワイプとみなす。
+  Offset? _downAt;
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _spread.dispose();
+    _fade.dispose();
+    super.dispose();
+  }
+
+  void _press(Offset position) {
+    _timer?.cancel();
+    _downAt = position;
+    _timer = Timer(_pressSpreadDelay, () {
+      setState(() => _origin = position);
+      _fade.value = 1;
+      _spread.forward(from: 0);
+    });
+  }
+
+  /// 指が動いたら、スワイプかどうかを見て沈み込みを引っ込める。
+  ///
+  /// スクロールが始まった（＝長押しが外れた）と分かるのは指が 18px 動いてからで、
+  /// それを待つとスワイプのたびに一瞬広がってしまうので、こちらで先に見る。
+  ///
+  /// ここではフェードを挟まず即座に消す。流れていく画面の上に余韻が残ると、
+  /// 消える動きのほうが目に付いてしまうため。
+  void _move(Offset position) {
+    final downAt = _downAt;
+    if (downAt == null) return;
+    if ((position - downAt).distance <= _pressMoveSlop) return;
+    _timer?.cancel();
+    _downAt = null;
+    _fade.value = 0;
+  }
+
+  /// 指を離した・スクロールに取られた、どちらでも沈み込みを消す。
+  void _release() {
+    _timer?.cancel();
+    _downAt = null;
+    if (_origin != null) _fade.reverse();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    // 指の動きは長押しの判定を待たずに自分で見る（[_move] 参照）。スクロールに
+    // 取られた後もこのレスへ届くので、途中で引っ込める判断ができる。
+    return Listener(
+      onPointerMove: (event) => _move(event.localPosition),
+      child: RawGestureDetector(
+        behavior: HitTestBehavior.opaque,
+        gestures: <Type, GestureRecognizerFactory>{
+          // 長押しの長さを変えたいので GestureDetector ではなく直接組み立てる。
+          LongPressGestureRecognizer:
+              GestureRecognizerFactoryWithHandlers<LongPressGestureRecognizer>(
+                () => LongPressGestureRecognizer(
+                  duration: _resLongPressDuration,
+                  debugOwner: this,
+                ),
+                (recognizer) {
+                  recognizer.onLongPressDown = (details) =>
+                      _press(details.localPosition);
+                  recognizer.onLongPressCancel = _release;
+                  recognizer.onLongPressUp = _release;
+                  recognizer.onLongPress = () {
+                    // 長押しが通った合図。指を離す前にメニューが出ると分かる。
+                    HapticFeedback.mediumImpact();
+                    widget.onLongPress();
+                  };
+                },
+              ),
+        },
+        child: CustomPaint(
+          painter: _PressSpread(
+            origin: _origin,
+            spread: _spread,
+            fade: _fade,
+            // レス自身の背景（自分・自分宛・検索一致）はどれも半透明なので、
+            // 後ろに敷いた沈み込みが透けて出る。本文へ被せないぶん文字が濁らない。
+            color: scheme.onSurface.withValues(alpha: 0.09),
+          ),
+          child: widget.child,
+        ),
+      ),
+    );
+  }
+}
+
+/// 押した指の位置から広がる沈み込み。本文の後ろに描くので文字は濁らない。
+class _PressSpread extends CustomPainter {
+  _PressSpread({
+    required this.origin,
+    required this.spread,
+    required this.fade,
+    required this.color,
+  }) : super(repaint: Listenable.merge([spread, fade]));
+
+  /// 指を置いた位置（レス内のローカル座標）。まだ押されていなければ null。
+  final Offset? origin;
+  final Animation<double> spread;
+  final Animation<double> fade;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final origin = this.origin;
+    if (origin == null || fade.value == 0) return;
+    // 指から一番遠い角まで届く大きさを終点にして、レス全体が沈むようにする。
+    final dx = math.max(origin.dx, size.width - origin.dx);
+    final dy = math.max(origin.dy, size.height - origin.dy);
+    final radius =
+        math.sqrt(dx * dx + dy * dy) *
+        Curves.easeOutCubic.transform(spread.value);
+    if (radius <= 0) return;
+    // 広がった円が上下のレスに掛からないよう、このレスの矩形で切り取る
+    // （ClipRect を挟むとレスごとにレイヤーが増えるので、描くときだけ切る）。
+    canvas.save();
+    canvas.clipRect(Offset.zero & size);
+    canvas.drawCircle(
+      origin,
+      radius,
+      Paint()..color = color.withValues(alpha: color.a * fade.value),
+    );
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(_PressSpread old) =>
+      old.origin != origin ||
+      old.color != color ||
+      old.spread != spread ||
+      old.fade != fade;
 }
 
 /// 名前の末尾に付く括弧書き（ワッチョイ・端末種別など）を切り出す。

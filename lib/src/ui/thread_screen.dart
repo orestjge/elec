@@ -18,6 +18,7 @@ import '../net/ng_store.dart';
 import '../net/read_history.dart';
 import 'attachment_uploader.dart';
 import 'compose_style.dart';
+import 'back_swipe.dart';
 import 'embed_urls.dart';
 import 'image_urls.dart';
 import 'ng_screen.dart';
@@ -54,10 +55,28 @@ class ThreadScreen extends StatefulWidget {
     this.initialResCount = 0,
     this.creatorMetadent,
     this.defaultName,
+    this.active = true,
+    this.onClose,
   });
 
   final String threadKey;
   final String threadTitle;
+
+  /// この画面が今表示されているか。
+  ///
+  /// スレ画面は、閉じずに表示だけ外れることがある（一覧の裏に控えて、また開く
+  /// ときに取得済みの本文とスクロール位置をそのまま使うため）。控えている間は
+  /// 更新を止めて既読位置を保存し、表に戻ったら開き直したときと同じ状態
+  /// （新着ラインと再開位置）を作り直す。
+  ///
+  /// 画面ごと閉じる（unmount する）場合はここを触る必要はない。
+  final bool active;
+
+  /// 「戻る」の受け取り先。
+  ///
+  /// 一覧の中に置かれているとき（ルートとして開かれていないとき）に、AppBar の
+  /// 戻るボタンをここへ回す。null ならルートを閉じる既定の動きになる。
+  final VoidCallback? onClose;
   final HttpFetcher? fetcher;
   final EdgeEndpoints endpoints;
   final Duration pollInterval;
@@ -159,6 +178,9 @@ class _ThreadScreenState extends State<ThreadScreen>
   /// 追跡する。これより後ろのレスが「未読」で、「最新へ」の件数の基準になる。
   int _furthestRead = 0;
 
+  /// 一度でも取得を始めたか。控えのまま一度も表に出ていない画面は false。
+  bool _loadStarted = false;
+
   /// スレを開いた時点のレス数。これを超える番号が「新着（今回開いてから増えた
   /// 分）」で、新着ラインの境界になる。スクロールでは動かない。
   int _openCount = 0;
@@ -174,13 +196,7 @@ class _ThreadScreenState extends State<ThreadScreen>
   /// 番号が取れる場合（[PostAccepted.resNum]）は [_pendingOwnPosts] を使わないので、
   /// 再取得ループの継続はこのフラグで判断する。
   bool _awaitingOwnPost = false;
-  double _horizontalDragDistance = 0;
-  double _verticalDragDistance = 0;
-  bool _trackingSwipe = false;
   final _selectedBodyResNumbers = <int>{};
-  Timer? _swipeStartTimer;
-  static const double _swipeDistanceThreshold = 25;
-  static const Duration _swipeStartTimeout = Duration(milliseconds: 450);
   static const int _postRefreshAttempts = 4;
   static const Duration _postRefreshRetryDelay = Duration(milliseconds: 700);
 
@@ -224,18 +240,67 @@ class _ThreadScreenState extends State<ThreadScreen>
     _ng.addListener(_onNgChanged);
     _positions.itemPositions.addListener(_onPositions);
     WidgetsBinding.instance.addObserver(this);
+    // 控えとして置かれただけ（まだ表に出ていない）なら、表に出るまで何もしない。
+    // 一覧の裏で無駄に取得・更新しないため。
+    if (widget.active) _open();
+  }
+
+  /// 初めて表に出たとき。履歴に残し、本文を取ってポーリングを始める。
+  void _open() {
+    _loadStarted = true;
+    _markOpened();
+    _initialLoad();
+    _startPolling();
+  }
+
+  @override
+  void didUpdateWidget(ThreadScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.active == oldWidget.active) return;
+    if (widget.active) {
+      _enter();
+    } else {
+      _leave();
+    }
+  }
+
+  /// 表に戻ったとき。開き直したときと同じ状態にする。
+  ///
+  /// 本文は控えている間のものが残っているので、読み込み中は出さずにそのまま
+  /// 見せ、裏で取り直してから新着ラインと再開位置を貼り直す。
+  void _enter() {
+    // 控えのまま一度も表に出ていなければ、ここが初回。
+    if (!_loadStarted) {
+      _open();
+      return;
+    }
+    _markOpened();
+    _startPolling();
+    unawaited(_reload());
+  }
+
+  /// 表示から外れたとき。閉じたときと同じだけの後始末をする。
+  void _leave() {
+    _timer?.cancel();
+    _persistReadPosition();
+    // 見えていない画面が入力を持ったままだとキーボードが残るので手放す。
+    if (_composerFocus.hasFocus) _composerFocus.unfocus();
+    if (_searchFocus.hasFocus) _searchFocus.unfocus();
+  }
+
+  void _markOpened() {
     unawaited(
       _history.markOpenedThread(
         ThreadSummary(
           key: widget.threadKey,
-          title: widget.threadTitle,
-          resCount: widget.initialResCount,
+          title: _effectiveTitle,
+          resCount: _state.res.isNotEmpty
+              ? _state.res.length
+              : widget.initialResCount,
           capName: null,
         ),
       ),
     );
-    _initialLoad();
-    _startPolling();
   }
 
   @override
@@ -250,7 +315,6 @@ class _ThreadScreenState extends State<ThreadScreen>
     WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
     _postRefreshTimer?.cancel();
-    _swipeStartTimer?.cancel();
     _topSnackTimer?.cancel();
     _topSnackEntry?.remove();
     _composer.dispose();
@@ -344,30 +408,12 @@ class _ThreadScreenState extends State<ThreadScreen>
       );
       if (!mounted) return;
       final lastSeen = _history.lastSeen(widget.threadKey);
-      // 新着境界と初回スクロール位置を決める。
-      // - 未読（初回）: 先頭から（インデックス 0）。新着ライン無し。
-      // - 既読＆新着あり: 前回位置に新着ラインを置き、そこへ合わせる。
-      // - 既読＆新着なし: 末尾（続き）へ。
-      // 新着ラインの少し手前に着地させて、直前の流れを思い出せるようにする。
-      const overlap = 3;
-      final int openCount;
-      final int initialIndex;
-      if (lastSeen == null) {
-        openCount = total;
-        initialIndex = 0;
-      } else if (lastSeen < total) {
-        openCount = lastSeen; // ここから下が新着
-        // 新着ラインの行位置は items 上で openCount。数レス手前に寄せる。
-        initialIndex = (lastSeen - overlap) < 0 ? 0 : lastSeen - overlap;
-      } else {
-        openCount = total;
-        initialIndex = total > 0 ? total - 1 : 0;
-      }
+      final entry = _entryPositions(total, lastSeen);
       setState(() {
         _state = r.state;
-        _openCount = openCount;
+        _openCount = entry.openCount;
         _furthestRead = lastSeen ?? 0;
-        _initialIndex = initialIndex;
+        _initialIndex = entry.initialIndex;
         _loading = false;
         _error = null;
       });
@@ -378,6 +424,49 @@ class _ThreadScreenState extends State<ThreadScreen>
         _loading = false;
       });
     }
+  }
+
+  /// 全 [total] レスのスレを開いたときの、新着境界（ここから下が新着）と
+  /// 着地位置。[lastSeen] は前回どこまで見たか（未読なら null）。
+  ///
+  /// - 未読（初回）: 先頭から（インデックス 0）。新着ライン無し。
+  /// - 既読＆新着あり: 前回位置に新着ラインを置き、そこへ合わせる。
+  /// - 既読＆新着なし: 末尾（続き）へ。
+  ///
+  /// 新着ラインの少し手前に着地させて、直前の流れを思い出せるようにする。
+  ({int openCount, int initialIndex}) _entryPositions(
+    int total,
+    int? lastSeen,
+  ) {
+    const overlap = 3;
+    if (lastSeen == null) return (openCount: total, initialIndex: 0);
+    if (lastSeen < total) {
+      // 新着ラインの行位置は items 上で lastSeen。数レス手前に寄せる。
+      return (
+        openCount: lastSeen,
+        initialIndex: lastSeen - overlap < 0 ? 0 : lastSeen - overlap,
+      );
+    }
+    return (openCount: total, initialIndex: total > 0 ? total - 1 : 0);
+  }
+
+  /// 控えていた画面が表に戻ったときの取り直し。
+  ///
+  /// 本文は残っているので読み込み表示は出さず、取り直せた時点で新着ラインだけ
+  /// 貼り直す。
+  ///
+  /// **読んでいた位置は動かさない**。控えに回すのは「閉じた」ではなく「離れた」
+  /// なので、戻ったときは離れた場所がそのまま見えているのが自然なため。控えて
+  /// いる間に増えたレスは、その下に新着ラインを挟んで続く。
+  Future<void> _reload() async {
+    if (_loading) return; // 初回取得の途中ならそちらに任せる
+    await _poll(force: true);
+    if (!mounted) return;
+    final lastSeen = _history.lastSeen(widget.threadKey);
+    setState(() {
+      _openCount = _entryPositions(_state.res.length, lastSeen).openCount;
+      _furthestRead = lastSeen ?? _furthestRead;
+    });
   }
 
   Future<void> _poll({bool force = false}) async {
@@ -1371,7 +1460,7 @@ class _ThreadScreenState extends State<ThreadScreen>
   }
 
   PageRoute<void> _threadLinkRoute(String threadKey) {
-    return PageRouteBuilder<void>(
+    return SwipeBackPageRoute<void>(
       pageBuilder: (context, animation, secondaryAnimation) => ThreadScreen(
         threadKey: threadKey,
         // タイトルは開くまで不明。dat の 1 レス目から補完する。
@@ -1389,66 +1478,7 @@ class _ThreadScreenState extends State<ThreadScreen>
         pickAndUploadImage: widget.pickAndUploadImage,
         defaultName: widget.defaultName,
       ),
-      transitionDuration: const Duration(milliseconds: 240),
-      reverseTransitionDuration: const Duration(milliseconds: 220),
-      transitionsBuilder: (context, animation, secondaryAnimation, child) {
-        final curved = CurvedAnimation(
-          parent: animation,
-          curve: Curves.easeOutCubic,
-          reverseCurve: Curves.easeInCubic,
-        );
-        return SlideTransition(
-          position: Tween<Offset>(
-            begin: const Offset(1, 0),
-            end: Offset.zero,
-          ).animate(curved),
-          child: child,
-        );
-      },
     );
-  }
-
-  void _handlePointerDown(PointerDownEvent event) {
-    _horizontalDragDistance = 0;
-    _verticalDragDistance = 0;
-    // 入力欄の上で始まったドラッグはカーソル移動・文字選択なので戻る操作にしない。
-    // 一覧側で始まったスワイプは入力中（キーボード表示中）でも戻れるようにする。
-    _trackingSwipe = !_bodySelectionActive && !_isOnComposer(event.position);
-    _swipeStartTimer?.cancel();
-    if (!_trackingSwipe) return;
-    _swipeStartTimer = Timer(_swipeStartTimeout, () {
-      _trackingSwipe = false;
-    });
-  }
-
-  /// グローバル座標 [globalPosition] が入力欄の矩形内か。
-  bool _isOnComposer(Offset globalPosition) {
-    final box = _composerKey.currentContext?.findRenderObject() as RenderBox?;
-    if (box == null || !box.hasSize) return false;
-    final rect = box.localToGlobal(Offset.zero) & box.size;
-    return rect.contains(globalPosition);
-  }
-
-  void _handlePointerMove(PointerMoveEvent event) {
-    if (!_trackingSwipe) return;
-    _horizontalDragDistance += event.delta.dx;
-    _verticalDragDistance += event.delta.dy.abs();
-  }
-
-  void _handlePointerUp(PointerUpEvent event) {
-    _swipeStartTimer?.cancel();
-    if (!_trackingSwipe) return;
-    _trackingSwipe = false;
-    if (_bodySelectionActive) return;
-    if (_horizontalDragDistance < _swipeDistanceThreshold) return;
-    if (_horizontalDragDistance < _verticalDragDistance * 1.2) return;
-    final navigator = Navigator.of(context);
-    if (navigator.canPop()) navigator.pop();
-  }
-
-  void _handlePointerCancel(PointerCancelEvent event) {
-    _swipeStartTimer?.cancel();
-    _trackingSwipe = false;
   }
 
   // 本文以外（名前欄・ヘッダー・余白など）をタップしたとき、選択中なら解除する。
@@ -1465,9 +1495,8 @@ class _ThreadScreenState extends State<ThreadScreen>
         ? _selectedBodyResNumbers.add(resNumber)
         : _selectedBodyResNumbers.remove(resNumber);
     if (!changed) return;
-    setState(() {
-      if (active) _trackingSwipe = false;
-    });
+    // 選択中は戻るスワイプを止める（横に引く操作が選択範囲の変更になるため）。
+    setState(() {});
   }
 
   /// スレ画面の通知は入力欄や末尾レスに重ならないよう、上部へ出す。
@@ -1607,6 +1636,11 @@ class _ThreadScreenState extends State<ThreadScreen>
     return Scaffold(
       appBar: AppBar(
         toolbarHeight: 80,
+        // ルートとして開かれていないときは自前で戻るを出す（既定の実装は
+        // ルートが積まれているかどうかで判断するため、ここでは出てこない）。
+        leading: widget.onClose == null
+            ? null
+            : BackButton(onPressed: widget.onClose),
         // タイトルは重要なので AppBar 内でできるだけ読ませる。極端に長い場合は
         // これまで通りタップで全文を出す。
         title: _searching
@@ -1673,29 +1707,26 @@ class _ThreadScreenState extends State<ThreadScreen>
               )
             : null,
       ),
-      body: Listener(
+      body: GestureDetector(
         behavior: HitTestBehavior.translucent,
-        onPointerDown: _handlePointerDown,
-        onPointerMove: _handlePointerMove,
-        onPointerUp: _handlePointerUp,
-        onPointerCancel: _handlePointerCancel,
-        child: GestureDetector(
-          behavior: HitTestBehavior.translucent,
-          onTap: _handleBackgroundTap,
-          child: Column(
-            children: [
-              Expanded(child: _body()),
-              _Composer(
-                key: _composerKey,
-                controller: _composer,
-                focusNode: _composerFocus,
-                onSend: _submit,
-                onPickAndUploadImage: _pickAndUploadImage,
-                onPickAndUploadFile: _pickAndUploadFile,
-                enabled: _canWrite,
-              ),
-            ],
-          ),
+        onTap: _handleBackgroundTap,
+        child: Column(
+          children: [
+            // 戻るスワイプは一覧側でだけ受ける。入力欄の上の横ドラッグはカーソル
+            // 移動・文字選択なので、そちらへ触らない。
+            Expanded(
+              child: BackSwipe(enabled: !_bodySelectionActive, child: _body()),
+            ),
+            _Composer(
+              key: _composerKey,
+              controller: _composer,
+              focusNode: _composerFocus,
+              onSend: _submit,
+              onPickAndUploadImage: _pickAndUploadImage,
+              onPickAndUploadFile: _pickAndUploadFile,
+              enabled: _canWrite,
+            ),
+          ],
         ),
       ),
     );
@@ -1778,7 +1809,6 @@ class _ThreadScreenState extends State<ThreadScreen>
                 onReply: _reply,
                 onBodySelectionActiveChanged: (active) =>
                     _handleBodySelectionActiveChanged(item.number, active),
-                onTap: () => _showResActions(item),
                 onLongPress: () => _showResActions(item),
                 bodySelectable: false,
                 isOwn: _history.isOwnPost(widget.threadKey, item.number),
