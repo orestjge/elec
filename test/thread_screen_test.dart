@@ -62,13 +62,14 @@ void main() {
   );
   final over1000 = datLine('1001<><>Over 1000 Thread<>このスレッドは1000を超えました。<>');
 
-  Widget app(HttpFetcher f) => MaterialApp(
+  Widget app(HttpFetcher f, {String? defaultName}) => MaterialApp(
     home: ThreadScreen(
       threadKey: '1762103691',
       threadTitle: 'テストスレ',
       fetcher: f,
       pollInterval: const Duration(seconds: 5),
       readHistory: ReadHistory(MemoryReadHistoryStorage()),
+      defaultName: defaultName,
     ),
   );
 
@@ -624,6 +625,125 @@ void main() {
       ),
       findsNWidgets(3),
     );
+  });
+
+  testWidgets('返信数を押せるレスは番号の当たり判定を指の大きさまで広げる', (tester) async {
+    final f = QueueFetcher([
+      ok([...res1, ...res2, ...res3]),
+    ]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    // レス 1 は返信を集めていて押せるので、文字の高さ（16px）ではなく、
+    // ヘッダ行が返信ボタンのために元から持っている高さまで使う。
+    expect(tester.getSize(resNumber(0)).height, greaterThanOrEqualTo(26));
+    // 返信のないレス 3 は 1 行分のままにして、一覧の詰まりを保つ。
+    expect(tester.getSize(resNumber(2)).height, lessThan(26));
+  });
+
+  testWidgets('名無しはヘッダから名前を省き、コテハンだけ残す', (tester) async {
+    final kote = datLine(
+      'コテハン◆Ab12<><>2025/11/03(月) 04:00:00.000 ID:ccc<> 名乗ってるレス <>',
+    );
+    final f = QueueFetcher([
+      ok([...res1, ...kote]),
+    ]);
+    await tester.pumpWidget(app(f, defaultName: '名無し'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('名無し'), findsNothing);
+    expect(find.text('コテハン◆Ab12'), findsOneWidget);
+    // 本文は消えていない（消したのは名前だけ）。
+    expect(find.text('最初のレス'), findsOneWidget);
+  });
+
+  testWidgets('名無しにワッチョイが付いていれば括弧の中だけ残す', (tester) async {
+    // 実データと同じ形（dat の名前欄はタグ込みで来る）。
+    final anon = datLine(
+      'エッヂの名無し </b>(L20 NKP8-6NV7)<b><><>2025/11/03(月) 05:00:00.000 '
+      'ID:ddd<> ワッチョイ付きの名無し <>スレタイ',
+    );
+    final kote = datLine(
+      'コテハン◆Ab12 </b>(L20 ZZZZ-1111)<b><><>2025/11/03(月) 05:00:01.000 '
+      'ID:eee<> ワッチョイ付きのコテハン <>',
+    );
+    final f = QueueFetcher([
+      ok([...anon, ...kote]),
+    ]);
+    await tester.pumpWidget(app(f, defaultName: 'エッヂの名無し'));
+    await tester.pumpAndSettle();
+
+    // 毎行同じ既定名は消える。ワッチョイは書いた人の情報なので残す。
+    expect(find.textContaining('エッヂの名無し'), findsNothing);
+    expect(find.text('(L20 NKP8-6NV7)'), findsOneWidget);
+    // コテハンは既定名と違うので、ワッチョイごとそのまま出す。
+    expect(find.text('コテハン◆Ab12 (L20 ZZZZ-1111)'), findsOneWidget);
+  });
+
+  testWidgets('板の既定名が分からなければ名前を省かない', (tester) async {
+    final f = QueueFetcher([
+      ok([...res1]),
+    ]);
+    // defaultName なし＝名無しかどうか判断できないので、そのまま出す。
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    expect(find.text('名無し'), findsOneWidget);
+  });
+
+  testWidgets('省いた名前でも検索に引っかかれば表示する', (tester) async {
+    final f = QueueFetcher([
+      ok([...res1]),
+    ]);
+    await tester.pumpWidget(app(f, defaultName: '名無し'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('名無し'), findsNothing);
+
+    await tester.tap(find.text('テストスレ').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('スレ内検索'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'スレ内検索'), '名無し');
+    await tester.pumpAndSettle();
+
+    // 一致件数に数えたレスの一致箇所が画面のどこにも無い、という状態を作らない。
+    expect(find.textContaining('名無し', findRichText: true), findsWidgets);
+  });
+
+  testWidgets('時刻は時分だけ出し、タップで完全な日時を出す', (tester) async {
+    final f = QueueFetcher([
+      ok([...res1]),
+    ]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    expect(find.text('02:14'), findsOneWidget);
+    expect(find.text('02:14:51'), findsNothing);
+
+    await tester.tap(find.text('02:14'));
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('2025/11/03(月) 02:14:51.907'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('レスのメニューからも返信一覧へ入れる', (tester) async {
+    final f = QueueFetcher([
+      ok([...res1, ...res2, ...res3]),
+    ]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    // 番号横の吹き出しを押し外すとこのメニューが開くので、ここからも同じ
+    // 返信一覧へ行けるようにしてある。
+    await tester.longPress(find.text('最初のレス'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('返信 2 件を見る'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('会話 #1  3件'), findsOneWidget);
   });
 
   testWidgets('会話シートは返信アイコンを押したときだけ入力欄を出す', (tester) async {

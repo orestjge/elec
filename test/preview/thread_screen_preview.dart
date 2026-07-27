@@ -20,6 +20,7 @@ import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:edge_core/edge_core.dart';
+import 'package:elec/src/net/board.dart';
 import 'package:elec/src/net/read_history.dart';
 import 'package:elec/src/ui/thread_screen.dart';
 import 'package:elec/theme.dart';
@@ -46,7 +47,9 @@ class _StaticFetcher implements HttpFetcher {
 
 /// 目印が一通り出るスレを組む。
 /// レス 2 に 5 件・レス 3 に 12 件の返信、レス 8 は自分のレス（＝自分宛も付く）。
-List<int> _dat() {
+/// [watchoi] を立てると、名前に `</b>(L20 ...)<b>` が付いた板（ワッチョイ有効）の
+/// dat になる。実データと同じ形にしてある（experiment_sample.dat 参照）。
+List<int> _dat({bool watchoi = false}) {
   const ids = ['aB3xYz9Qw', 'Kd8mN2pLr', 'Qw7vT4sZx', 'Hj5cB1nMe'];
   final bytes = <int>[];
   for (var i = 1; i <= 60; i++) {
@@ -60,9 +63,19 @@ List<int> _dat() {
       _ when i > 30 && i <= 42 => '>>3 それな',
       _ => 'ふつうのレス $i。本文はこのくらいの長さで折り返しを見る。',
     };
+    // 名無しに混ざるコテハン。名無しの名前を省いたときの見え方（コテハンだけが
+    // 残る・ID の位置が揃う）を確かめるために入れておく。
+    final base = switch (i) {
+      4 => 'ながい名前のコテハン◆Ab12Cd34Ef',
+      5 => 'これはかなり長いコテハンの名前です◆Zz99Yy88',
+      _ => 'エッヂの名無し',
+    };
+    final name = watchoi
+        ? '$base </b>(L20 ${ids[i % ids.length].substring(0, 4)}-6NV7)<b>'
+        : base;
     bytes.addAll(
       _datLine(
-        'エッヂの名無し<><>2025/11/03(月) 02:14:${i.toString().padLeft(2, '0')}.907 '
+        '$name<><>2025/11/03(月) 02:14:${i.toString().padLeft(2, '0')}.907 '
         'ID:${ids[i % ids.length]}<> $body <>${i == 1 ? 'スレタイ' : ''}',
       ),
     );
@@ -70,8 +83,16 @@ List<int> _dat() {
   return bytes;
 }
 
-Future<void> _shoot(WidgetTester tester, ThemeData theme, String out) async {
-  tester.view.physicalSize = const Size(420 * 2, 900 * 2);
+/// [width] は論理ピクセルの画面幅。既定は普通の端末幅。狭い端末（ヘッダが
+/// 折り返す幅）での見え方も確かめられるように可変にしてある。
+Future<void> _shoot(
+  WidgetTester tester,
+  ThemeData theme,
+  String out, {
+  double width = 420,
+  bool watchoi = false,
+}) async {
+  tester.view.physicalSize = Size(width * 2, 900 * 2);
   tester.view.devicePixelRatio = 2;
   addTearDown(tester.view.reset);
 
@@ -87,10 +108,12 @@ Future<void> _shoot(WidgetTester tester, ThemeData theme, String out) async {
         child: ThreadScreen(
           threadKey: '1762103691',
           threadTitle: 'スレマップと返信数の見た目を確認するスレ',
-          fetcher: _StaticFetcher(_dat()),
+          fetcher: _StaticFetcher(_dat(watchoi: watchoi)),
           // 撮っている間にポーリングが走らないよう十分長くする。
           pollInterval: const Duration(hours: 1),
           readHistory: history,
+          // 一覧から開いたときと同じに、板の既定名を渡す（名無しの名前が省かれる）。
+          defaultName: Board.eddibb.defaultName,
         ),
       ),
     ),
@@ -128,5 +151,25 @@ void main() {
 
   testWidgets('dark', (tester) async {
     await _shoot(tester, ElecTheme.dark(), '$dir/thread_dark.png');
+  });
+
+  // 名前にワッチョイが付く板。既定名が消えて括弧書きだけ残るのを見る。
+  testWidgets('watchoi', (tester) async {
+    await _shoot(
+      tester,
+      ElecTheme.light(),
+      '$dir/thread_watchoi.png',
+      watchoi: true,
+    );
+  });
+
+  // ヘッダが折り返す幅。番号・名前・ID・時刻の並びが崩れないかを見る。
+  testWidgets('narrow', (tester) async {
+    await _shoot(
+      tester,
+      ElecTheme.light(),
+      '$dir/thread_narrow.png',
+      width: 340,
+    );
   });
 }

@@ -53,6 +53,7 @@ class ThreadScreen extends StatefulWidget {
     this.initialStatusLabel,
     this.initialResCount = 0,
     this.creatorMetadent,
+    this.defaultName,
   });
 
   final String threadKey;
@@ -66,6 +67,10 @@ class ThreadScreen extends StatefulWidget {
   /// 渡され、スレタイのメニューから「このスレ主を NG」できるようにする。
   /// 直接キーで開いた等で不明なら null。
   final String? creatorMetadent;
+
+  /// 板の既定の名前（`BBS_NONAME_NAME`）。名無しのレスから名前を省くのに使う。
+  /// 詳細は [PostItem.defaultName]。板の設定が未取得なら null。
+  final String? defaultName;
 
   /// NG（あぼーん）設定。既定はアプリ共有インスタンス（テストで差し替え可能）。
   final NgStore? ngStore;
@@ -712,6 +717,7 @@ class _ThreadScreenState extends State<ThreadScreen>
     final id = res.id;
     final idCount = _idCounts(_state.res)[id] ?? 1;
     final idOrdinal = _idOrdinals(_state.res)[res.number] ?? 1;
+    final replyCount = replyCounts(_state.res)[res.number] ?? 0;
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -746,10 +752,22 @@ class _ThreadScreenState extends State<ThreadScreen>
                     blurImages: guroMaskedResNumbers(
                       _state.res,
                     ).contains(res.number),
+                    defaultName: widget.defaultName,
                   ),
                 ),
               ),
               const Divider(height: 1),
+              // 番号横の吹き出しは小さいので、押し外してこのメニューが開いた
+              // ときでも同じ返信一覧へ入れるようにしておく。
+              if (replyCount > 0)
+                ListTile(
+                  leading: const Icon(Icons.chat_bubble_outline),
+                  title: Text('返信 $replyCount 件を見る'),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _showReplies(res.number);
+                  },
+                ),
               ListTile(
                 leading: const Icon(Icons.copy_all),
                 title: const Text('レス全体をコピー'),
@@ -956,6 +974,7 @@ class _ThreadScreenState extends State<ThreadScreen>
                       isOwn: _history.isOwnPost(widget.threadKey, post.number),
                       isReplyToOwn: _isReplyToOwnPost(post),
                       blurImages: guroMasked.contains(post.number),
+                      defaultName: widget.defaultName,
                     );
                   },
                 ),
@@ -1034,6 +1053,7 @@ class _ThreadScreenState extends State<ThreadScreen>
           onShowActions: _showResActions,
           isOwnPost: (n) => _history.isOwnPost(widget.threadKey, n),
           isReplyToOwn: _isReplyToOwnPost,
+          defaultName: widget.defaultName,
           ng: _ng,
           revealedNg: _revealedNg,
           enabled: _canWrite,
@@ -1367,6 +1387,7 @@ class _ThreadScreenState extends State<ThreadScreen>
         imgurUploader: _imgurUploader,
         imageUploadSettings: _imageUploadSettings,
         pickAndUploadImage: widget.pickAndUploadImage,
+        defaultName: widget.defaultName,
       ),
       transitionDuration: const Duration(milliseconds: 240),
       reverseTransitionDuration: const Duration(milliseconds: 220),
@@ -1765,6 +1786,7 @@ class _ThreadScreenState extends State<ThreadScreen>
                 blurImages: guroMasked.contains(item.number),
                 highlightQuery: searchQuery,
                 isCurrentMatch: item.number == currentMatchNumber,
+                defaultName: widget.defaultName,
               );
             },
           ),
@@ -2401,6 +2423,7 @@ class _ConversationSheet extends StatefulWidget {
     required this.ng,
     required this.revealedNg,
     required this.enabled,
+    this.defaultName,
   });
 
   final String title;
@@ -2441,6 +2464,9 @@ class _ConversationSheet extends StatefulWidget {
 
   /// 入力欄を有効にするか（停止スレでは false）。
   final bool enabled;
+
+  /// 板の既定の名前。名無しのレスから名前を省くのに使う（[PostItem.defaultName]）。
+  final String? defaultName;
 
   @override
   State<_ConversationSheet> createState() => _ConversationSheetState();
@@ -2577,6 +2603,7 @@ class _ConversationSheetState extends State<_ConversationSheet> {
                                 blurImages: widget.guroMasked.contains(
                                   entry.res.number,
                                 ),
+                                defaultName: widget.defaultName,
                               ),
                       ),
                     );
