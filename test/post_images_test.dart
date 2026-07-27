@@ -147,6 +147,14 @@ void main() {
     expect(find.byIcon(Icons.play_circle_fill), findsNWidgets(2));
     expect(find.text('YouTube'), findsOneWidget);
     expect(find.text('ニコニコ動画'), findsOneWidget);
+    final youtubeCard = tester.getRect(
+      find.ancestor(of: find.text('YouTube'), matching: find.byType(InkWell)),
+    );
+    final niconicoCard = tester.getRect(
+      find.ancestor(of: find.text('ニコニコ動画'), matching: find.byType(InkWell)),
+    );
+    expect(youtubeCard.width / youtubeCard.height, moreOrLessEquals(16 / 9));
+    expect(niconicoCard.width / niconicoCard.height, moreOrLessEquals(1.25));
 
     await tester.tap(find.text('ニコニコ動画'));
     expect(tapped.single.url, Uri.parse('https://www.nicovideo.jp/watch/sm9'));

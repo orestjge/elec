@@ -419,12 +419,13 @@ class _EmbedThumb extends StatelessWidget {
 
   Widget _card(BuildContext context, {required String? thumbnailUrl}) {
     final scheme = Theme.of(context).colorScheme;
+    final aspectRatio = video.kind == EmbedKind.youtube ? 16 / 9 : 1.25;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(10),
       child: Container(
         height: size,
-        width: size * 1.25,
+        width: size * aspectRatio,
         decoration: BoxDecoration(
           color: scheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(10),
