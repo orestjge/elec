@@ -195,9 +195,7 @@ void main() {
     VideoPlayerPlatform.instance = platform;
     final url = Uri.parse('https://example.com/movie.mp4');
 
-    await tester.pumpWidget(
-      MaterialApp(home: VideoPlayerScreen(url: url)),
-    );
+    await tester.pumpWidget(MaterialApp(home: VideoPlayerScreen(url: url)));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
 

@@ -38,10 +38,10 @@ void main() {
   });
 
   test('音声拡張子の URL を拾う', () {
-    expect(
-      audios('曲 https://files.catbox.moe/a.mp3 と http://x/b.m4a?dl=1'),
-      ['https://files.catbox.moe/a.mp3', 'http://x/b.m4a?dl=1'],
-    );
+    expect(audios('曲 https://files.catbox.moe/a.mp3 と http://x/b.m4a?dl=1'), [
+      'https://files.catbox.moe/a.mp3',
+      'http://x/b.m4a?dl=1',
+    ]);
     expect(audios('a http://x/c.OGG b http://x/d.flac'), [
       'http://x/c.OGG',
       'http://x/d.flac',
@@ -68,7 +68,9 @@ void main() {
   test('pbs.twimg.com/media は format クエリで画像展開する', () {
     // 拡張子は無いが format=jpg なので画像扱い。URL 全体（クエリ含む）を返す。
     expect(
-      urls('https://pbs.twimg.com/media/HNo8iF5bsAAURlS?format=jpg&name=4096x4096'),
+      urls(
+        'https://pbs.twimg.com/media/HNo8iF5bsAAURlS?format=jpg&name=4096x4096',
+      ),
       ['https://pbs.twimg.com/media/HNo8iF5bsAAURlS?format=jpg&name=4096x4096'],
     );
     // png も対象。

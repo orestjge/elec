@@ -16,9 +16,7 @@ enum FileUploadProvider {
 
 @immutable
 class FileUploadSettingsSnapshot {
-  const FileUploadSettingsSnapshot({
-    this.provider = FileUploadProvider.catbox,
-  });
+  const FileUploadSettingsSnapshot({this.provider = FileUploadProvider.catbox});
 
   final FileUploadProvider provider;
 

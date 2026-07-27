@@ -109,7 +109,12 @@ void main() {
         now: () => now,
       );
       await a.markOpenedThread(
-        const ThreadSummary(key: '9', title: '見たスレ', resCount: 3, capName: null),
+        const ThreadSummary(
+          key: '9',
+          title: '見たスレ',
+          resCount: 3,
+          capName: null,
+        ),
       );
 
       final b = ReadHistory(FileReadHistoryStorage(directory: dir));

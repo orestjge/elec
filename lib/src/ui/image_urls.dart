@@ -20,10 +20,7 @@ final _audioExtRe = RegExp(
 
 /// pbs.twimg.com の画像 URL は拡張子を持たず、`format=jpg` 等のクエリで
 /// 種別が決まる（例: `https://pbs.twimg.com/media/XXXX?format=jpg&name=large`）。
-final _twimgFormatRe = RegExp(
-  r'^(jpe?g|png|gif|webp)$',
-  caseSensitive: false,
-);
+final _twimgFormatRe = RegExp(r'^(jpe?g|png|gif|webp)$', caseSensitive: false);
 
 /// [text] 中の画像 URL を出現順・重複除去で返す。
 List<Uri> imageUrlsIn(String text) {
