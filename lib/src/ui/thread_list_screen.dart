@@ -698,6 +698,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
         initialStatusLabel: _statusLabel(thread),
         initialResCount: thread.resCount,
         creatorMetadent: thread.metadent,
+        defaultName: widget.board.defaultName,
       ),
       transitionDuration: const Duration(milliseconds: 240),
       reverseTransitionDuration: const Duration(milliseconds: 220),

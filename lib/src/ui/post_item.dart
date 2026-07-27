@@ -34,6 +34,7 @@ class PostItem extends StatelessWidget {
     this.blurImages = false,
     this.highlightQuery = '',
     this.isCurrentMatch = false,
+    this.defaultName,
   });
 
   final Res res;
@@ -94,6 +95,17 @@ class PostItem extends StatelessWidget {
 
   /// このレスが現在ジャンプ中の一致レスか。アイテムごと強調する。
   final bool isCurrentMatch;
+
+  /// 板の既定の名前（`BBS_NONAME_NAME`。例: `エッヂの名無し`）。
+  ///
+  /// これと同じ名前＝名無しなので、ヘッダから名前ごと省く。ほとんどのレスが
+  /// 名無しなのに毎行同じ文字列が入ると、その分だけ ID の開始位置が名前の長さで
+  /// 前後してしまい、上下のレスで ID を見比べにくいため。コテハンだけが残るので
+  /// 「誰か」が付いているレスも見つけやすくなる。
+  ///
+  /// 板から取れていない（null）ときは省略しない。名無しかどうか判断できない
+  /// 名前を勝手に消すと、コテハンを消す事故になるため。
+  final String? defaultName;
 
   @override
   Widget build(BuildContext context) {
@@ -159,7 +171,7 @@ class PostItem extends StatelessWidget {
         children: [
           _Header(
             res: res,
-            name: name.isEmpty ? '名無し' : name,
+            name: _headerName(name),
             idCount: idCount,
             idOrdinal: idOrdinal,
             onTapId: onTapId,
@@ -213,7 +225,57 @@ class PostItem extends StatelessWidget {
       child: content,
     );
   }
+
+  /// ヘッダに出す名前と、その見せ方（[text] が空ならヘッダに名前を出さない）。
+  ///
+  /// [defaultName] は [PostItem.defaultName]。
+  ///
+  /// - 名無し（名前欄が空、または板の既定名そのもの）は名前ごと省く。
+  /// - ワッチョイのように既定名へ括弧書きが付くだけの名前
+  ///   （`エッヂの名無し (L20 ipkW-6PVw)`）は、**括弧の中だけ残す**。毎行同じ
+  ///   既定名は読む意味がないが、ワッチョイはそのレスを書いた人の情報なので
+  ///   落とさない。ただしコテハンではないので [muted]＝控えめな見た目にして、
+  ///   名乗っている人だけが目立つ状態を保つ。
+  /// - コテハン（既定名と違う名前）はワッチョイが付いていてもそのまま出す。
+  ///
+  /// スレ内検索でその名前が引っかかっているときは、何も省かず元の名前を出す。
+  /// 件数に数えたレスの一致箇所が画面のどこにも無い、という状態を作らないため。
+  ({String text, bool muted}) _headerName(String name) {
+    final query = highlightQuery.trim().toLowerCase();
+    if (query.isNotEmpty && name.toLowerCase().contains(query)) {
+      return (text: name, muted: false);
+    }
+    if (name.isEmpty) return (text: '', muted: false);
+    // 既定名が分からなければ何も省かない。名無しかどうか判断できない名前を
+    // 消すと、コテハンを消す事故になるため。
+    if (defaultName == null) return (text: name, muted: false);
+    if (name == defaultName) return (text: '', muted: false);
+
+    final match = _nameSuffixRe.firstMatch(name);
+    if (match != null) {
+      final base = match.group(1)!.trim();
+      if (base.isEmpty || base == defaultName) {
+        return (text: match.group(2)!, muted: true);
+      }
+    }
+    return (text: name, muted: false);
+  }
 }
+
+/// 名前の末尾に付く括弧書き（ワッチョイ・端末種別など）を切り出す。
+///
+/// `エッヂの名無し (L20 ipkW-6PVw)` を `エッヂの名無し` と `(L20 ipkW-6PVw)` に
+/// 分ける。dat の名前欄は `ポッドの名無し </b>(L20 NKP8-6NV7)<b>` のように
+/// タグ込みで来るが、[htmlToText] を通した後の文字列を相手にする。
+///
+/// 括弧の中に括弧は入らない前提（`[^()（）]*`）。全角括弧の板もあるので両方見る。
+final _nameSuffixRe = RegExp(r'^(.*?)[\s　]*([(（][^()（）]*[)）])$');
+
+/// 返信件数を押せるときの当たり判定の高さ。文字の高さ（16px）のままだと指には
+/// 狭いので、ヘッダ行が右端の返信ボタン（17px + 余白 4px×2 = 25px）のために元から
+/// 持っている高さに合わせる。行全体はここまで既に伸びているため、広げてもレスの
+/// 高さはほとんど増えない。
+const double _resNumberTapHeight = 26;
 
 /// レス番号。返信を集めたレスは番号ごと色を上げ、番号の右に件数を添える。
 ///
@@ -257,7 +319,7 @@ class _ResNumber extends StatelessWidget {
           const SizedBox(width: 3),
           // 受けた返信の数は吹き出し。返信する操作（ヘッダ右端）は矢印で、
           // 「付いたもの」と「これからする操作」を形で分ける。
-          Icon(Icons.chat_bubble_outline, size: 11, color: color),
+          Icon(Icons.chat_bubble_outline, size: 13, color: color),
           const SizedBox(width: 2),
           Text('$replyCount', style: style),
         ],
@@ -266,12 +328,17 @@ class _ResNumber extends StatelessWidget {
 
     if (replyCount == 0 || onTapReplies == null) return label;
     // 件数を出しているときは、そこから返信一覧（会話ビュー）へ入れる。
+    // 余白は右にだけ足す。左を広げると番号が本文の左端からずれてしまうため。
     return InkWell(
       onTap: () => onTapReplies!(number),
-      borderRadius: BorderRadius.circular(4),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 2),
-        child: label,
+      borderRadius: BorderRadius.circular(6),
+      child: SizedBox(
+        height: _resNumberTapHeight,
+        child: Padding(
+          padding: const EdgeInsets.only(left: 2, right: 6),
+          // widthFactor: 1 で横幅は中身なりに縮める（Wrap 内で全幅化させない）。
+          child: Center(widthFactor: 1, child: label),
+        ),
       ),
     );
   }
@@ -293,7 +360,9 @@ class _Header extends StatelessWidget {
   });
 
   final Res res;
-  final String name;
+
+  /// ヘッダに出す名前と見せ方（[PostItem._headerName] の結果）。
+  final ({String text, bool muted}) name;
   final int idCount;
   final int idOrdinal;
   final ValueChanged<String>? onTapId;
@@ -309,6 +378,14 @@ class _Header extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final lineHeight = _headerLineHeight(theme);
+    // 返信件数が押せるときだけ、番号のスロットを当たり判定の高さまで広げる。
+    // 押せないレスは今までどおり 1 行分のままにして、一覧の詰まりを保つ。
+    final numberSlotHeight =
+        replyCount > 0 &&
+            onTapReplies != null &&
+            lineHeight < _resNumberTapHeight
+        ? _resNumberTapHeight
+        : lineHeight;
 
     return Row(
       // 左グループが 2 行になっても、日時・返信ボタンは 1 行目の高さに揃える。
@@ -325,7 +402,7 @@ class _Header extends StatelessWidget {
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 _HeaderSlot(
-                  height: lineHeight,
+                  height: numberSlotHeight,
                   child: _ResNumber(
                     number: res.number,
                     replyCount: replyCount,
@@ -334,16 +411,19 @@ class _Header extends StatelessWidget {
                 ),
                 // Wrap の子は Flexible にできないので、極端に長い名前だけは
                 // 行幅で頭打ちにして省略する（通常の名前はそのまま 1 チャンク）。
-                ConstrainedBox(
-                  constraints: BoxConstraints(maxWidth: constraints.maxWidth),
-                  child: _HeaderSlot(
-                    height: lineHeight,
-                    child: _NameLabel(
-                      name: name,
-                      highlightQuery: highlightQuery,
+                // 名無しは空文字で渡ってくるので、枠ごと出さない。
+                if (name.text.isNotEmpty)
+                  ConstrainedBox(
+                    constraints: BoxConstraints(maxWidth: constraints.maxWidth),
+                    child: _HeaderSlot(
+                      height: lineHeight,
+                      child: _NameLabel(
+                        name: name.text,
+                        muted: name.muted,
+                        highlightQuery: highlightQuery,
+                      ),
                     ),
                   ),
-                ),
                 // チップは固定高さのスロットに入れない。狭いときは中身に応じて
                 // 縦に伸び（最大 2 行）、それでも入らなければ省略する。スロットで
                 // 1 行に固定すると、折り返したときにチップが潰れる。
@@ -426,16 +506,29 @@ class _HeaderSlot extends StatelessWidget {
 }
 
 class _NameLabel extends StatelessWidget {
-  const _NameLabel({required this.name, this.highlightQuery = ''});
+  const _NameLabel({
+    required this.name,
+    this.muted = false,
+    this.highlightQuery = '',
+  });
   final String name;
+
+  /// 名乗っていない人の付随情報（ワッチョイ等）か。時刻と同じ「添え物」の見た目に
+  /// 落として、コテハンだけが名前として目立つようにする。
+  final bool muted;
   final String highlightQuery;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final style = theme.textTheme.labelLarge?.copyWith(
-      color: theme.colorScheme.onSurface,
-      fontWeight: FontWeight.w600,
+    final base = muted
+        ? theme.textTheme.labelMedium
+        : theme.textTheme.labelLarge;
+    final style = base?.copyWith(
+      color: muted
+          ? theme.colorScheme.onSurfaceVariant
+          : theme.colorScheme.onSurface,
+      fontWeight: muted ? FontWeight.w400 : FontWeight.w600,
       leadingDistribution: TextLeadingDistribution.even,
     );
     final queryLower = highlightQuery.trim().toLowerCase();
@@ -530,8 +623,12 @@ class _OwnChip extends StatelessWidget {
   }
 }
 
-/// レス時刻。既定は HH:MM:SS のみ。タップでコンマ以下・日付まで含む完全な
+/// レス時刻。既定は HH:MM のみ。タップでコンマ以下・日付まで含む完全な
 /// 日時をスナックバーに出す。
+///
+/// 秒を落とすのは、ヘッダの右端で幅を 1 文字分でも空けるため（左の名前・ID の
+/// 幅がその分増え、ID の位置が揃いやすくなる）。秒が要る場面（連投の間隔を見る
+/// など）はタップで完全な日時が出るので、情報自体は失われない。
 class _TimeLabel extends StatelessWidget {
   const _TimeLabel({required this.res});
   final Res res;
@@ -559,9 +656,9 @@ class _TimeLabel extends StatelessWidget {
     );
   }
 
-  /// 日付テキストから時刻部分（HH:MM:SS）を取り出す。無ければ全体。
+  /// 日付テキストから時刻の時分（HH:MM）を取り出す。無ければ全体。
   static String _short(Res res) {
-    final m = RegExp(r'(\d{2}:\d{2}:\d{2})').firstMatch(res.dateText);
+    final m = RegExp(r'(\d{2}:\d{2})(?::\d{2})?').firstMatch(res.dateText);
     return m?.group(1) ?? res.dateText;
   }
 }
