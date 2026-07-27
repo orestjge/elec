@@ -41,15 +41,18 @@ void main() {
     NicoThumbnails.fetcher = fetcher;
 
     await NicoThumbnails.resolve('sm38048362');
-    expect(fetcher.requested.single, Uri.parse(
-      'https://ext.nicovideo.jp/api/getthumbinfo/sm38048362',
-    ));
+    expect(
+      fetcher.requested.single,
+      Uri.parse('https://ext.nicovideo.jp/api/getthumbinfo/sm38048362'),
+    );
   });
 
   test('thumbnail_url が無ければ null', () async {
     NicoThumbnails.fetcher = _FakeFetcher(
-      _xml('<nicovideo_thumb_response status="fail"><error>'
-          '<code>DELETED</code></error></nicovideo_thumb_response>'),
+      _xml(
+        '<nicovideo_thumb_response status="fail"><error>'
+        '<code>DELETED</code></error></nicovideo_thumb_response>',
+      ),
     );
     expect(await NicoThumbnails.resolve('sm1'), isNull);
   });

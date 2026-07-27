@@ -105,10 +105,13 @@ class FileNgStorage implements NgStorage {
 }
 
 class MemoryNgStorage implements NgStorage {
-  MemoryNgStorage([List<NgWord>? words, Set<String>? ids, Set<String>? creators])
-    : _words = words ?? [],
-      _ids = ids ?? {},
-      _creators = creators ?? {};
+  MemoryNgStorage([
+    List<NgWord>? words,
+    Set<String>? ids,
+    Set<String>? creators,
+  ]) : _words = words ?? [],
+       _ids = ids ?? {},
+       _creators = creators ?? {};
   List<NgWord> _words;
   Set<String> _ids;
   Set<String> _creators;
@@ -177,9 +180,9 @@ class NgStore extends ChangeNotifier {
       : null;
 
   /// 表示 ID（9 文字想定）→ スレ主判定用の 4 文字キー（先頭 3＋末尾 1）。
-  static String? creatorKeyFromId(String? id) =>
-      (id != null && id.length >= 2)
-      ? id.substring(0, id.length < 3 ? id.length : 3) + id.substring(id.length - 1)
+  static String? creatorKeyFromId(String? id) => (id != null && id.length >= 2)
+      ? id.substring(0, id.length < 3 ? id.length : 3) +
+            id.substring(id.length - 1)
       : null;
 
   /// スレ立て人が NG か。[metadent] は `subject-metadent.txt` の `[xxx★]`。

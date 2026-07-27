@@ -39,10 +39,12 @@ class _StaticFetcher implements HttpFetcher {
   final List<int> body;
 
   @override
-  Future<FetchResponse> get(Uri url, {Map<String, String> headers = const {}}) =>
-      Future.value(
-        FetchResponse(statusCode: 200, bodyBytes: body, headers: const {}),
-      );
+  Future<FetchResponse> get(
+    Uri url, {
+    Map<String, String> headers = const {},
+  }) => Future.value(
+    FetchResponse(statusCode: 200, bodyBytes: body, headers: const {}),
+  );
 }
 
 /// 目印が一通り出るスレを組む。

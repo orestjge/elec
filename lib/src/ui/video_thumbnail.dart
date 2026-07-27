@@ -41,8 +41,9 @@ class VideoThumbnails {
   /// このプラットフォームでサムネイル生成が可能か（Android/iOS/macOS）。
   static bool get isSupported {
     return switch (debugTargetPlatform ?? defaultTargetPlatform) {
-      TargetPlatform.android || TargetPlatform.iOS || TargetPlatform.macOS =>
-        true,
+      TargetPlatform.android ||
+      TargetPlatform.iOS ||
+      TargetPlatform.macOS => true,
       _ => false,
     };
   }
