@@ -31,7 +31,7 @@ void main() {
       v.playerUrl.toString(),
       'https://www.youtube.com/embed/dQw4w9WgXcQ?playsinline=1&autoplay=1&rel=0',
     );
-    expect(v.thumbnailUrl, 'https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg');
+    expect(v.thumbnailUrl, 'https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg');
   });
 
   test('ニコニコ動画のリンクを拾う', () {

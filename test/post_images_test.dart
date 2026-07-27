@@ -78,6 +78,36 @@ void main() {
     expect(find.text('a.jpg'), findsNothing);
   });
 
+  testWidgets('拡大中の上下ドラッグは閉じずに画像のパンへ回す', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: PostImages(urls: [Uri.parse('https://example.com/a.jpg')]),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byType(GestureDetector).first);
+    await tester.pumpAndSettle();
+
+    // 2本指のピンチで拡大する。
+    final center = tester.getCenter(find.byType(InteractiveViewer));
+    final left = await tester.startGesture(center - const Offset(20, 0));
+    final right = await tester.startGesture(center + const Offset(20, 0));
+    await tester.pump();
+    await left.moveBy(const Offset(-60, 0));
+    await right.moveBy(const Offset(60, 0));
+    await tester.pump();
+    await left.up();
+    await right.up();
+    await tester.pumpAndSettle();
+
+    // 拡大したまま上下にずらしてもビューアは開いたまま。
+    await tester.drag(find.byType(PageView), const Offset(0, 140));
+    await tester.pumpAndSettle();
+    expect(find.text('a.jpg'), findsOneWidget);
+  });
+
   testWidgets('動画URLは非対応プラットフォームでは再生カードにする', (tester) async {
     addTearDown(() => VideoThumbnails.debugTargetPlatform = null);
     VideoThumbnails.debugTargetPlatform = TargetPlatform.linux;
@@ -147,6 +177,14 @@ void main() {
     expect(find.byIcon(Icons.play_circle_fill), findsNWidgets(2));
     expect(find.text('YouTube'), findsOneWidget);
     expect(find.text('ニコニコ動画'), findsOneWidget);
+    final youtubeCard = tester.getRect(
+      find.ancestor(of: find.text('YouTube'), matching: find.byType(InkWell)),
+    );
+    final niconicoCard = tester.getRect(
+      find.ancestor(of: find.text('ニコニコ動画'), matching: find.byType(InkWell)),
+    );
+    expect(youtubeCard.width / youtubeCard.height, moreOrLessEquals(16 / 9));
+    expect(niconicoCard.width / niconicoCard.height, moreOrLessEquals(1.25));
 
     await tester.tap(find.text('ニコニコ動画'));
     expect(tapped.single.url, Uri.parse('https://www.nicovideo.jp/watch/sm9'));

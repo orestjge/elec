@@ -108,7 +108,7 @@ EmbedVideo _youtube(String id) => EmbedVideo(
   playerUrl: Uri.parse(
     'https://www.youtube.com/embed/$id?playsinline=1&autoplay=1&rel=0',
   ),
-  thumbnailUrl: 'https://i.ytimg.com/vi/$id/hqdefault.jpg',
+  thumbnailUrl: 'https://i.ytimg.com/vi/$id/mqdefault.jpg',
 );
 
 EmbedVideo? _niconico(String rawId) {

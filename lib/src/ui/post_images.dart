@@ -419,12 +419,13 @@ class _EmbedThumb extends StatelessWidget {
 
   Widget _card(BuildContext context, {required String? thumbnailUrl}) {
     final scheme = Theme.of(context).colorScheme;
+    final aspectRatio = video.kind == EmbedKind.youtube ? 16 / 9 : 1.25;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(10),
       child: Container(
         height: size,
-        width: size * 1.25,
+        width: size * aspectRatio,
         decoration: BoxDecoration(
           color: scheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(10),
@@ -522,6 +523,11 @@ class _ImageViewerState extends State<_ImageViewer> {
   late final PageController _page;
   late int _index;
   final _activePointers = <int>{};
+
+  /// ページごとの現在の拡大率。拡大中は上下スワイプを閉じる操作に使わず、
+  /// InteractiveViewer のパン（画像をずらして見る）へ譲るために見る。
+  final _scales = <int, double>{};
+
   Duration? _dragStartTime;
   double _dragDx = 0;
   double _dragDy = 0;
@@ -546,6 +552,10 @@ class _ImageViewerState extends State<_ImageViewer> {
   }
 
   Uri get _url => widget.urls[_index];
+
+  /// 表示中のページが拡大されているか。等倍のときだけ上下スワイプを閉じる操作に
+  /// 割り当て、拡大中は上下ドラッグを画像のパンとして通す。
+  bool get _zoomed => (_scales[_index] ?? 1) > 1.01;
 
   Future<void> _close() async {
     final popped = await Navigator.of(context).maybePop();
@@ -574,7 +584,9 @@ class _ImageViewerState extends State<_ImageViewer> {
     _dragDx = 0;
     _dragDy = 0;
     _dragging = false;
-    _dragRejected = false;
+    // 拡大中の上下ドラッグは「画像をずらして確認する」操作なので、閉じる判定には
+    // 使わない。等倍へ戻す（ピンチアウト）と再び上下スワイプで閉じられる。
+    _dragRejected = _zoomed;
   }
 
   void _onPointerMove(PointerMoveEvent event) {
@@ -673,6 +685,7 @@ class _ImageViewerState extends State<_ImageViewer> {
                       itemBuilder: (context, i) => _ZoomableImage(
                         url: widget.urls[i].toString(),
                         onDismiss: _close,
+                        onScaleChanged: (scale) => _scales[i] = scale,
                       ),
                     ),
                     if (multiple) ...[
@@ -705,9 +718,16 @@ String _mediaFileName(Uri url) =>
 
 /// 画面全体でピンチズーム・パンでき、画像の外側（余白）タップで閉じられる画像。
 class _ZoomableImage extends StatefulWidget {
-  const _ZoomableImage({required this.url, required this.onDismiss});
+  const _ZoomableImage({
+    required this.url,
+    required this.onDismiss,
+    required this.onScaleChanged,
+  });
   final String url;
   final VoidCallback onDismiss;
+
+  /// 拡大率が変わるたび呼ぶ。親が「拡大中は閉じるスワイプを止める」判定に使う。
+  final ValueChanged<double> onScaleChanged;
 
   @override
   State<_ZoomableImage> createState() => _ZoomableImageState();
@@ -718,11 +738,20 @@ class _ZoomableImageState extends State<_ZoomableImage> {
   ImageStream? _stream;
   ImageStreamListener? _listener;
   Size? _imageSize;
+  double _scale = 1;
 
   @override
   void initState() {
     super.initState();
+    _controller.addListener(_reportScale);
     _resolveImageSize();
+  }
+
+  void _reportScale() {
+    final scale = _controller.value.getMaxScaleOnAxis();
+    if ((scale - _scale).abs() < 0.001) return;
+    _scale = scale;
+    widget.onScaleChanged(scale);
   }
 
   void _resolveImageSize() {
@@ -747,6 +776,7 @@ class _ZoomableImageState extends State<_ZoomableImage> {
     if (_stream != null && _listener != null) {
       _stream!.removeListener(_listener!);
     }
+    _controller.removeListener(_reportScale);
     _controller.dispose();
     super.dispose();
   }
