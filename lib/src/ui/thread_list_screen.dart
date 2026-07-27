@@ -127,10 +127,23 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   static const double _swipeDistanceThreshold = 25;
   static const Duration _swipeStartTimeout = Duration(milliseconds: 450);
 
+  /// 横に並べた 2 面（0: スレ一覧、1: スレ）の位置。
+  final _pages = PageController();
+
+  /// 隣に控えているスレ。ここが null なら 1 面だけ（スレ面は無い）。
+  ///
+  /// 控えは常に 1 スレ。開いたスレを閉じずに残しておき、左へ引けば取得済みの
+  /// 本文とスクロール位置のまま戻れるようにする。別のスレを開いたら差し替わる。
+  ThreadSummary? _parked;
+
+  /// スレ面が表に出ているか。[ThreadScreen.active] に渡す。
+  bool _threadShown = false;
+
   /// 表示中の並び順（スレキー列）の固定スナップショット。実況板では最近レス順
   /// が高頻度で入れ替わり一覧を追えないため、自動更新では並べ替えず、レス数・
   /// 新着バッジだけをその場で更新する。並べ替え直しは手動更新・ソート変更・
-  /// スレを開いて戻ったときだけ行う。初回成功まで null。
+  /// 表示の切り替えなど、こちらが動かしたときだけ行う（スレを見て戻ったときも
+  /// 並べ替えない。行が動くと元居た場所を見失うため）。初回成功まで null。
   List<String>? _order;
 
   Timer? _timer;
@@ -146,6 +159,9 @@ class _ThreadListScreenState extends State<ThreadListScreen>
       encoding: widget.endpoints.textEncoding,
     );
     _history = widget.readHistory ?? ReadHistory.shared;
+    // 前回見ていたスレを控えに置く。表に出るまで取得もポーリングもしないので、
+    // 置くだけならただの待機（[ThreadScreen.active] 参照）。
+    _parked = _history.lastViewedThread?.toSummary();
     _ng.addListener(_onNgChanged);
     WidgetsBinding.instance.addObserver(this);
     _initialLoad();
@@ -162,6 +178,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
     WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
     _swipeStartTimer?.cancel();
+    _pages.dispose();
     _search.dispose();
     final fetcher = _fetcher;
     if (_ownsFetcher && fetcher is HttpClientFetcher) {
@@ -540,7 +557,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
       }
       return;
     }
-    await _openThreadRef(ref);
+    _openThreadRef(ref);
   }
 
   ThreadRef? _threadRefFromText(String? text) {
@@ -652,18 +669,49 @@ class _ThreadListScreenState extends State<ThreadListScreen>
     }
   }
 
-  Future<void> _openThread(ThreadSummary thread) async {
-    await _history.markOpenedThread(thread);
-    if (!mounted) return;
-    await Navigator.of(context).push(_threadRoute(thread));
-    // 戻ってきたら既読状態が変わっているので再描画し、並び順も貼り直す
-    // （既読優先ソートなどに反映）。
-    if (mounted) setState(_reorder);
+  /// スレを開く。控えを差し替えて、スレ面へ移る。
+  void _openThread(ThreadSummary thread) {
+    // 取得を待たずに履歴へ入れる（一覧の既読表示は開いた時点で変わる）。
+    unawaited(_history.markOpenedThread(thread));
+    final replacing = _parked?.key != thread.key;
+    setState(() {
+      if (replacing) _parked = thread;
+      // 移動を待たずに表扱いにする。着いてから読み始めると、その間だけ
+      // 空の画面が見えてしまうため。
+      _threadShown = true;
+    });
+    // 差し替えた直後はスレ面がまだ組み立てられていないので、次のフレームで動く。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_pages.hasClients) return;
+      _pages.animateToPage(
+        1,
+        duration: const Duration(milliseconds: 240),
+        curve: Curves.easeOutCubic,
+      );
+    });
   }
 
-  Future<void> _openThreadRef(ThreadRef ref) async {
+  /// スレ面から一覧へ戻る。スレは控えに残す。
+  void _showList() {
+    if (!_pages.hasClients) return;
+    _pages.animateToPage(
+      0,
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeInCubic,
+    );
+  }
+
+  void _onPageChanged(int page) {
+    final shown = page == 1;
+    if (shown == _threadShown) return;
+    // 一覧へ戻ってきても並べ替えない。行き来のたびに行が動くと、さっきまで
+    // 見ていた場所を見失うため（既読・新着バッジはその場で更新される）。
+    setState(() => _threadShown = shown);
+  }
+
+  void _openThreadRef(ThreadRef ref) {
     final thread = _threadByKey(ref.threadKey);
-    await _openThread(
+    _openThread(
       thread ??
           ThreadSummary(
             key: ref.threadKey,
@@ -687,45 +735,6 @@ class _ThreadListScreenState extends State<ThreadListScreen>
     return null;
   }
 
-  PageRoute<void> _threadRoute(ThreadSummary thread) {
-    return PageRouteBuilder<void>(
-      pageBuilder: (context, animation, secondaryAnimation) => ThreadScreen(
-        threadKey: thread.key,
-        threadTitle: thread.title,
-        fetcher: _fetcher,
-        endpoints: widget.endpoints,
-        readHistory: _history,
-        initialStatusLabel: _statusLabel(thread),
-        initialResCount: thread.resCount,
-        creatorMetadent: thread.metadent,
-        defaultName: widget.board.defaultName,
-      ),
-      transitionDuration: const Duration(milliseconds: 240),
-      reverseTransitionDuration: const Duration(milliseconds: 220),
-      transitionsBuilder: (context, animation, secondaryAnimation, child) {
-        final curved = CurvedAnimation(
-          parent: animation,
-          curve: Curves.easeOutCubic,
-          reverseCurve: Curves.easeInCubic,
-        );
-        return SlideTransition(
-          position: Tween<Offset>(
-            begin: const Offset(1, 0),
-            end: Offset.zero,
-          ).animate(curved),
-          child: child,
-        );
-      },
-    );
-  }
-
-  Future<void> _openLastViewedThread() async {
-    if (_searchOpen) return;
-    final stored = _history.lastViewedThread;
-    if (stored == null) return;
-    await _openThread(stored.toSummary());
-  }
-
   void _handlePointerDown(PointerDownEvent event) {
     _horizontalDragDistance = 0;
     _verticalDragDistance = 0;
@@ -746,17 +755,12 @@ class _ThreadListScreenState extends State<ThreadListScreen>
     _swipeStartTimer?.cancel();
     if (!_trackingSwipe) return;
     _trackingSwipe = false;
-    // 縦が優勢ならスクロール操作なので無視。
-    final horizontal = _horizontalDragDistance.abs();
-    if (horizontal < _swipeDistanceThreshold) return;
-    if (horizontal < _verticalDragDistance * 1.2) return;
-    if (_horizontalDragDistance < 0) {
-      // 右→左: 直近に見たスレを開く。
-      _openLastViewedThread();
-    } else {
-      // 左→右: 板一覧（ドロワー）を開く。
-      _scaffoldKey.currentState?.openDrawer();
-    }
+    // 縦が優勢ならスクロール操作なので無視。右→左（スレ面へ移る）は横並びの
+    // ページ送りが指に追従して受け持つので、ここでは見ない。
+    if (_horizontalDragDistance < _swipeDistanceThreshold) return;
+    if (_horizontalDragDistance < _verticalDragDistance * 1.2) return;
+    // 左→右: 板一覧（ドロワー）を開く。
+    _scaffoldKey.currentState?.openDrawer();
   }
 
   void _handlePointerCancel(PointerCancelEvent event) {
@@ -787,7 +791,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
       final created = await _markOwnCreatedThread(createdTitle, beforeKeys);
       // 自分で立てたスレはそのまま開いて、書き込み結果を確認しやすくする。
       if (created != null && mounted) {
-        await _openThread(created);
+        _openThread(created);
       }
     }
   }
@@ -826,6 +830,50 @@ class _ThreadListScreenState extends State<ThreadListScreen>
 
   @override
   Widget build(BuildContext context) {
+    final parked = _parked;
+    if (parked == null) return _list();
+    // 一覧とスレを横に並べ、指に追従して行き来できるようにする。スレはページの
+    // 外へ出ても生かしたまま（[ThreadScreen.active]）なので、戻ってまた開いても
+    // 取得済みの本文とスクロール位置が残る。
+    return PopScope(
+      // スレ面ではシステムの戻るを一覧へ戻す操作にする。
+      canPop: !_threadShown,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _showList();
+      },
+      child: PageView(
+        controller: _pages,
+        // 一覧のさらに左・スレ面のさらに右へ引いたとき、存在しない面の背景が
+        // 覗くと黒くちらつく。端では弾ませず、実在する隣ページへの移動だけにする。
+        physics: const PageScrollPhysics(parent: ClampingScrollPhysics()),
+        onPageChanged: _onPageChanged,
+        children: [
+          _list(),
+          _KeepAlive(
+            child: ThreadScreen(
+              key: ValueKey(parked.key),
+              threadKey: parked.key,
+              threadTitle: parked.title,
+              fetcher: _fetcher,
+              endpoints: widget.endpoints,
+              pollInterval: widget.pollInterval,
+              authStore: widget.authStore,
+              readHistory: _history,
+              ngStore: _ng,
+              initialStatusLabel: _statusLabel(parked),
+              initialResCount: parked.resCount,
+              creatorMetadent: parked.metadent,
+              defaultName: widget.board.defaultName,
+              active: _threadShown,
+              onClose: _showList,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _list() {
     return Scaffold(
       key: _scaffoldKey,
       // 左ドロワーから板を切り替え・追加する。左端スワイプ（既定）に加え、一覧上を
@@ -1716,5 +1764,30 @@ class _ErrorView extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+/// 横のページから外れても中身を生かしておくラッパ。
+///
+/// [PageView] は見えなくなった面を木から外してしまい、置いておいたスレ画面の
+/// 状態（取得済みの本文・スクロール位置）が消えるため、明示的に残す。
+class _KeepAlive extends StatefulWidget {
+  const _KeepAlive({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_KeepAlive> createState() => _KeepAliveState();
+}
+
+class _KeepAliveState extends State<_KeepAlive>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return widget.child;
   }
 }

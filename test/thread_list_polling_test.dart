@@ -779,9 +779,10 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('1レス'), findsOneWidget);
 
-    final gesture = await tester.startGesture(const Offset(240, 320));
-    await gesture.moveBy(const Offset(500, 0));
-    await gesture.up();
+    await tester.drag(
+      find.textContaining('本文', findRichText: true),
+      const Offset(500, 0),
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('エッヂ'), findsWidgets);
@@ -813,9 +814,10 @@ void main() {
     await tester.pumpAndSettle();
 
     // 一覧側（本文付近）から右スワイプすると戻れる。
-    final gesture = await tester.startGesture(const Offset(240, 200));
-    await gesture.moveBy(const Offset(500, 0));
-    await gesture.up();
+    await tester.drag(
+      find.textContaining('本文', findRichText: true),
+      const Offset(500, 0),
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('エッヂ'), findsWidgets);
@@ -876,8 +878,8 @@ void main() {
     await tester.tap(find.text('選択中スレ'));
     await tester.pumpAndSettle();
 
-    // 本文タップでレスメニューを開く。選択できる本文はこの中にある。
-    await tester.tap(find.textContaining('本文', findRichText: true));
+    // 本文長押しでレスメニューを開く。選択できる本文はこの中にある。
+    await tester.longPress(find.textContaining('本文', findRichText: true));
     await tester.pumpAndSettle();
 
     final bodyFinder = find.byWidgetPredicate(

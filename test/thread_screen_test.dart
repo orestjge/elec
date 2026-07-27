@@ -569,7 +569,7 @@ void main() {
     expect(find.text('2/2  b.png'), findsOneWidget);
   });
 
-  testWidgets('通常一覧の本文タップでレスメニューを出し、メニュー内本文は選択可能', (tester) async {
+  testWidgets('通常一覧の本文タップではメニューを出さず、長押しで出す（メニュー内本文は選択可能）', (tester) async {
     final f = QueueFetcher([
       ok([...res1]),
     ]);
@@ -578,11 +578,110 @@ void main() {
 
     expect(find.byType(SelectableText), findsNothing);
 
-    await tester.tap(find.textContaining('最初のレス', findRichText: true));
+    final body = find.textContaining('最初のレス', findRichText: true);
+    await tester.tap(body);
+    await tester.pumpAndSettle();
+
+    expect(find.text('レス全体をコピー'), findsNothing);
+
+    await tester.longPress(body);
     await tester.pumpAndSettle();
 
     expect(find.text('レス全体をコピー'), findsOneWidget);
     expect(find.byType(SelectableText), findsOneWidget);
+  });
+
+  testWidgets('レスを押している間だけ指の位置から沈み込みが広がり、長押し成立で手応えを返す', (tester) async {
+    final haptics = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'HapticFeedback.vibrate') {
+          haptics.add(call.arguments as String? ?? '');
+        }
+        return null;
+      },
+    );
+    addTearDown(() {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      );
+    });
+
+    final f = QueueFetcher([
+      ok([...res1]),
+    ]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    // 沈み込みは本文の後ろに広がる円として描く。
+    final body = find.textContaining('最初のレス', findRichText: true);
+    final spread = find
+        .ancestor(of: body, matching: find.byType(CustomPaint))
+        .first;
+
+    expect(spread, paintsExactlyCountTimes(#drawCircle, 0));
+
+    final press = await tester.startGesture(tester.getCenter(body));
+    // 触れた直後は広げない（スクロール開始のチカチカ防止）。
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(spread, paintsExactlyCountTimes(#drawCircle, 0));
+
+    // 指を止めていれば広がり出す。ここではまだ長押しは成立していない。
+    await tester.pump(const Duration(milliseconds: 60));
+    await tester.pump(const Duration(milliseconds: 60));
+    expect(spread, paintsExactlyCountTimes(#drawCircle, 1));
+    expect(find.text('レス全体をコピー'), findsNothing);
+    expect(haptics, isEmpty);
+
+    // 押し続ければ長押しが通り、手応えを返してメニューを出す。
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(haptics, isNotEmpty);
+    expect(find.text('レス全体をコピー'), findsOneWidget);
+
+    // 離すと沈み込みは消える。
+    await press.up();
+    await tester.pumpAndSettle();
+    expect(spread, paintsExactlyCountTimes(#drawCircle, 0));
+  });
+
+  // スクロールを始めた指の下で沈み込みが広がると、押していないのに反応したように
+  // 見える。長押しが外れる 18px を待たず、指が動いた時点で引っ込める。
+  testWidgets('スワイプ中は沈み込みを広げない', (tester) async {
+    final f = QueueFetcher([
+      ok([...res1]),
+    ]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    final body = find.textContaining('最初のレス', findRichText: true);
+    final spread = find
+        .ancestor(of: body, matching: find.byType(CustomPaint))
+        .first;
+
+    // 広がり出す前に引き始めれば、そもそも出ない。
+    final swipe = await tester.startGesture(tester.getCenter(body));
+    await tester.pump(const Duration(milliseconds: 20));
+    await swipe.moveBy(const Offset(0, -30));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(spread, paintsExactlyCountTimes(#drawCircle, 0));
+    await swipe.up();
+    await tester.pumpAndSettle();
+
+    // 一度広がってから引き始めても、動かした時点で（余韻を残さず）消える。
+    final hold = await tester.startGesture(tester.getCenter(body));
+    await tester.pump(const Duration(milliseconds: 160));
+    await tester.pump(const Duration(milliseconds: 60));
+    expect(spread, paintsExactlyCountTimes(#drawCircle, 1));
+
+    await hold.moveBy(const Offset(0, -30));
+    await tester.pump();
+    expect(spread, paintsExactlyCountTimes(#drawCircle, 0));
+    // 指が離れる前にスクロールへ移ったので、メニューも出ない。
+    expect(find.text('レス全体をコピー'), findsNothing);
+    await hold.up();
+    await tester.pumpAndSettle();
   });
 
   testWidgets('レスメニュー内のレス参照タップで参照先を開く', (tester) async {
@@ -723,10 +822,7 @@ void main() {
 
     await tester.tap(find.text('02:14'));
     await tester.pumpAndSettle();
-    expect(
-      find.textContaining('2025/11/03(月) 02:14:51.907'),
-      findsOneWidget,
-    );
+    expect(find.textContaining('2025/11/03(月) 02:14:51.907'), findsOneWidget);
   });
 
   testWidgets('レスのメニューからも返信一覧へ入れる', (tester) async {
