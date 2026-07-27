@@ -203,6 +203,33 @@ void main() {
     expect(tester.getRect(find.byType(TextField).at(1)), before);
   });
 
+  testWidgets('スレッドタイトルが折り返すとタイトル入力欄が広がる', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NewThreadScreen(
+          fetcher: RecordingPoster(),
+          authStore: AuthStore(MemoryTokenStorage()),
+          authLauncher: FakeLauncher(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final titleField = find.byType(TextField).first;
+    expect(tester.getRect(titleField).height, 42);
+
+    await tester.enterText(
+      titleField,
+      'これはかなり長いスレッドタイトルで入力欄が二行以上に折り返されたときに高さが自然に広がることを確認するためのテスト用タイトルです',
+    );
+    await tester.pump();
+
+    expect(tester.getRect(titleField).height, greaterThan(42));
+  });
+
   // デスクトップの既定の密度（compact）は InputDecoration の上下パディングと
   // ボタンの最小サイズを 8 削るので、放っておくとスレタイ欄・添付・立てるが
   // ばらばらの高さになる。レス入力欄と同じ 42 に揃っていることを見る。
