@@ -831,10 +831,12 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   @override
   Widget build(BuildContext context) {
     final parked = _parked;
-    if (parked == null) return _list();
-    // 一覧とスレを横に並べ、指に追従して行き来できるようにする。スレはページの
-    // 外へ出ても生かしたまま（[ThreadScreen.active]）なので、戻ってまた開いても
-    // 取得済みの本文とスクロール位置が残る。
+    // 一覧とスレを横に並べ、指に追従して行き来できるようにする。両面ともページの
+    // 外へ出ても生かしたまま（[_KeepAlive]・[ThreadScreen.active]）なので、行き来
+    // しても一覧のスクロール位置も、スレの取得済みの本文と位置も残る。
+    //
+    // 控えが無くても 1 面だけの PageView にする。控えの有無で木の形が変わると
+    // 一覧が作り直され、初めてスレを開いた瞬間だけスクロール位置が飛ぶため。
     return PopScope(
       // スレ面ではシステムの戻るを一覧へ戻す操作にする。
       canPop: !_threadShown,
@@ -848,26 +850,27 @@ class _ThreadListScreenState extends State<ThreadListScreen>
         physics: const PageScrollPhysics(parent: ClampingScrollPhysics()),
         onPageChanged: _onPageChanged,
         children: [
-          _list(),
-          _KeepAlive(
-            child: ThreadScreen(
-              key: ValueKey(parked.key),
-              threadKey: parked.key,
-              threadTitle: parked.title,
-              fetcher: _fetcher,
-              endpoints: widget.endpoints,
-              pollInterval: widget.pollInterval,
-              authStore: widget.authStore,
-              readHistory: _history,
-              ngStore: _ng,
-              initialStatusLabel: _statusLabel(parked),
-              initialResCount: parked.resCount,
-              creatorMetadent: parked.metadent,
-              defaultName: widget.board.defaultName,
-              active: _threadShown,
-              onClose: _showList,
+          _KeepAlive(child: _list()),
+          if (parked != null)
+            _KeepAlive(
+              child: ThreadScreen(
+                key: ValueKey(parked.key),
+                threadKey: parked.key,
+                threadTitle: parked.title,
+                fetcher: _fetcher,
+                endpoints: widget.endpoints,
+                pollInterval: widget.pollInterval,
+                authStore: widget.authStore,
+                readHistory: _history,
+                ngStore: _ng,
+                initialStatusLabel: _statusLabel(parked),
+                initialResCount: parked.resCount,
+                creatorMetadent: parked.metadent,
+                defaultName: widget.board.defaultName,
+                active: _threadShown,
+                onClose: _showList,
+              ),
             ),
-          ),
         ],
       ),
     );
