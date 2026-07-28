@@ -134,6 +134,47 @@ void main() {
     expect(order(), ['スレD', 'スレC', 'スレB', 'スレA']);
   });
 
+  testWidgets('末尾に付いた新スレは、その後の自動更新で入れ替わらない', (tester) async {
+    final fetcher = QueueFetcher([
+      subjectOk('1.dat<>スレA (10)\n', 'LM1'),
+      // 新スレ B・C が出現（サーバ順は C が先）。
+      subjectOk('3.dat<>スレC (2)\n2.dat<>スレB (4)\n1.dat<>スレA (10)\n', 'LM2'),
+      // 次の更新でサーバ順が入れ替わり、さらに D も出る。
+      subjectOk(
+        '2.dat<>スレB (9)\n1.dat<>スレA (11)\n4.dat<>スレD (1)\n3.dat<>スレC (2)\n',
+        'LM3',
+      ),
+    ]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadListScreen(
+          fetcher: fetcher,
+          pollInterval: const Duration(seconds: 15),
+          readHistory: ReadHistory(MemoryReadHistoryStorage()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    List<String> order() => tester
+        .widgetList<ThreadTile>(find.byType(ThreadTile))
+        .map((w) => w.thread.title)
+        .toList();
+
+    expect(order(), ['スレA']);
+
+    // 現れた順（サーバ順）に末尾へ積まれる。
+    await tester.pump(const Duration(seconds: 15));
+    await tester.pumpAndSettle();
+    expect(order(), ['スレA', 'スレC', 'スレB']);
+
+    // サーバ順が変わっても、積んだ場所からは動かない。D だけがさらに末尾へ。
+    await tester.pump(const Duration(seconds: 15));
+    await tester.pumpAndSettle();
+    expect(order(), ['スレA', 'スレC', 'スレB', 'スレD']);
+  });
+
   testWidgets('自動更新で subject から落ちたスレは、dat落ちチップを付けて同じ場所に残す', (tester) async {
     final fetcher = QueueFetcher([
       subjectOk('1.dat<>スレA (10)\n2.dat<>スレB (5)\n3.dat<>スレC (3)\n', 'LM1'),

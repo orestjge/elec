@@ -291,11 +291,22 @@ class _ThreadListScreenState extends State<ThreadListScreen>
     }
   }
 
-  /// 取得結果を採用する。行を残せるよう、各スレの最後の姿も控える。
+  /// 取得結果を採用する。行を残せるよう各スレの最後の姿を控え、初めて見たスレは
+  /// 固定順の末尾に積む。
+  ///
+  /// 積んだ時点で場所が決まるので、あとはそこから動かない。固定順に入れずに毎回
+  /// 「今のサーバ順で末尾へ」としていたときは、末尾の新スレ同士が更新のたびに
+  /// 入れ替わってしまっていた。
   void _adoptState(SubjectState state) {
     _state = state;
     for (final thread in state.threads) {
       _lastKnown[thread.key] = thread;
+    }
+    final order = _order;
+    if (order == null) return; // 初回。この直後に _reorder が全体を敷き直す。
+    final known = order.toSet();
+    for (final thread in state.threads) {
+      if (known.add(thread.key)) order.add(thread.key);
     }
   }
 
@@ -311,8 +322,11 @@ class _ThreadListScreenState extends State<ThreadListScreen>
     }
   }
 
-  /// 表示する並び。固定スナップショット [_order] の順に現在のデータを当て、
-  /// 固定順に無い（新しく現れた）スレは末尾へ回す。[_order] 未設定なら都度ソート。
+  /// 表示する並び。固定スナップショット [_order] の順に現在のデータを当てる。
+  /// [_order] 未設定なら都度ソート。
+  ///
+  /// 新しく現れたスレは [_adoptState] が末尾に積んであるので、ここでは何もしない
+  /// （末尾の新スレ同士も動かない）。
   ///
   /// subject.txt から落ちたスレは最後の姿（[_lastKnown]）のまま同じ場所に残す。
   /// 消して詰めると下の行が繰り上がり、見ていた位置がズレるため。
@@ -330,7 +344,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
         placed.add(key);
       }
     }
-    // 固定順に無い新スレは末尾へ。次の手動更新で正規の位置に収まる。
+    // 念のための取りこぼし避け（通常は [_adoptState] が積んでいるので空回り）。
     for (final t in threads) {
       if (!placed.contains(t.key)) result.add(t);
     }
