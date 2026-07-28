@@ -296,74 +296,90 @@ class _NewThreadScreenState extends State<NewThreadScreen> {
     final bodyStyle = composeBodyTextStyle(theme);
     return Scaffold(
       appBar: AppBar(title: const Text('スレを立てる')),
-      body: Listener(
-        behavior: HitTestBehavior.translucent,
-        onPointerDown: _handlePointerDown,
-        onPointerMove: _handlePointerMove,
-        onPointerUp: _handlePointerUp,
-        onPointerCancel: _handlePointerCancel,
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-          children: [
-            TextField(
-              controller: _title,
-              maxLength: _titleMax,
-              minLines: 1,
-              maxLines: null,
-              inputFormatters: [
-                FilteringTextInputFormatter.deny(RegExp(r'[\r\n]')),
-              ],
-              textInputAction: TextInputAction.next,
-              style: titleStyle,
-              decoration: composeFieldDecoration(
-                scheme: scheme,
-                hintText: 'スレッドタイトル',
-                textStyle: titleStyle,
-                // 1 行のときはレス入力欄と同じ高さ（42）に収める。
-                // 行高 22（16×1.4）+ 10×2 = 42。折り返したらこの余白のまま伸びる。
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 10,
-                ),
+      // 操作バーは bottomNavigationBar ではなく body の中に置く。Scaffold は
+      // bottomNavigationBar をキーボードの上へ押し上げない（縮むのは body だけ）
+      // ため、あちらに置くと立てる・添付ボタンがキーボードに隠れてしまう。
+      // body の末尾に置けばキーボード分だけ入力欄側が縮み、バーは常にその上に残る。
+      body: Column(
+        children: [
+          Expanded(
+            child: Listener(
+              behavior: HitTestBehavior.translucent,
+              onPointerDown: _handlePointerDown,
+              onPointerMove: _handlePointerMove,
+              onPointerUp: _handlePointerUp,
+              onPointerCancel: _handlePointerCancel,
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                children: [
+                  TextField(
+                    controller: _title,
+                    maxLength: _titleMax,
+                    minLines: 1,
+                    maxLines: null,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.deny(RegExp(r'[\r\n]')),
+                    ],
+                    textInputAction: TextInputAction.next,
+                    style: titleStyle,
+                    decoration: composeFieldDecoration(
+                      scheme: scheme,
+                      hintText: 'スレッドタイトル',
+                      textStyle: titleStyle,
+                      // 1 行のときはレス入力欄と同じ高さ（42）に収める。
+                      // 行高 22（16×1.4）+ 10×2 = 42。折り返したらこの余白のまま伸びる。
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
+                    ),
+                  ),
+                  _CharCount(
+                    length: _title.text.characters.length,
+                    max: _titleMax,
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _body,
+                    focusNode: _bodyFocus,
+                    maxLength: _bodyMax,
+                    minLines: 10,
+                    maxLines: 24,
+                    textInputAction: TextInputAction.newline,
+                    // 本文はレス入力欄と同じ組み方（15px・行高 1.4）。
+                    style: bodyStyle,
+                    decoration: composeFieldDecoration(
+                      scheme: scheme,
+                      hintText: '本文を書く',
+                      textStyle: bodyStyle,
+                    ),
+                  ),
+                  _CharCount(
+                    length: _body.text.characters.length,
+                    max: _bodyMax,
+                  ),
+                  const SizedBox(height: 12),
+                  _AttachmentPreview(body: _body, onRemove: _removeUrl),
+                  const SizedBox(height: 12),
+                  Text(
+                    'スレ立てには一定の書き込み実績と間隔制限があります',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
               ),
             ),
-            _CharCount(length: _title.text.characters.length, max: _titleMax),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _body,
-              focusNode: _bodyFocus,
-              maxLength: _bodyMax,
-              minLines: 10,
-              maxLines: 24,
-              textInputAction: TextInputAction.newline,
-              // 本文はレス入力欄と同じ組み方（15px・行高 1.4）。
-              style: bodyStyle,
-              decoration: composeFieldDecoration(
-                scheme: scheme,
-                hintText: '本文を書く',
-                textStyle: bodyStyle,
-              ),
-            ),
-            _CharCount(length: _body.text.characters.length, max: _bodyMax),
-            const SizedBox(height: 12),
-            _AttachmentPreview(body: _body, onRemove: _removeUrl),
-            const SizedBox(height: 12),
-            Text(
-              'スレ立てには一定の書き込み実績と間隔制限があります',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: scheme.onSurfaceVariant,
-              ),
-            ),
-          ],
-        ),
-      ),
-      bottomNavigationBar: _NewThreadActions(
-        sending: _sending,
-        uploadingImage: _uploadingImage,
-        uploadingFile: _uploadingFile,
-        onAttachImage: _busy ? null : _attachImage,
-        onAttachFile: _busy ? null : _attachFile,
-        onSubmit: _canSubmit ? _submit : null,
+          ),
+          _NewThreadActions(
+            sending: _sending,
+            uploadingImage: _uploadingImage,
+            uploadingFile: _uploadingFile,
+            onAttachImage: _busy ? null : _attachImage,
+            onAttachFile: _busy ? null : _attachFile,
+            onSubmit: _canSubmit ? _submit : null,
+          ),
+        ],
       ),
     );
   }

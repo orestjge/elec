@@ -268,4 +268,39 @@ void main() {
     expect(attach, 42);
     expect(submit, 42);
   });
+
+  // Scaffold は bottomNavigationBar をキーボードの上へ押し上げないので、操作バーを
+  // そこに置くと立てる・添付がキーボードに隠れる。キーボード分の inset を与えて、
+  // バーがその上に残ることを見る。
+  testWidgets('キーボードを開いても立てる・添付ボタンがキーボードに隠れない', (tester) async {
+    const keyboard = 300.0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => MediaQuery(
+            data: MediaQuery.of(
+              context,
+            ).copyWith(viewInsets: const EdgeInsets.only(bottom: keyboard)),
+            child: NewThreadScreen(
+              fetcher: RecordingPoster(),
+              authStore: AuthStore(MemoryTokenStorage()),
+              authLauncher: FakeLauncher(),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final keyboardTop =
+        tester.view.physicalSize.height / tester.view.devicePixelRatio -
+        keyboard;
+    for (final f in [
+      find.byKey(const ValueKey('new-thread-submit')),
+      find.byIcon(Icons.image_outlined),
+      find.byIcon(Icons.attach_file),
+    ]) {
+      expect(tester.getRect(f).bottom, lessThanOrEqualTo(keyboardTop));
+    }
+  });
 }
