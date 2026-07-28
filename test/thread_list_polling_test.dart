@@ -182,6 +182,56 @@ void main() {
     expect(seenOf('スレA'), ThreadSeen.opened);
   });
 
+  testWidgets('見るべき順は 初見 → 新着あり → 既読 → 見送ったスレ に並べる', (tester) async {
+    final history = ReadHistory(MemoryReadHistoryStorage());
+    // 一覧で見たことがある＝初見ではない（4 は初見のまま）。
+    await history.markListed(['1', '2', '3', '5']);
+    // 開いたスレ。2 は開いた後にレスが増えた＝新着あり、3 は追いついている。
+    await history.markOpenedThread(
+      const ThreadSummary(key: '2', title: 'スレB', resCount: 8, capName: null),
+    );
+    await history.markRead('2', 8);
+    await history.markOpenedThread(
+      const ThreadSummary(key: '3', title: 'スレC', resCount: 5, capName: null),
+    );
+    await history.markRead('3', 5);
+
+    final fetcher = QueueFetcher([
+      subjectOk(
+        // bump 順（サーバ順）。この中で 4 群に分かれる。
+        '1.dat<>スレA (10)\n'
+        '2.dat<>スレB (12)\n' // 開いた後に +4
+        '3.dat<>スレC (5)\n' // 追いついている
+        '4.dat<>スレD (2)\n' // 一覧でも初見
+        '5.dat<>スレE (7)\n', // 一覧で見たが開いていない
+        'LM1',
+      ),
+    ]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadListScreen(
+          fetcher: fetcher,
+          pollInterval: const Duration(seconds: 15),
+          readHistory: history,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('並べ替え'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('見るべき順'));
+    await tester.pumpAndSettle();
+
+    final order = tester
+        .widgetList<ThreadTile>(find.byType(ThreadTile))
+        .map((w) => w.thread.title)
+        .toList();
+    // D=初見 → B=新着あり → C=既読 → A,E=見送った（各群は bump 順のまま）。
+    expect(order, ['スレD', 'スレB', 'スレC', 'スレA', 'スレE']);
+  });
+
   testWidgets('末尾に付いた新スレは、その後の自動更新で入れ替わらない', (tester) async {
     final fetcher = QueueFetcher([
       subjectOk('1.dat<>スレA (10)\n', 'LM1'),

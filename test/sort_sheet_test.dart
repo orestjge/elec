@@ -39,7 +39,7 @@ void main() {
     // シートの見出しと各項目・説明が見える。
     expect(find.text('並べ替え'), findsOneWidget);
     expect(find.text('レスが新しいスレ順（掲示板の定番）'), findsOneWidget);
-    expect(find.text('既読スレを上に（新着ありを最優先）'), findsOneWidget);
+    expect(find.text('初見 → 新着あり → 既読 → 見送ったスレ'), findsOneWidget);
     expect(find.text('1日あたりのレス数が多い順'), findsOneWidget);
     expect(find.text('レスの多い順'), findsOneWidget);
     expect(find.text('新しく立った順'), findsOneWidget);

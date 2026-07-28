@@ -21,7 +21,12 @@ import 'thread_tile.dart';
 /// スレッド一覧の並べ替え方法。
 enum ThreadSort {
   bump('最近レス順', 'レスが新しいスレ順（掲示板の定番）', Icons.sort),
-  readPriority('既読優先', '既読スレを上に（新着ありを最優先）', Icons.mark_chat_read_outlined),
+
+  /// 見るべき順。初見 → 新着あり → 既読 → 一度も開いていない、の 4 段。
+  ///
+  /// 一覧を上から流すだけで「まだ知らないスレ」と「続きが来たスレ」を先に拾え、
+  /// 一度見送ったスレ（一覧で見たが開かなかった）は下にまとまる。
+  checkOrder('見るべき順', '初見 → 新着あり → 既読 → 見送ったスレ', Icons.playlist_add_check),
   momentum('勢い', '1日あたりのレス数が多い順', Icons.bolt),
   resCount('レス数', 'レスの多い順', Icons.forum_outlined),
   newest('新着', '新しく立った順', Icons.schedule),
@@ -456,21 +461,24 @@ class _ThreadListScreenState extends State<ThreadListScreen>
       case ThreadSort.bump:
         // subject.txt は既にサーバの bump 順（最終書き込み順）。そのまま。
         return threads;
-      case ThreadSort.readPriority:
-        // 既読&新着あり → 既読 → 未読。各群は bump 順（入力順）を保つ。
-        final readNew = <ThreadSummary>[];
-        final read = <ThreadSummary>[];
-        final unread = <ThreadSummary>[];
+      case ThreadSort.checkOrder:
+        // 見るべき順。初見 → 続きがある → 読み終わっている → 一度も開いていない。
+        // 各群は bump 順（入力順）を保つ。
+        final fresh = <ThreadSummary>[];
+        final unreadRes = <ThreadSummary>[];
+        final caughtUp = <ThreadSummary>[];
+        final untouched = <ThreadSummary>[];
         for (final t in threads) {
-          if (!_history.isRead(t.key)) {
-            unread.add(t);
-          } else if (_newCount(t) > 0) {
-            readNew.add(t);
-          } else {
-            read.add(t);
+          switch (_seenState(t)) {
+            case ThreadSeen.fresh:
+              fresh.add(t);
+            case ThreadSeen.opened:
+              (_newCount(t) > 0 ? unreadRes : caughtUp).add(t);
+            case ThreadSeen.listed:
+              untouched.add(t);
           }
         }
-        return [...readNew, ...read, ...unread];
+        return [...fresh, ...unreadRes, ...caughtUp, ...untouched];
       case ThreadSort.momentum:
         return [...threads]
           ..sort((a, b) => momentumPerDay(b).compareTo(momentumPerDay(a)));
