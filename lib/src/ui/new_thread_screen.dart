@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:edge_core/edge_core.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../net/auth_launcher.dart';
 import '../net/auth_store.dart';
@@ -307,14 +308,19 @@ class _NewThreadScreenState extends State<NewThreadScreen> {
             TextField(
               controller: _title,
               maxLength: _titleMax,
+              minLines: 1,
+              maxLines: null,
+              inputFormatters: [
+                FilteringTextInputFormatter.deny(RegExp(r'[\r\n]')),
+              ],
               textInputAction: TextInputAction.next,
               style: titleStyle,
               decoration: composeFieldDecoration(
                 scheme: scheme,
                 hintText: 'スレッドタイトル',
                 textStyle: titleStyle,
-                // スレタイは 1 行なので、レス入力欄と同じ高さ（42）に収める。
-                // 行高 22（16×1.4）+ 10×2 = 42。
+                // 1 行のときはレス入力欄と同じ高さ（42）に収める。
+                // 行高 22（16×1.4）+ 10×2 = 42。折り返したらこの余白のまま伸びる。
                 contentPadding: const EdgeInsets.symmetric(
                   horizontal: 14,
                   vertical: 10,
