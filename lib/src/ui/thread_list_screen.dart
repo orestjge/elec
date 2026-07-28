@@ -21,7 +21,12 @@ import 'thread_tile.dart';
 /// スレッド一覧の並べ替え方法。
 enum ThreadSort {
   bump('最近レス順', 'レスが新しいスレ順（掲示板の定番）', Icons.sort),
-  readPriority('既読優先', '既読スレを上に（新着ありを最優先）', Icons.mark_chat_read_outlined),
+
+  /// 見るべき順。初見 → 新着あり → 既読 → 一度も開いていない、の 4 段。
+  ///
+  /// 一覧を上から流すだけで「まだ知らないスレ」と「続きが来たスレ」を先に拾え、
+  /// 一度見送ったスレ（一覧で見たが開かなかった）は下にまとまる。
+  checkOrder('見るべき順', '初見 → 新着あり → 既読 → 見送ったスレ', Icons.playlist_add_check),
   momentum('勢い', '1日あたりのレス数が多い順', Icons.bolt),
   resCount('レス数', 'レスの多い順', Icons.forum_outlined),
   newest('新着', '新しく立った順', Icons.schedule),
@@ -146,6 +151,20 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   /// 並べ替えない。行が動くと元居た場所を見失うため）。初回成功まで null。
   List<String>? _order;
 
+  /// 固定順に載っているスレの最後の姿。自動更新で subject.txt から落ちても行を
+  /// 残せるようにする（[_orderedThreads]）。行が消えると下が繰り上がって、読んで
+  /// いた場所を見失うため。落ちたことは「dat落ち」チップで示し、行そのものは
+  /// 次の並べ替え直しまで置いておく。[_reorder] で固定順に無いものを捨てる。
+  final Map<String, ThreadSummary> _lastKnown = {};
+
+  /// 画面を開いた時点で「一覧で見たことがある」だったスレ。表示中は動かさない
+  /// （[_seenState]）。
+  late final Set<String> _listedAtOpen;
+
+  /// 今回一覧に出したスレ。ポーリングのたび・画面を閉じるときにまとめて保存する
+  /// （スクロールのたびに書くと、そのつど履歴ファイル全体を書き直すことになる）。
+  final Set<String> _pendingListed = {};
+
   Timer? _timer;
   bool _fetching = false; // 多重取得の抑止
 
@@ -159,6 +178,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
       encoding: widget.endpoints.textEncoding,
     );
     _history = widget.readHistory ?? ReadHistory.shared;
+    _listedAtOpen = Set.of(_history.listedThreads);
     // 前回見ていたスレを控えに置く。表に出るまで取得もポーリングもしないので、
     // 置くだけならただの待機（[ThreadScreen.active] 参照）。
     _parked = _history.lastViewedThread?.toSummary();
@@ -176,6 +196,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   void dispose() {
     _ng.removeListener(_onNgChanged);
     WidgetsBinding.instance.removeObserver(this);
+    _flushListed();
     _timer?.cancel();
     _swipeStartTimer?.cancel();
     _pages.dispose();
@@ -198,10 +219,19 @@ class _ThreadListScreenState extends State<ThreadListScreen>
       case AppLifecycleState.paused:
       case AppLifecycleState.hidden:
         _stopPolling();
+        _flushListed(); // 落とされる前に、今回目に入ったぶんを保存する
+
       case AppLifecycleState.inactive:
       case AppLifecycleState.detached:
         break;
     }
+  }
+
+  /// 今回一覧に出したスレを履歴へ移す。
+  void _flushListed() {
+    if (_pendingListed.isEmpty) return;
+    unawaited(_history.markListed(_pendingListed.toList()));
+    _pendingListed.clear();
   }
 
   void _startPolling() {
@@ -220,7 +250,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
       if (!mounted) return;
       await _rememberThreads(r.state.threads);
       setState(() {
-        _state = r.state;
+        _adoptState(r.state);
         _loading = false;
         _error = null;
         _reorder();
@@ -237,6 +267,8 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   /// 定期・復帰時の更新。失敗しても既存の一覧は保持する（黙って握る）。
   Future<void> _poll() async {
     if (_fetching || !mounted) return;
+    // 取りに行くついでに、前の周期で目に入ったぶんを保存しておく。
+    _flushListed();
     _fetching = true;
     setState(() => _polling = true);
     try {
@@ -251,7 +283,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
         // データだけ差し替え、並び順（_order）はあえて触らない。レス数・新着
         // バッジはその場で更新されるが、行が飛び回らないので一覧を追える。
         setState(() {
-          _state = r.state;
+          _adoptState(r.state);
           _error = null;
         });
       }
@@ -274,7 +306,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
       if (!mounted) return;
       if (!r.notModified) await _rememberThreads(r.state.threads);
       setState(() {
-        if (!r.notModified) _state = r.state;
+        if (!r.notModified) _adoptState(r.state);
         _error = null;
         _loading = false;
         _reorder(); // 手動更新なので並び順を貼り直す
@@ -285,16 +317,45 @@ class _ThreadListScreenState extends State<ThreadListScreen>
     }
   }
 
+  /// 取得結果を採用する。行を残せるよう各スレの最後の姿を控え、初めて見たスレは
+  /// 固定順の末尾に積む。
+  ///
+  /// 積んだ時点で場所が決まるので、あとはそこから動かない。固定順に入れずに毎回
+  /// 「今のサーバ順で末尾へ」としていたときは、末尾の新スレ同士が更新のたびに
+  /// 入れ替わってしまっていた。
+  void _adoptState(SubjectState state) {
+    _state = state;
+    for (final thread in state.threads) {
+      _lastKnown[thread.key] = thread;
+    }
+    final order = _order;
+    if (order == null) return; // 初回。この直後に _reorder が全体を敷き直す。
+    final known = order.toSet();
+    for (final thread in state.threads) {
+      if (known.add(thread.key)) order.add(thread.key);
+    }
+  }
+
   /// 現在のデータと選択中ソートで並び順を確定し、固定スナップショットを更新する。
   void _reorder() {
     final state = _state;
     if (state != null) {
-      _order = _sorted(state.threads).map((t) => t.key).toList();
+      final order = _sorted(state.threads).map((t) => t.key).toList();
+      _order = order;
+      // 並べ替え直しは落ちたスレを一覧から外す機会でもある。ここで控えも捨てる。
+      final keys = order.toSet();
+      _lastKnown.removeWhere((key, _) => !keys.contains(key));
     }
   }
 
-  /// 表示する並び。固定スナップショット [_order] の順に現在のデータを当て、
-  /// 固定順に無い（新しく現れた）スレは末尾へ回す。[_order] 未設定なら都度ソート。
+  /// 表示する並び。固定スナップショット [_order] の順に現在のデータを当てる。
+  /// [_order] 未設定なら都度ソート。
+  ///
+  /// 新しく現れたスレは [_adoptState] が末尾に積んであるので、ここでは何もしない
+  /// （末尾の新スレ同士も動かない）。
+  ///
+  /// subject.txt から落ちたスレは最後の姿（[_lastKnown]）のまま同じ場所に残す。
+  /// 消して詰めると下の行が繰り上がり、見ていた位置がズレるため。
   List<ThreadSummary> _orderedThreads() {
     final threads = _state!.threads;
     final order = _order;
@@ -303,13 +364,13 @@ class _ThreadListScreenState extends State<ThreadListScreen>
     final result = <ThreadSummary>[];
     final placed = <String>{};
     for (final key in order) {
-      final t = byKey[key];
+      final t = byKey[key] ?? _lastKnown[key];
       if (t != null) {
         result.add(t);
         placed.add(key);
       }
     }
-    // 固定順に無い新スレは末尾へ。次の手動更新で正規の位置に収まる。
+    // 念のための取りこぼし避け（通常は [_adoptState] が積んでいるので空回り）。
     for (final t in threads) {
       if (!placed.contains(t.key)) result.add(t);
     }
@@ -372,14 +433,21 @@ class _ThreadListScreenState extends State<ThreadListScreen>
     return diff > 0 ? diff : 0;
   }
 
-  String? _statusLabel(ThreadSummary t) {
-    if (_isStoppedThread(t)) {
-      final current =
-          _state?.threads.any((thread) => thread.key == t.key) ?? false;
-      if (!current) return t.resCount >= 1000 ? '完走' : 'dat落ち';
-      return '完走';
-    }
-    return null;
+  /// このスレをどこまで見たか。
+  ///
+  /// 「一覧で見た」の判定は**画面を開いた時点の控え**（[_listedAtOpen]）で決める。
+  /// その場で控えを見にいくと、スクロールして目に入った瞬間に点が変わってしまう
+  /// （見ているそばで表示が動く）。今回目に入ったぶんは [_pendingListed] に貯めて、
+  /// 次に開いたときから効かせる。
+  ThreadSeen _seenState(ThreadSummary t) {
+    if (_history.isRead(t.key)) return ThreadSeen.opened;
+    return _listedAtOpen.contains(t.key) ? ThreadSeen.listed : ThreadSeen.fresh;
+  }
+
+  ThreadStatus? _status(ThreadSummary t) {
+    if (!_isStoppedThread(t)) return null;
+    // 1000 まで行っていれば、一覧から落ちていても「完走」。
+    return t.resCount >= 1000 ? ThreadStatus.finished : ThreadStatus.archived;
   }
 
   bool _isStoppedThread(ThreadSummary t) {
@@ -393,21 +461,24 @@ class _ThreadListScreenState extends State<ThreadListScreen>
       case ThreadSort.bump:
         // subject.txt は既にサーバの bump 順（最終書き込み順）。そのまま。
         return threads;
-      case ThreadSort.readPriority:
-        // 既読&新着あり → 既読 → 未読。各群は bump 順（入力順）を保つ。
-        final readNew = <ThreadSummary>[];
-        final read = <ThreadSummary>[];
-        final unread = <ThreadSummary>[];
+      case ThreadSort.checkOrder:
+        // 見るべき順。初見 → 続きがある → 読み終わっている → 一度も開いていない。
+        // 各群は bump 順（入力順）を保つ。
+        final fresh = <ThreadSummary>[];
+        final unreadRes = <ThreadSummary>[];
+        final caughtUp = <ThreadSummary>[];
+        final untouched = <ThreadSummary>[];
         for (final t in threads) {
-          if (!_history.isRead(t.key)) {
-            unread.add(t);
-          } else if (_newCount(t) > 0) {
-            readNew.add(t);
-          } else {
-            read.add(t);
+          switch (_seenState(t)) {
+            case ThreadSeen.fresh:
+              fresh.add(t);
+            case ThreadSeen.opened:
+              (_newCount(t) > 0 ? unreadRes : caughtUp).add(t);
+            case ThreadSeen.listed:
+              untouched.add(t);
           }
         }
-        return [...readNew, ...read, ...unread];
+        return [...fresh, ...unreadRes, ...caughtUp, ...untouched];
       case ThreadSort.momentum:
         return [...threads]
           ..sort((a, b) => momentumPerDay(b).compareTo(momentumPerDay(a)));
@@ -863,7 +934,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
                 authStore: widget.authStore,
                 readHistory: _history,
                 ngStore: _ng,
-                initialStatusLabel: _statusLabel(parked),
+                initialStatusLabel: _status(parked)?.label,
                 initialResCount: parked.resCount,
                 creatorMetadent: parked.metadent,
                 defaultName: widget.board.defaultName,
@@ -961,15 +1032,21 @@ class _ThreadListScreenState extends State<ThreadListScreen>
       ),
       sliver: SliverList.builder(
         itemCount: threads.length,
-        itemBuilder: (context, i) => ThreadTile(
-          thread: threads[i],
-          isRead: _history.isRead(threads[i].key),
-          newCount: _newCount(threads[i]),
-          statusLabel: _statusLabel(threads[i]),
-          isOwn: _history.isOwnThread(threads[i].key),
-          onTap: () => _openThread(threads[i]),
-          onLongPress: () => _showThreadActions(threads[i]),
-        ),
+        itemBuilder: (context, i) {
+          final thread = threads[i];
+          // 組み立てられた＝画面に出た（か、その直前まで来た）ということ。
+          // 次に開いたときに新顔でなくなるよう控えておく。
+          _pendingListed.add(thread.key);
+          return ThreadTile(
+            thread: thread,
+            seen: _seenState(thread),
+            newCount: _newCount(thread),
+            status: _status(thread),
+            isOwn: _history.isOwnThread(thread.key),
+            onTap: () => _openThread(thread),
+            onLongPress: () => _showThreadActions(thread),
+          );
+        },
       ),
     );
   }

@@ -134,6 +134,192 @@ void main() {
     expect(order(), ['スレD', 'スレC', 'スレB', 'スレA']);
   });
 
+  testWidgets('一覧で見たスレは、次に開いたときは新顔でなくなる', (tester) async {
+    final history = ReadHistory(MemoryReadHistoryStorage());
+
+    Future<void> openList(WidgetTester tester, String subject) async {
+      // いったん画面を閉じてから開き直す（State を作り直させる）。
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ThreadListScreen(
+            fetcher: QueueFetcher([subjectOk(subject, 'LM1')]),
+            pollInterval: const Duration(seconds: 15),
+            readHistory: history,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    // スレ面が前に出ている間、一覧は生きたまま裏に控える（offstage）ので、
+    // そこも拾えるようにしておく。
+    ThreadSeen seenOf(String title) => tester
+        .widget<ThreadTile>(
+          find.widgetWithText(ThreadTile, title, skipOffstage: false),
+        )
+        .seen;
+
+    // 初回。どれも一覧で見たことがない＝全部が新顔。
+    await openList(tester, '1.dat<>スレA (10)\n2.dat<>スレB (5)\n');
+    expect(seenOf('スレA'), ThreadSeen.fresh);
+    expect(seenOf('スレB'), ThreadSeen.fresh);
+
+    // 見ている間は点が変わらない（目の前で表示が動かない）。
+    await tester.pump(const Duration(seconds: 15));
+    await tester.pumpAndSettle();
+    expect(seenOf('スレA'), ThreadSeen.fresh);
+
+    // 開き直すと、さっき目に入ったぶんは新顔でなくなる。新しく立った C だけ新顔。
+    await openList(tester, '1.dat<>スレA (12)\n2.dat<>スレB (5)\n3.dat<>スレC (1)\n');
+    expect(seenOf('スレA'), ThreadSeen.listed);
+    expect(seenOf('スレB'), ThreadSeen.listed);
+    expect(seenOf('スレC'), ThreadSeen.fresh);
+
+    // 開いたスレは「開いた」状態になる（一覧は控えたまま生きている）。
+    await tester.tap(find.text('スレA'));
+    await tester.pumpAndSettle();
+    expect(seenOf('スレA'), ThreadSeen.opened);
+  });
+
+  testWidgets('見るべき順は 初見 → 新着あり → 既読 → 見送ったスレ に並べる', (tester) async {
+    final history = ReadHistory(MemoryReadHistoryStorage());
+    // 一覧で見たことがある＝初見ではない（4 は初見のまま）。
+    await history.markListed(['1', '2', '3', '5']);
+    // 開いたスレ。2 は開いた後にレスが増えた＝新着あり、3 は追いついている。
+    await history.markOpenedThread(
+      const ThreadSummary(key: '2', title: 'スレB', resCount: 8, capName: null),
+    );
+    await history.markRead('2', 8);
+    await history.markOpenedThread(
+      const ThreadSummary(key: '3', title: 'スレC', resCount: 5, capName: null),
+    );
+    await history.markRead('3', 5);
+
+    final fetcher = QueueFetcher([
+      subjectOk(
+        // bump 順（サーバ順）。この中で 4 群に分かれる。
+        '1.dat<>スレA (10)\n'
+        '2.dat<>スレB (12)\n' // 開いた後に +4
+        '3.dat<>スレC (5)\n' // 追いついている
+        '4.dat<>スレD (2)\n' // 一覧でも初見
+        '5.dat<>スレE (7)\n', // 一覧で見たが開いていない
+        'LM1',
+      ),
+    ]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadListScreen(
+          fetcher: fetcher,
+          pollInterval: const Duration(seconds: 15),
+          readHistory: history,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('並べ替え'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('見るべき順'));
+    await tester.pumpAndSettle();
+
+    final order = tester
+        .widgetList<ThreadTile>(find.byType(ThreadTile))
+        .map((w) => w.thread.title)
+        .toList();
+    // D=初見 → B=新着あり → C=既読 → A,E=見送った（各群は bump 順のまま）。
+    expect(order, ['スレD', 'スレB', 'スレC', 'スレA', 'スレE']);
+  });
+
+  testWidgets('末尾に付いた新スレは、その後の自動更新で入れ替わらない', (tester) async {
+    final fetcher = QueueFetcher([
+      subjectOk('1.dat<>スレA (10)\n', 'LM1'),
+      // 新スレ B・C が出現（サーバ順は C が先）。
+      subjectOk('3.dat<>スレC (2)\n2.dat<>スレB (4)\n1.dat<>スレA (10)\n', 'LM2'),
+      // 次の更新でサーバ順が入れ替わり、さらに D も出る。
+      subjectOk(
+        '2.dat<>スレB (9)\n1.dat<>スレA (11)\n4.dat<>スレD (1)\n3.dat<>スレC (2)\n',
+        'LM3',
+      ),
+    ]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadListScreen(
+          fetcher: fetcher,
+          pollInterval: const Duration(seconds: 15),
+          readHistory: ReadHistory(MemoryReadHistoryStorage()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    List<String> order() => tester
+        .widgetList<ThreadTile>(find.byType(ThreadTile))
+        .map((w) => w.thread.title)
+        .toList();
+
+    expect(order(), ['スレA']);
+
+    // 現れた順（サーバ順）に末尾へ積まれる。
+    await tester.pump(const Duration(seconds: 15));
+    await tester.pumpAndSettle();
+    expect(order(), ['スレA', 'スレC', 'スレB']);
+
+    // サーバ順が変わっても、積んだ場所からは動かない。D だけがさらに末尾へ。
+    await tester.pump(const Duration(seconds: 15));
+    await tester.pumpAndSettle();
+    expect(order(), ['スレA', 'スレC', 'スレB', 'スレD']);
+  });
+
+  testWidgets('自動更新で subject から落ちたスレは、dat落ちチップを付けて同じ場所に残す', (tester) async {
+    final fetcher = QueueFetcher([
+      subjectOk('1.dat<>スレA (10)\n2.dat<>スレB (5)\n3.dat<>スレC (3)\n', 'LM1'),
+      // ポーリング: B が subject.txt から消える。
+      subjectOk('1.dat<>スレA (11)\n3.dat<>スレC (3)\n', 'LM2'),
+    ]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadListScreen(
+          fetcher: fetcher,
+          pollInterval: const Duration(seconds: 15),
+          readHistory: ReadHistory(MemoryReadHistoryStorage()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    List<String> order() => tester
+        .widgetList<ThreadTile>(find.byType(ThreadTile))
+        .map((w) => w.thread.title)
+        .toList();
+
+    expect(order(), ['スレA', 'スレB', 'スレC']);
+    final beforeC = tester.getTopLeft(find.text('スレC')).dy;
+
+    await tester.pump(const Duration(seconds: 15));
+    await tester.pumpAndSettle();
+
+    // 行は残り、下の行も繰り上がらない。落ちたことはチップで分かる。
+    expect(order(), ['スレA', 'スレB', 'スレC']);
+    expect(tester.getTopLeft(find.text('スレC')).dy, beforeC);
+    expect(find.text('dat落ち'), findsOneWidget);
+    expect(
+      tester
+          .widget<ThreadTile>(find.widgetWithText(ThreadTile, 'スレB'))
+          .thread
+          .resCount,
+      5, // 最後に見えていた姿のまま
+    );
+
+    // 手動更新（並べ替え直し）では消える。
+    await tester.fling(find.text('スレA'), const Offset(0, 300), 1000);
+    await tester.pumpAndSettle();
+    expect(order(), ['スレA', 'スレC']);
+  });
+
   testWidgets('初回失敗時はエラー表示、再試行で回復する', (tester) async {
     final fetcher = QueueFetcher([
       const FetchResponse(statusCode: 500, bodyBytes: []),

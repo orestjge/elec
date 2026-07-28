@@ -16,6 +16,7 @@ class ReadHistorySnapshot {
   const ReadHistorySnapshot({
     this.seen = const {},
     this.seenAt = const {},
+    this.listed = const {},
     this.favorites = const {},
     this.threads = const {},
     this.ownThreads = const {},
@@ -24,6 +25,10 @@ class ReadHistorySnapshot {
   });
 
   final Map<String, int> seen;
+
+  /// 一覧で目に入ったことがあるスレのキー。開いたかどうかとは別で、「前に一覧で
+  /// 見かけた」＝新しく立ったスレではない、を表す。
+  final Set<String> listed;
 
   /// スレを最後に開いた時刻（エポックミリ秒）。履歴の「最後に見た順」に使う。
   final Map<String, int> seenAt;
@@ -101,6 +106,7 @@ class FileReadHistoryStorage implements ReadHistoryStorage {
       final seenJson = json['seen'];
       if (seenJson is Map<String, dynamic>) {
         final seenAtJson = json['seenAt'];
+        final listedJson = json['listed'];
         final favoritesJson = json['favorites'];
         final threadsJson = json['threads'];
         final ownThreadsJson = json['ownThreads'];
@@ -109,6 +115,9 @@ class FileReadHistoryStorage implements ReadHistoryStorage {
           seen: seenJson.map((k, v) => MapEntry(k, (v as num).toInt())),
           seenAt: seenAtJson is Map<String, dynamic>
               ? seenAtJson.map((k, v) => MapEntry(k, (v as num).toInt()))
+              : const {},
+          listed: listedJson is List
+              ? listedJson.whereType<String>().toSet()
               : const {},
           favorites: favoritesJson is List
               ? favoritesJson.whereType<String>().toSet()
@@ -143,6 +152,7 @@ class FileReadHistoryStorage implements ReadHistoryStorage {
       jsonEncode({
         'seen': snapshot.seen,
         'seenAt': snapshot.seenAt,
+        'listed': snapshot.listed.toList()..sort(),
         'favorites': snapshot.favorites.toList()..sort(),
         'threads': snapshot.threads.map((k, v) => MapEntry(k, v.toJson())),
         'ownThreads': snapshot.ownThreads.toList()..sort(),
@@ -181,6 +191,7 @@ class FileReadHistoryStorage implements ReadHistoryStorage {
 class MemoryReadHistoryStorage implements ReadHistoryStorage {
   Map<String, int> _seen;
   Map<String, int> _seenAt;
+  Set<String> _listed = {};
   Set<String> _favorites;
   Map<String, StoredThread> _threads;
   Set<String> _ownThreads;
@@ -206,6 +217,7 @@ class MemoryReadHistoryStorage implements ReadHistoryStorage {
   Future<ReadHistorySnapshot> load() async => ReadHistorySnapshot(
     seen: Map.of(_seen),
     seenAt: Map.of(_seenAt),
+    listed: Set.of(_listed),
     favorites: Set.of(_favorites),
     threads: Map.of(_threads),
     ownThreads: Set.of(_ownThreads),
@@ -217,6 +229,7 @@ class MemoryReadHistoryStorage implements ReadHistoryStorage {
   Future<void> save(ReadHistorySnapshot snapshot) async {
     _seen = Map.of(snapshot.seen);
     _seenAt = Map.of(snapshot.seenAt);
+    _listed = Set.of(snapshot.listed);
     _favorites = Set.of(snapshot.favorites);
     _threads = Map.of(snapshot.threads);
     _ownThreads = Set.of(snapshot.ownThreads);
@@ -267,6 +280,7 @@ class ReadHistory {
   final DateTime Function() _now;
   Map<String, int> _seen = {};
   Map<String, int> _seenAt = {};
+  Set<String> _listed = {};
   Set<String> _favorites = {};
   Map<String, StoredThread> _threads = {};
   Set<String> _ownThreads = {};
@@ -278,6 +292,7 @@ class ReadHistory {
     final snapshot = await _storage.load();
     _seen = Map.of(snapshot.seen);
     _seenAt = Map.of(snapshot.seenAt);
+    _listed = Set.of(snapshot.listed);
     _favorites = Set.of(snapshot.favorites);
     _threads = Map.of(snapshot.threads);
     _ownThreads = Set.of(snapshot.ownThreads);
@@ -286,6 +301,39 @@ class ReadHistory {
   }
 
   bool isRead(String threadKey) => _seen.containsKey(threadKey);
+
+  /// 一覧で目に入ったことがあるか。開いたスレは当然見ている。
+  bool isListed(String threadKey) =>
+      _listed.contains(threadKey) || _seen.containsKey(threadKey);
+
+  /// いま一覧に出ているキーの控え。次に開いたときに「新しく立ったスレ」だけを
+  /// 見分けるために使う（[isListed]）。
+  Set<String> get listedThreads => Set.unmodifiable(_listed);
+
+  /// 一覧で目に入ったスレとして覚える。スクロールのたびに呼ばれるので、増えた
+  /// ものが無ければ何もしない。
+  Future<void> markListed(Iterable<String> threadKeys) async {
+    var changed = false;
+    for (final key in threadKeys) {
+      if (_listed.add(key)) changed = true;
+    }
+    if (!changed) return;
+    _pruneListed();
+    await _save();
+  }
+
+  /// 覚えるのは新しいほうから [_maxListed] 件まで。スレキーは立った時刻（UNIX
+  /// 秒）なので、大きいほうが新しい。落ちて久しいスレは覚えていても意味が無い。
+  static const _maxListed = 3000;
+
+  void _pruneListed() {
+    if (_listed.length <= _maxListed) return;
+    final keys = _listed.toList()
+      ..sort((a, b) => _keyOrder(b).compareTo(_keyOrder(a)));
+    _listed = keys.take(_maxListed).toSet();
+  }
+
+  static int _keyOrder(String key) => int.tryParse(key) ?? 0;
 
   /// 前回見たレス数。未読なら null。
   int? lastSeen(String threadKey) => _seen[threadKey];
@@ -408,6 +456,7 @@ class ReadHistory {
     final snapshot = ReadHistorySnapshot(
       seen: Map.of(_seen),
       seenAt: Map.of(_seenAt),
+      listed: Set.of(_listed),
       favorites: Set.of(_favorites),
       threads: Map.of(_threads),
       ownThreads: Set.of(_ownThreads),
