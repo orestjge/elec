@@ -23,6 +23,28 @@ void main() {
       expect(h.lastSeen('1'), 120);
     });
 
+    test('markListed で「一覧で見た」になり、開いたスレも見た扱い', () async {
+      final h = ReadHistory(MemoryReadHistoryStorage());
+      expect(h.isListed('1'), isFalse);
+      await h.markListed(['1', '2']);
+      expect(h.isListed('1'), isTrue);
+      expect(h.isListed('2'), isTrue);
+      expect(h.isListed('3'), isFalse);
+
+      // 開いたスレは一覧で見ていなくても見た扱い（履歴やお気に入りから直接開く）。
+      await h.markRead('3', 10);
+      expect(h.isListed('3'), isTrue);
+    });
+
+    test('一覧で見たスレは新しいほうから 3000 件まで覚える', () async {
+      final h = ReadHistory(MemoryReadHistoryStorage());
+      // スレキーは立った時刻（UNIX 秒）。古いほうから 3100 件入れる。
+      await h.markListed([for (var i = 0; i < 3100; i++) '${1700000000 + i}']);
+      expect(h.listedThreads, hasLength(3000));
+      expect(h.isListed('${1700000000 + 3099}'), isTrue); // 新しいほうは残る
+      expect(h.isListed('1700000000'), isFalse); // 古いほうから捨てる
+    });
+
     test('お気に入りを切り替えられる', () async {
       final h = ReadHistory(MemoryReadHistoryStorage());
       expect(h.isFavorite('1'), isFalse);
@@ -207,6 +229,16 @@ void main() {
       expect(b.lastSeen('123'), 50);
       expect(b.lastSeen('456'), 10);
       expect(b.isRead('789'), isFalse);
+    });
+
+    test('一覧で見たスレも保存される', () async {
+      final a = ReadHistory(FileReadHistoryStorage(directory: dir));
+      await a.markListed(['123', '456']);
+
+      final b = ReadHistory(FileReadHistoryStorage(directory: dir));
+      await b.load();
+      expect(b.isListed('123'), isTrue);
+      expect(b.isListed('789'), isFalse);
     });
 
     test('お気に入りも保存される', () async {

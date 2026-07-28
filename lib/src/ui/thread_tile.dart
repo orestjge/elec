@@ -17,6 +17,20 @@ enum ThreadStatus {
   final IconData icon;
 }
 
+/// そのスレをどこまで見たか。左端のマーカーで区別する。
+enum ThreadSeen {
+  /// 一覧でも見たことがない＝前に見たときには無かったスレ。実況板では「さっき
+  /// 立った」がいちばん拾いたい情報なので、塗りつぶしの点で目立たせる。
+  fresh,
+
+  /// 一覧で見かけたが、まだ開いていない。点は輪郭だけにして、未読なのは分かる
+  /// が新顔ではない、を表す。
+  listed,
+
+  /// 開いたことがある。点は出さない。
+  opened,
+}
+
 /// スレ一覧の 1 行。カードではなくフラットな行で、余白とタイポグラフィで
 /// 区切る。勢いが高いスレはアクセント色で強調する。
 class ThreadTile extends StatelessWidget {
@@ -25,7 +39,7 @@ class ThreadTile extends StatelessWidget {
     required this.thread,
     required this.onTap,
     this.onLongPress,
-    this.isRead = false,
+    this.seen = ThreadSeen.fresh,
     this.newCount = 0,
     this.status,
     this.isOwn = false,
@@ -37,8 +51,11 @@ class ThreadTile extends StatelessWidget {
   /// 長押し（スレ主 NG などのメニュー用）。
   final VoidCallback? onLongPress;
 
-  /// 開いたことがあるスレか（タイトルの色を落として区別する）。
-  final bool isRead;
+  /// このスレをどこまで見たか。開いたスレはタイトルの色を落とす。
+  final ThreadSeen seen;
+
+  /// 開いたことがあるか。
+  bool get _isRead => seen == ThreadSeen.opened;
 
   /// 前回開いてからの新着レス数（0 なら無し）。
   final int newCount;
@@ -73,10 +90,10 @@ class ThreadTile extends StatelessWidget {
     final metaColor = scheme.onSurfaceVariant;
     final momentumColor = isHot ? scheme.primary : metaColor;
     // 既読スレはタイトルを少し落ち着かせて未読と区別する。
-    final titleColor = isRead ? scheme.onSurfaceVariant : scheme.onSurface;
+    final titleColor = _isRead ? scheme.onSurfaceVariant : scheme.onSurface;
     final titleStyle = theme.textTheme.titleMedium?.copyWith(
       fontSize: 14,
-      fontWeight: isRead ? FontWeight.w500 : FontWeight.w600,
+      fontWeight: _isRead ? FontWeight.w500 : FontWeight.w600,
       height: 1.3,
       color: titleColor,
     );
@@ -104,10 +121,7 @@ class ThreadTile extends StatelessWidget {
                 // 左端の状態マーカー。タイトル 1 行目の中央に合わせる。
                 Padding(
                   padding: const EdgeInsets.only(right: 8),
-                  child: _StatusMark(
-                    isRead: isRead,
-                    lineHeight: titleLineHeight,
-                  ),
+                  child: _StatusMark(seen: seen, lineHeight: titleLineHeight),
                 ),
                 Expanded(
                   child: Column(
@@ -135,7 +149,7 @@ class ThreadTile extends StatelessWidget {
                             // 出す。ただし出入りでタイトルの折り返し（＝行の
                             // 高さ）が変わらないよう、出る可能性のある既読行では
                             // 幅を先に空けておく（[_newBadgeSlot]）。
-                            if (isRead) ...[
+                            if (_isRead) ...[
                               const SizedBox(width: 8),
                               SizedBox(
                                 width: textScaler.scale(_newBadgeSlot),
@@ -251,17 +265,20 @@ class _OwnThreadBadge extends StatelessWidget {
   }
 }
 
-/// 左端の未読マーカー。未読はアクセント色の点、既読は点なし（＝開いたことが
-/// ある）。チェックは付けない（新着が後から来るので「読み終わった」ではない）。
+/// 左端の状態マーカー。塗りつぶし＝新顔、輪郭だけ＝一覧で見たがまだ開いていない、
+/// 無し＝開いたことがある。チェックは付けない（新着が後から来るので「読み終わっ
+/// た」ではない）。
+///
+/// 3 つとも同じ 8px の丸なので、状態が変わっても行の高さも左端も動かない。
 class _StatusMark extends StatelessWidget {
-  const _StatusMark({required this.isRead, required this.lineHeight});
-  final bool isRead;
+  const _StatusMark({required this.seen, required this.lineHeight});
+  final ThreadSeen seen;
   final double lineHeight;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    // 既読でも同じ幅を確保してタイトルの左端を揃える。
+    // 開いたスレでも同じ幅を確保してタイトルの左端を揃える。
     return SizedBox(
       width: 8,
       height: lineHeight,
@@ -269,15 +286,23 @@ class _StatusMark extends StatelessWidget {
         child: SizedBox(
           width: 8,
           height: 8,
-          child: isRead
-              ? null
-              : DecoratedBox(
-                  key: const ValueKey('unread-dot'),
-                  decoration: BoxDecoration(
-                    color: scheme.primary,
-                    shape: BoxShape.circle,
-                  ),
-                ),
+          child: switch (seen) {
+            ThreadSeen.fresh => DecoratedBox(
+              key: const ValueKey('fresh-dot'),
+              decoration: BoxDecoration(
+                color: scheme.primary,
+                shape: BoxShape.circle,
+              ),
+            ),
+            ThreadSeen.listed => DecoratedBox(
+              key: const ValueKey('listed-dot'),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: scheme.primary, width: 1.5),
+              ),
+            ),
+            ThreadSeen.opened => null,
+          },
         ),
       ),
     );

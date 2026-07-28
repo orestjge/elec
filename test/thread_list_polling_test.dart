@@ -134,6 +134,54 @@ void main() {
     expect(order(), ['スレD', 'スレC', 'スレB', 'スレA']);
   });
 
+  testWidgets('一覧で見たスレは、次に開いたときは新顔でなくなる', (tester) async {
+    final history = ReadHistory(MemoryReadHistoryStorage());
+
+    Future<void> openList(WidgetTester tester, String subject) async {
+      // いったん画面を閉じてから開き直す（State を作り直させる）。
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ThreadListScreen(
+            fetcher: QueueFetcher([subjectOk(subject, 'LM1')]),
+            pollInterval: const Duration(seconds: 15),
+            readHistory: history,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    // スレ面が前に出ている間、一覧は生きたまま裏に控える（offstage）ので、
+    // そこも拾えるようにしておく。
+    ThreadSeen seenOf(String title) => tester
+        .widget<ThreadTile>(
+          find.widgetWithText(ThreadTile, title, skipOffstage: false),
+        )
+        .seen;
+
+    // 初回。どれも一覧で見たことがない＝全部が新顔。
+    await openList(tester, '1.dat<>スレA (10)\n2.dat<>スレB (5)\n');
+    expect(seenOf('スレA'), ThreadSeen.fresh);
+    expect(seenOf('スレB'), ThreadSeen.fresh);
+
+    // 見ている間は点が変わらない（目の前で表示が動かない）。
+    await tester.pump(const Duration(seconds: 15));
+    await tester.pumpAndSettle();
+    expect(seenOf('スレA'), ThreadSeen.fresh);
+
+    // 開き直すと、さっき目に入ったぶんは新顔でなくなる。新しく立った C だけ新顔。
+    await openList(tester, '1.dat<>スレA (12)\n2.dat<>スレB (5)\n3.dat<>スレC (1)\n');
+    expect(seenOf('スレA'), ThreadSeen.listed);
+    expect(seenOf('スレB'), ThreadSeen.listed);
+    expect(seenOf('スレC'), ThreadSeen.fresh);
+
+    // 開いたスレは「開いた」状態になる（一覧は控えたまま生きている）。
+    await tester.tap(find.text('スレA'));
+    await tester.pumpAndSettle();
+    expect(seenOf('スレA'), ThreadSeen.opened);
+  });
+
   testWidgets('末尾に付いた新スレは、その後の自動更新で入れ替わらない', (tester) async {
     final fetcher = QueueFetcher([
       subjectOk('1.dat<>スレA (10)\n', 'LM1'),

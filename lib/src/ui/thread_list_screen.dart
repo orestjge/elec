@@ -152,6 +152,14 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   /// 次の並べ替え直しまで置いておく。[_reorder] で固定順に無いものを捨てる。
   final Map<String, ThreadSummary> _lastKnown = {};
 
+  /// 画面を開いた時点で「一覧で見たことがある」だったスレ。表示中は動かさない
+  /// （[_seenState]）。
+  late final Set<String> _listedAtOpen;
+
+  /// 今回一覧に出したスレ。ポーリングのたび・画面を閉じるときにまとめて保存する
+  /// （スクロールのたびに書くと、そのつど履歴ファイル全体を書き直すことになる）。
+  final Set<String> _pendingListed = {};
+
   Timer? _timer;
   bool _fetching = false; // 多重取得の抑止
 
@@ -165,6 +173,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
       encoding: widget.endpoints.textEncoding,
     );
     _history = widget.readHistory ?? ReadHistory.shared;
+    _listedAtOpen = Set.of(_history.listedThreads);
     // 前回見ていたスレを控えに置く。表に出るまで取得もポーリングもしないので、
     // 置くだけならただの待機（[ThreadScreen.active] 参照）。
     _parked = _history.lastViewedThread?.toSummary();
@@ -182,6 +191,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   void dispose() {
     _ng.removeListener(_onNgChanged);
     WidgetsBinding.instance.removeObserver(this);
+    _flushListed();
     _timer?.cancel();
     _swipeStartTimer?.cancel();
     _pages.dispose();
@@ -204,10 +214,19 @@ class _ThreadListScreenState extends State<ThreadListScreen>
       case AppLifecycleState.paused:
       case AppLifecycleState.hidden:
         _stopPolling();
+        _flushListed(); // 落とされる前に、今回目に入ったぶんを保存する
+
       case AppLifecycleState.inactive:
       case AppLifecycleState.detached:
         break;
     }
+  }
+
+  /// 今回一覧に出したスレを履歴へ移す。
+  void _flushListed() {
+    if (_pendingListed.isEmpty) return;
+    unawaited(_history.markListed(_pendingListed.toList()));
+    _pendingListed.clear();
   }
 
   void _startPolling() {
@@ -243,6 +262,8 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   /// 定期・復帰時の更新。失敗しても既存の一覧は保持する（黙って握る）。
   Future<void> _poll() async {
     if (_fetching || !mounted) return;
+    // 取りに行くついでに、前の周期で目に入ったぶんを保存しておく。
+    _flushListed();
     _fetching = true;
     setState(() => _polling = true);
     try {
@@ -405,6 +426,17 @@ class _ThreadListScreenState extends State<ThreadListScreen>
     if (seen == null) return 0;
     final diff = t.resCount - seen;
     return diff > 0 ? diff : 0;
+  }
+
+  /// このスレをどこまで見たか。
+  ///
+  /// 「一覧で見た」の判定は**画面を開いた時点の控え**（[_listedAtOpen]）で決める。
+  /// その場で控えを見にいくと、スクロールして目に入った瞬間に点が変わってしまう
+  /// （見ているそばで表示が動く）。今回目に入ったぶんは [_pendingListed] に貯めて、
+  /// 次に開いたときから効かせる。
+  ThreadSeen _seenState(ThreadSummary t) {
+    if (_history.isRead(t.key)) return ThreadSeen.opened;
+    return _listedAtOpen.contains(t.key) ? ThreadSeen.listed : ThreadSeen.fresh;
   }
 
   ThreadStatus? _status(ThreadSummary t) {
@@ -992,15 +1024,21 @@ class _ThreadListScreenState extends State<ThreadListScreen>
       ),
       sliver: SliverList.builder(
         itemCount: threads.length,
-        itemBuilder: (context, i) => ThreadTile(
-          thread: threads[i],
-          isRead: _history.isRead(threads[i].key),
-          newCount: _newCount(threads[i]),
-          status: _status(threads[i]),
-          isOwn: _history.isOwnThread(threads[i].key),
-          onTap: () => _openThread(threads[i]),
-          onLongPress: () => _showThreadActions(threads[i]),
-        ),
+        itemBuilder: (context, i) {
+          final thread = threads[i];
+          // 組み立てられた＝画面に出た（か、その直前まで来た）ということ。
+          // 次に開いたときに新顔でなくなるよう控えておく。
+          _pendingListed.add(thread.key);
+          return ThreadTile(
+            thread: thread,
+            seen: _seenState(thread),
+            newCount: _newCount(thread),
+            status: _status(thread),
+            isOwn: _history.isOwnThread(thread.key),
+            onTap: () => _openThread(thread),
+            onLongPress: () => _showThreadActions(thread),
+          );
+        },
       ),
     );
   }

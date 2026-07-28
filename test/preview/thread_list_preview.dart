@@ -58,7 +58,8 @@ String _subject({required bool dropped}) {
     '1762103602.dat<>既読で新着があるスレ (317)',
     if (!dropped) '1762103603.dat<>そのうち subject から落ちるスレ (48)',
     '1762103604.dat<>完走したスレ (1000)',
-    '1762103605.dat<>まだ開いていないスレ (12)',
+    '1762103605.dat<>一覧で見たがまだ開いていないスレ (12)',
+    '1762103607.dat<>一覧でも初めて見るスレ (2)',
     '1762103606.dat<>自分で立てたスレ (3)',
   ];
   return '${lines.join('\n')}\n';
@@ -95,6 +96,13 @@ Future<void> _shoot(
   );
   await history.markRead('1762103603', 48);
   await history.markOwnThread('1762103606');
+  // 「一覧で見たことがある」ぶん（1762103607 だけ入れない＝新顔）。
+  await history.markListed([
+    '1762103601',
+    '1762103604',
+    '1762103605',
+    '1762103606',
+  ]);
 
   await tester.pumpWidget(
     MaterialApp(

@@ -13,26 +13,64 @@ ThreadSummary thread() => const ThreadSummary(
 Widget wrap(Widget child) => MaterialApp(home: Scaffold(body: child));
 
 void main() {
-  testWidgets('未読スレは未読ドットを出す', (tester) async {
+  testWidgets('一覧でも初めて見るスレは塗りつぶしの点を出す', (tester) async {
     await tester.pumpWidget(
-      wrap(ThreadTile(thread: thread(), isRead: false, onTap: () {})),
+      wrap(ThreadTile(thread: thread(), seen: ThreadSeen.fresh, onTap: () {})),
     );
-    expect(find.byKey(const ValueKey('unread-dot')), findsOneWidget);
+    expect(find.byKey(const ValueKey('fresh-dot')), findsOneWidget);
+    expect(find.byKey(const ValueKey('listed-dot')), findsNothing);
   });
 
-  testWidgets('既読スレはドットも「既読」ラベルもチェックも出さない', (tester) async {
+  testWidgets('一覧で見たがまだ開いていないスレは輪郭だけの点を出す', (tester) async {
     await tester.pumpWidget(
-      wrap(ThreadTile(thread: thread(), isRead: true, onTap: () {})),
+      wrap(ThreadTile(thread: thread(), seen: ThreadSeen.listed, onTap: () {})),
     );
-    expect(find.byKey(const ValueKey('unread-dot')), findsNothing);
+    expect(find.byKey(const ValueKey('listed-dot')), findsOneWidget);
+    expect(find.byKey(const ValueKey('fresh-dot')), findsNothing);
+  });
+
+  testWidgets('開いたスレは点も「既読」ラベルもチェックも出さない', (tester) async {
+    await tester.pumpWidget(
+      wrap(ThreadTile(thread: thread(), seen: ThreadSeen.opened, onTap: () {})),
+    );
+    expect(find.byKey(const ValueKey('fresh-dot')), findsNothing);
+    expect(find.byKey(const ValueKey('listed-dot')), findsNothing);
     expect(find.text('既読'), findsNothing);
     expect(find.byIcon(Icons.check_rounded), findsNothing);
+  });
+
+  testWidgets('3 つの状態で行の高さも左端も動かない', (tester) async {
+    final sizes = <Size>[];
+    final titleLefts = <double>[];
+    for (final seen in ThreadSeen.values) {
+      await tester.pumpWidget(
+        wrap(
+          ListView(
+            children: [
+              SizedBox(
+                width: 360,
+                child: ThreadTile(thread: thread(), seen: seen, onTap: () {}),
+              ),
+            ],
+          ),
+        ),
+      );
+      sizes.add(tester.getSize(find.byType(ThreadTile)));
+      titleLefts.add(tester.getTopLeft(find.text('テストスレ')).dx);
+    }
+    expect(sizes.toSet(), hasLength(1));
+    expect(titleLefts.toSet(), hasLength(1));
   });
 
   testWidgets('新着があれば +N バッジを出す', (tester) async {
     await tester.pumpWidget(
       wrap(
-        ThreadTile(thread: thread(), isRead: true, newCount: 5, onTap: () {}),
+        ThreadTile(
+          thread: thread(),
+          seen: ThreadSeen.opened,
+          newCount: 5,
+          onTap: () {},
+        ),
       ),
     );
     expect(find.text('+5'), findsOneWidget);
@@ -40,7 +78,7 @@ void main() {
 
   testWidgets('新着が無ければバッジは出ない', (tester) async {
     await tester.pumpWidget(
-      wrap(ThreadTile(thread: thread(), isRead: true, onTap: () {})),
+      wrap(ThreadTile(thread: thread(), seen: ThreadSeen.opened, onTap: () {})),
     );
     expect(find.textContaining('+'), findsNothing);
   });
@@ -86,7 +124,7 @@ void main() {
             resCount: 100,
             capName: null,
           ),
-          isRead: true,
+          seen: ThreadSeen.opened,
           newCount: newCount,
           status: status,
           onTap: () {},
