@@ -407,14 +407,10 @@ class _ThreadListScreenState extends State<ThreadListScreen>
     return diff > 0 ? diff : 0;
   }
 
-  String? _statusLabel(ThreadSummary t) {
-    if (_isStoppedThread(t)) {
-      final current =
-          _state?.threads.any((thread) => thread.key == t.key) ?? false;
-      if (!current) return t.resCount >= 1000 ? '完走' : 'dat落ち';
-      return '完走';
-    }
-    return null;
+  ThreadStatus? _status(ThreadSummary t) {
+    if (!_isStoppedThread(t)) return null;
+    // 1000 まで行っていれば、一覧から落ちていても「完走」。
+    return t.resCount >= 1000 ? ThreadStatus.finished : ThreadStatus.archived;
   }
 
   bool _isStoppedThread(ThreadSummary t) {
@@ -898,7 +894,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
                 authStore: widget.authStore,
                 readHistory: _history,
                 ngStore: _ng,
-                initialStatusLabel: _statusLabel(parked),
+                initialStatusLabel: _status(parked)?.label,
                 initialResCount: parked.resCount,
                 creatorMetadent: parked.metadent,
                 defaultName: widget.board.defaultName,
@@ -1000,7 +996,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
           thread: threads[i],
           isRead: _history.isRead(threads[i].key),
           newCount: _newCount(threads[i]),
-          statusLabel: _statusLabel(threads[i]),
+          status: _status(threads[i]),
           isOwn: _history.isOwnThread(threads[i].key),
           onTap: () => _openThread(threads[i]),
           onLongPress: () => _showThreadActions(threads[i]),

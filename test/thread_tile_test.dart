@@ -47,7 +47,13 @@ void main() {
 
   testWidgets('停止状態ラベルを出す', (tester) async {
     await tester.pumpWidget(
-      wrap(ThreadTile(thread: thread(), statusLabel: 'dat落ち', onTap: () {})),
+      wrap(
+        ThreadTile(
+          thread: thread(),
+          status: ThreadStatus.archived,
+          onTap: () {},
+        ),
+      ),
     );
     expect(find.text('dat落ち'), findsOneWidget);
   });
@@ -72,7 +78,7 @@ void main() {
       return tester.getSize(find.byType(ThreadTile)).height;
     }
 
-    ThreadTile tile(String title, {int newCount = 0, String? statusLabel}) =>
+    ThreadTile tile(String title, {int newCount = 0, ThreadStatus? status}) =>
         ThreadTile(
           thread: ThreadSummary(
             key: '1700000000',
@@ -82,7 +88,7 @@ void main() {
           ),
           isRead: true,
           newCount: newCount,
-          statusLabel: statusLabel,
+          status: status,
           onTap: () {},
         );
 
@@ -112,7 +118,7 @@ void main() {
           expect(
             await heightOf(
               tester,
-              tile(title, statusLabel: 'dat落ち'),
+              tile(title, status: ThreadStatus.archived),
               textScale: scale,
             ),
             without,

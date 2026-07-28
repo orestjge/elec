@@ -3,6 +3,20 @@ import 'package:flutter/material.dart';
 
 import 'format.dart';
 
+/// もう書き込めないスレの状態。下段にアイコン＋短いラベルで出す。
+enum ThreadStatus {
+  /// 1000 まで行き切った。掲示板ではめでたい終わり方なので、トロフィーで
+  /// 「やり切った」ほうの止まり方だと分かるようにする。
+  finished('完走', Icons.emoji_events_outlined),
+
+  /// 一覧から落ちた（もう書けない）。こちらは地味な事実なので鍵のまま。
+  archived('dat落ち', Icons.lock_outline);
+
+  const ThreadStatus(this.label, this.icon);
+  final String label;
+  final IconData icon;
+}
+
 /// スレ一覧の 1 行。カードではなくフラットな行で、余白とタイポグラフィで
 /// 区切る。勢いが高いスレはアクセント色で強調する。
 class ThreadTile extends StatelessWidget {
@@ -13,7 +27,7 @@ class ThreadTile extends StatelessWidget {
     this.onLongPress,
     this.isRead = false,
     this.newCount = 0,
-    this.statusLabel,
+    this.status,
     this.isOwn = false,
   });
 
@@ -29,8 +43,8 @@ class ThreadTile extends StatelessWidget {
   /// 前回開いてからの新着レス数（0 なら無し）。
   final int newCount;
 
-  /// dat落ち・完走など、書き込み停止状態を示す短いラベル。
-  final String? statusLabel;
+  /// 書き込み停止状態（完走・dat落ち）。まだ書けるスレでは null。
+  final ThreadStatus? status;
 
   /// このアプリから立てたスレか。
   final bool isOwn;
@@ -170,14 +184,17 @@ class ThreadTile extends StatelessWidget {
                               label: formatCompact(thread.resCount),
                               color: metaColor,
                             ),
-                            // 停止状態は「もう書けない」という地味な事実なので、
-                            // バッジで目立たせず勢い・レス数と同じ扱いで並べる。
-                            if (statusLabel != null) ...[
+                            // 停止状態はバッジで目立たせず、勢い・レス数と同じ
+                            // 扱いで並べる。完走だけは色を足して、走り切った
+                            // ほうの止まり方だと分かるようにする。
+                            if (status case final status?) ...[
                               const SizedBox(width: 10),
                               _Metric(
-                                icon: Icons.lock_outline,
-                                label: statusLabel!,
-                                color: metaColor,
+                                icon: status.icon,
+                                label: status.label,
+                                color: status == ThreadStatus.finished
+                                    ? scheme.tertiary
+                                    : metaColor,
                               ),
                             ],
                             const Spacer(),
