@@ -98,14 +98,6 @@ class ThreadTile extends StatelessWidget {
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                          if (newCount > 0) ...[
-                            const SizedBox(width: 8),
-                            _NewBadge(count: newCount),
-                          ],
-                          if (statusLabel != null) ...[
-                            const SizedBox(width: 8),
-                            _StatusBadge(label: statusLabel!),
-                          ],
                           if (isOwn) ...[
                             const SizedBox(width: 8),
                             const _OwnThreadBadge(),
@@ -118,6 +110,14 @@ class ThreadTile extends StatelessWidget {
                           fontSize: 11,
                           color: metaColor,
                         ),
+                        // 自動更新で後から付くもの（新着バッジ・停止状態）は、
+                        // 常に出ている勢い・レス数と同じこの下段に置く。
+                        //
+                        // タイトルの横に置くと、その幅の分だけタイトルが折り返
+                        // して行の高さが動き、下の行＝見ている場所が丸ごとズレ
+                        // る。下段なら幅を奪わないうえ、後から入るものはどれも
+                        // メトリクス（アイコン 13・11px 文字）より背が低いので、
+                        // 出入りしても段の高さは変わらない。
                         child: Row(
                           children: [
                             _Metric(
@@ -132,6 +132,20 @@ class ThreadTile extends StatelessWidget {
                               label: formatCompact(thread.resCount),
                               color: metaColor,
                             ),
+                            if (newCount > 0) ...[
+                              const SizedBox(width: 6),
+                              _NewBadge(count: newCount),
+                            ],
+                            // 停止状態は「もう書けない」という地味な事実なので、
+                            // バッジで目立たせず勢い・レス数と同じ扱いで並べる。
+                            if (statusLabel != null) ...[
+                              const SizedBox(width: 10),
+                              _Metric(
+                                icon: Icons.lock_outline,
+                                label: statusLabel!,
+                                color: metaColor,
+                              ),
+                            ],
                             const Spacer(),
                             Text(formatAge(thread.createdAt)),
                           ],
@@ -154,40 +168,15 @@ double _lineHeight(TextStyle? style, {required double fallbackFontSize}) {
   return fontSize * (style?.height ?? 1);
 }
 
-class _StatusBadge extends StatelessWidget {
-  const _StatusBadge({required this.label});
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: scheme.outlineVariant),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: scheme.onSurfaceVariant,
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-        ),
-      ),
-    );
-  }
-}
-
 class _OwnThreadBadge extends StatelessWidget {
   const _OwnThreadBadge();
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    // 新着バッジと同じく、タイトル 1 行分の高さに収める。
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
       decoration: BoxDecoration(
         color: scheme.tertiaryContainer,
         borderRadius: BorderRadius.circular(10),
@@ -203,6 +192,7 @@ class _OwnThreadBadge extends StatelessWidget {
             style: TextStyle(
               color: scheme.onTertiaryContainer,
               fontSize: 11,
+              height: 1,
               fontWeight: FontWeight.w700,
             ),
           ),
@@ -253,8 +243,10 @@ class _NewBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    // 下段のメトリクスより背が低くなるよう詰める。はみ出すと、バッジが付いた
+    // 瞬間に行が伸びて一覧がズレる。
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
       decoration: BoxDecoration(
         color: scheme.primary,
         borderRadius: BorderRadius.circular(10),
@@ -264,6 +256,7 @@ class _NewBadge extends StatelessWidget {
         style: TextStyle(
           color: scheme.onPrimary,
           fontSize: 11,
+          height: 1,
           fontWeight: FontWeight.w700,
         ),
       ),

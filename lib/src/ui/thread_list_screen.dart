@@ -146,6 +146,12 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   /// 並べ替えない。行が動くと元居た場所を見失うため）。初回成功まで null。
   List<String>? _order;
 
+  /// 固定順に載っているスレの最後の姿。自動更新で subject.txt から落ちても行を
+  /// 残せるようにする（[_orderedThreads]）。行が消えると下が繰り上がって、読んで
+  /// いた場所を見失うため。落ちたことは「dat落ち」チップで示し、行そのものは
+  /// 次の並べ替え直しまで置いておく。[_reorder] で固定順に無いものを捨てる。
+  final Map<String, ThreadSummary> _lastKnown = {};
+
   Timer? _timer;
   bool _fetching = false; // 多重取得の抑止
 
@@ -220,7 +226,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
       if (!mounted) return;
       await _rememberThreads(r.state.threads);
       setState(() {
-        _state = r.state;
+        _adoptState(r.state);
         _loading = false;
         _error = null;
         _reorder();
@@ -251,7 +257,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
         // データだけ差し替え、並び順（_order）はあえて触らない。レス数・新着
         // バッジはその場で更新されるが、行が飛び回らないので一覧を追える。
         setState(() {
-          _state = r.state;
+          _adoptState(r.state);
           _error = null;
         });
       }
@@ -274,7 +280,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
       if (!mounted) return;
       if (!r.notModified) await _rememberThreads(r.state.threads);
       setState(() {
-        if (!r.notModified) _state = r.state;
+        if (!r.notModified) _adoptState(r.state);
         _error = null;
         _loading = false;
         _reorder(); // 手動更新なので並び順を貼り直す
@@ -285,16 +291,31 @@ class _ThreadListScreenState extends State<ThreadListScreen>
     }
   }
 
+  /// 取得結果を採用する。行を残せるよう、各スレの最後の姿も控える。
+  void _adoptState(SubjectState state) {
+    _state = state;
+    for (final thread in state.threads) {
+      _lastKnown[thread.key] = thread;
+    }
+  }
+
   /// 現在のデータと選択中ソートで並び順を確定し、固定スナップショットを更新する。
   void _reorder() {
     final state = _state;
     if (state != null) {
-      _order = _sorted(state.threads).map((t) => t.key).toList();
+      final order = _sorted(state.threads).map((t) => t.key).toList();
+      _order = order;
+      // 並べ替え直しは落ちたスレを一覧から外す機会でもある。ここで控えも捨てる。
+      final keys = order.toSet();
+      _lastKnown.removeWhere((key, _) => !keys.contains(key));
     }
   }
 
   /// 表示する並び。固定スナップショット [_order] の順に現在のデータを当て、
   /// 固定順に無い（新しく現れた）スレは末尾へ回す。[_order] 未設定なら都度ソート。
+  ///
+  /// subject.txt から落ちたスレは最後の姿（[_lastKnown]）のまま同じ場所に残す。
+  /// 消して詰めると下の行が繰り上がり、見ていた位置がズレるため。
   List<ThreadSummary> _orderedThreads() {
     final threads = _state!.threads;
     final order = _order;
@@ -303,7 +324,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
     final result = <ThreadSummary>[];
     final placed = <String>{};
     for (final key in order) {
-      final t = byKey[key];
+      final t = byKey[key] ?? _lastKnown[key];
       if (t != null) {
         result.add(t);
         placed.add(key);

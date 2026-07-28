@@ -134,6 +134,53 @@ void main() {
     expect(order(), ['スレD', 'スレC', 'スレB', 'スレA']);
   });
 
+  testWidgets('自動更新で subject から落ちたスレは、dat落ちチップを付けて同じ場所に残す', (tester) async {
+    final fetcher = QueueFetcher([
+      subjectOk('1.dat<>スレA (10)\n2.dat<>スレB (5)\n3.dat<>スレC (3)\n', 'LM1'),
+      // ポーリング: B が subject.txt から消える。
+      subjectOk('1.dat<>スレA (11)\n3.dat<>スレC (3)\n', 'LM2'),
+    ]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadListScreen(
+          fetcher: fetcher,
+          pollInterval: const Duration(seconds: 15),
+          readHistory: ReadHistory(MemoryReadHistoryStorage()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    List<String> order() => tester
+        .widgetList<ThreadTile>(find.byType(ThreadTile))
+        .map((w) => w.thread.title)
+        .toList();
+
+    expect(order(), ['スレA', 'スレB', 'スレC']);
+    final beforeC = tester.getTopLeft(find.text('スレC')).dy;
+
+    await tester.pump(const Duration(seconds: 15));
+    await tester.pumpAndSettle();
+
+    // 行は残り、下の行も繰り上がらない。落ちたことはチップで分かる。
+    expect(order(), ['スレA', 'スレB', 'スレC']);
+    expect(tester.getTopLeft(find.text('スレC')).dy, beforeC);
+    expect(find.text('dat落ち'), findsOneWidget);
+    expect(
+      tester
+          .widget<ThreadTile>(find.widgetWithText(ThreadTile, 'スレB'))
+          .thread
+          .resCount,
+      5, // 最後に見えていた姿のまま
+    );
+
+    // 手動更新（並べ替え直し）では消える。
+    await tester.fling(find.text('スレA'), const Offset(0, 300), 1000);
+    await tester.pumpAndSettle();
+    expect(order(), ['スレA', 'スレC']);
+  });
+
   testWidgets('初回失敗時はエラー表示、再試行で回復する', (tester) async {
     final fetcher = QueueFetcher([
       const FetchResponse(statusCode: 500, bodyBytes: []),
