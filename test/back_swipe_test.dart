@@ -2,6 +2,7 @@ import 'package:edge_core/edge_core.dart';
 import 'package:elec/src/net/read_history.dart';
 import 'package:elec/src/ui/thread_list_screen.dart';
 import 'package:elec/src/ui/thread_screen.dart';
+import 'package:elec/src/ui/thread_tile.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jis0208/jis0208.dart';
@@ -268,6 +269,52 @@ void main() {
         .where((t) => t.contains('本文'))
         .toList();
     expect(after.first, visible.first);
+  });
+
+  testWidgets('スレを開いて戻ると、一覧も見ていた位置のまま', (tester) async {
+    // 一画面に収まらない数のスレを並べる。
+    final subject = StringBuffer();
+    for (var i = 1; i <= 60; i++) {
+      subject.write('$i.dat<>スレ$i (10)\n');
+    }
+    final fetcher = QueueFetcher([
+      ok(_win31j.encode(subject.toString())),
+      ok(datLine('名無し<><>2025/11/03(月) 02:14:51.907 ID:aaa<> 本文 <>スレ1')),
+    ]);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadListScreen(
+          fetcher: fetcher,
+          pollInterval: const Duration(seconds: 60),
+          readHistory: ReadHistory(MemoryReadHistoryStorage()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 一覧を下の方までスクロールする。
+    await tester.drag(find.text('スレ1'), const Offset(0, -900));
+    await tester.pumpAndSettle();
+    // 上端に半分だけ覗く行を避け、確実に見えている行を目印にする。
+    final tile = find.byType(ThreadTile).at(2);
+    final title = tester.widget<ThreadTile>(tile).thread.title;
+    final top = tester.getTopLeft(tile).dy;
+    expect(title, isNot('スレ1')); // 先頭からは動いている
+
+    // 見えているスレを開いて、一覧へ戻る。
+    await tester.tap(tile);
+    await tester.pumpAndSettle();
+    expect(onThread(tester), isTrue);
+    await drag(
+      tester,
+      from: const Offset(240, 320),
+      distance: 600,
+      total: const Duration(milliseconds: 300),
+    );
+    expect(onThread(tester), isFalse);
+
+    // 同じスレが同じ位置にいる（先頭へ戻らない）。
+    expect(tester.getTopLeft(find.widgetWithText(ThreadTile, title)).dy, top);
   });
 
   testWidgets('縦スクロールでは戻らない', (tester) async {
