@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:edge_core/edge_core.dart';
+import 'package:flutter/gestures.dart';
 import 'package:elec/src/ui/embed_urls.dart';
 import 'package:elec/src/ui/nico_thumbnail.dart';
 import 'package:elec/src/ui/post_images.dart';
@@ -28,6 +29,38 @@ class _StubFetcher implements HttpFetcher {
       ),
     );
   }
+}
+
+/// 全画面ビューアの表示中の画像を2本指のピンチで拡大する。
+Future<void> _pinchZoom(WidgetTester tester) async {
+  final center = tester.getCenter(find.byType(InteractiveViewer));
+  final left = await tester.startGesture(center - const Offset(20, 0));
+  final right = await tester.startGesture(center + const Offset(20, 0));
+  await tester.pump();
+  await left.moveBy(const Offset(-60, 0));
+  await right.moveBy(const Offset(60, 0));
+  await tester.pump();
+  await left.up();
+  await right.up();
+  await tester.pumpAndSettle();
+}
+
+/// 2本指スクロール（デスクトップではドラッグの代わりにこれが来る）を送る。
+/// [kind] を mouse にするとホイール相当。
+Future<void> _scroll(
+  WidgetTester tester,
+  Offset delta, {
+  int times = 1,
+  PointerDeviceKind kind = PointerDeviceKind.trackpad,
+}) async {
+  final center = tester.getCenter(find.byType(PageView));
+  for (var i = 0; i < times; i++) {
+    await tester.sendEventToBinding(
+      PointerScrollEvent(position: center, kind: kind, scrollDelta: delta),
+    );
+    await tester.pump();
+  }
+  await tester.pumpAndSettle();
 }
 
 void main() {
@@ -106,6 +139,135 @@ void main() {
     await tester.drag(find.byType(PageView), const Offset(0, 140));
     await tester.pumpAndSettle();
     expect(find.text('a.jpg'), findsOneWidget);
+  });
+
+  testWidgets('拡大中の左右ドラッグは端まで画像を送り、はみ出したら隣の画像へ', (tester) async {
+    final urls = [
+      Uri.parse('https://example.com/a.jpg'),
+      Uri.parse('https://example.com/b.png'),
+      Uri.parse('https://example.com/c.webp'),
+    ];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: PostImages(urls: urls)),
+      ),
+    );
+
+    await tester.tap(find.byType(GestureDetector).first);
+    await tester.pumpAndSettle();
+
+    // 等倍のうちは左右スワイプで隣の画像へ送る。
+    await tester.fling(find.byType(PageView), const Offset(-300, 0), 800);
+    await tester.pumpAndSettle();
+    expect(find.text('2/3  b.png'), findsOneWidget);
+
+    await _pinchZoom(tester);
+
+    // 画像の中を見ている間は、左右にずらしてもページは変わらない。
+    await tester.drag(find.byType(PageView), const Offset(-200, 0));
+    await tester.pumpAndSettle();
+    expect(find.text('2/3  b.png'), findsOneWidget);
+
+    // 右端まで来てもなお左へ引っぱると、そのまま次の画像へ送る。
+    await tester.drag(find.byType(PageView), const Offset(-2000, 0));
+    await tester.pumpAndSettle();
+    expect(find.text('3/3  c.webp'), findsOneWidget);
+
+    // 送った先は等倍なので、左右スワイプがそのままページ送りに戻っている。
+    await tester.fling(find.byType(PageView), const Offset(300, 0), 800);
+    await tester.pumpAndSettle();
+    expect(find.text('2/3  b.png'), findsOneWidget);
+  });
+
+  testWidgets('拡大中でもトラックパッドの横スクロールは隣の画像へ送る', (tester) async {
+    final urls = [
+      Uri.parse('https://example.com/a.jpg'),
+      Uri.parse('https://example.com/b.png'),
+      Uri.parse('https://example.com/c.webp'),
+    ];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: PostImages(urls: urls)),
+      ),
+    );
+
+    await tester.tap(find.byType(GestureDetector).first);
+    await tester.pumpAndSettle();
+    await _pinchZoom(tester);
+
+    // ひと続きのスクロールでは、慣性で流れ続けても1枚だけ送る。
+    await _scroll(tester, const Offset(60, 0), times: 40);
+    expect(find.text('2/3  b.png'), findsOneWidget);
+  });
+
+  testWidgets('等倍のトラックパッド縦スクロールで閉じる', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: PostImages(urls: [Uri.parse('https://example.com/a.jpg')]),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byType(GestureDetector).first);
+    await tester.pumpAndSettle();
+    expect(find.text('a.jpg'), findsOneWidget);
+
+    await _scroll(tester, const Offset(0, 40), times: 3);
+    expect(find.text('a.jpg'), findsNothing);
+  });
+
+  testWidgets('拡大中の縦スクロールとホイールでは閉じない', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: PostImages(urls: [Uri.parse('https://example.com/a.jpg')]),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byType(GestureDetector).first);
+    await tester.pumpAndSettle();
+
+    // ホイールは拡大縮小なので、等倍のうちに回しても閉じない。
+    await _scroll(
+      tester,
+      const Offset(0, 40),
+      times: 3,
+      kind: PointerDeviceKind.mouse,
+    );
+    expect(find.text('a.jpg'), findsOneWidget);
+
+    // 拡大中の縦スクロールは画像を上下にずらして見る操作なので閉じない。
+    await _pinchZoom(tester);
+    await _scroll(tester, const Offset(0, 40), times: 3);
+    expect(find.text('a.jpg'), findsOneWidget);
+  });
+
+  testWidgets('拡大中に端からはみ出しても最初と最後で止まる', (tester) async {
+    final urls = [
+      Uri.parse('https://example.com/a.jpg'),
+      Uri.parse('https://example.com/b.png'),
+    ];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: PostImages(urls: urls)),
+      ),
+    );
+
+    await tester.tap(find.byType(GestureDetector).first);
+    await tester.pumpAndSettle();
+    expect(find.text('1/2  a.jpg'), findsOneWidget);
+
+    await _pinchZoom(tester);
+
+    // 1枚目の左端から更に右へ引っぱっても、最後の画像へは巻き戻らない。
+    await tester.drag(find.byType(PageView), const Offset(2000, 0));
+    await tester.pumpAndSettle();
+    expect(find.text('1/2  a.jpg'), findsOneWidget);
   });
 
   testWidgets('動画URLは非対応プラットフォームでは再生カードにする', (tester) async {

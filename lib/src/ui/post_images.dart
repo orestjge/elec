@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import 'audio_player_widget.dart';
@@ -605,6 +606,10 @@ class _Placeholder extends StatelessWidget {
   }
 }
 
+/// ビューアの 1 ページの見え方。拡大率と、画像が画面上で横にどこまで動いているか。
+/// 拡大中のスワイプを画像のパンに回すかページ送りに回すかの判断に使う。
+typedef _PageZoom = ({double scale, double x});
+
 /// 全画面の画像ビューア。ピンチズーム・パン可能。
 class _ImageViewer extends StatefulWidget {
   const _ImageViewer({required this.urls, required this.initialIndex});
@@ -620,9 +625,10 @@ class _ImageViewerState extends State<_ImageViewer> {
   late int _index;
   final _activePointers = <int>{};
 
-  /// ページごとの現在の拡大率。拡大中は上下スワイプを閉じる操作に使わず、
-  /// InteractiveViewer のパン（画像をずらして見る）へ譲るために見る。
-  final _scales = <int, double>{};
+  /// ページごとの現在の見え方。拡大中は上下スワイプを閉じる操作に使わず、左右スワイプ
+  /// も画像が動く間はページ送りにせず、どちらも InteractiveViewer のパン
+  /// （画像をずらして見る）へ譲るために見る。
+  final _zooms = <int, _PageZoom>{};
 
   Duration? _dragStartTime;
   double _dragDx = 0;
@@ -630,9 +636,30 @@ class _ImageViewerState extends State<_ImageViewer> {
   bool _dragging = false;
   bool _dragRejected = false;
 
+  /// 拡大中の左右ドラッグを見張っている。指を離した時点ではみ出しが足りていれば
+  /// 隣の画像へ送る。
+  bool _swiping = false;
+
+  /// 左右ドラッグを見張り始めた時点の、指の移動量と画像の位置。離した時点の値と
+  /// 引き比べると「動かそうとしたのに画像が動かなかった分」＝端から引っぱった分
+  /// が出る。これがページ送りの合図になる。
+  double _swipeAnchorDx = 0;
+  double _swipeAnchorX = 0;
+
+  /// トラックパッドのひと続きのスクロール量と、それで既に1回効かせたか。
+  Duration? _lastScrollTime;
+  Offset _scrolled = Offset.zero;
+  bool _scrollSpent = false;
+
   static const _dismissDistance = 96.0;
   static const _dismissVelocity = 700.0;
   static const _dragSlop = 8.0;
+
+  /// 端からどれだけ引っぱったら「隣の画像へ」と受け取るか。
+  static const _swipeDistance = 64.0;
+
+  /// これだけ間が空いたらスクロールは別の操作として数え直す。
+  static const _scrollGap = Duration(milliseconds: 200);
 
   @override
   void initState() {
@@ -649,9 +676,30 @@ class _ImageViewerState extends State<_ImageViewer> {
 
   Uri get _url => widget.urls[_index];
 
-  /// 表示中のページが拡大されているか。等倍のときだけ上下スワイプを閉じる操作に
-  /// 割り当て、拡大中は上下ドラッグを画像のパンとして通す。
-  bool get _zoomed => (_scales[_index] ?? 1) > 1.01;
+  /// 表示中のページが拡大されているか。等倍のときだけ上下スワイプを閉じる操作・
+  /// 左右スワイプをページ送りに割り当て、拡大中はドラッグを画像のパンとして通す。
+  bool get _zoomed => (_zooms[_index]?.scale ?? 1) > 1.01;
+
+  /// 表示中の画像が画面上で横にどこまで動いているか。
+  double get _imageX => _zooms[_index]?.x ?? 0;
+
+  /// ページの見え方が変わった。表示中のページで等倍かどうかが切り替わったときだけ
+  /// 組み直す（左右スワイプの行き先を PageView と画像のパンで入れ替えるため）。
+  /// 端に着いたかどうかはドラッグ中に読むだけなので、組み直しは要らない。
+  void _onZoomChanged(int page, _PageZoom zoom) {
+    final wasZoomed = _zoomed;
+    _zooms[page] = zoom;
+    if (page == _index && _zoomed != wasZoomed) setState(() {});
+  }
+
+  /// ページが変わった。離れたページの [_ZoomableImage] は破棄され拡大率も等倍へ
+  /// 戻るので、控えていた値も一緒に捨てる（戻ってきたときに拡大中と誤らせない）。
+  void _onPageChanged(int page) {
+    setState(() {
+      _zooms.clear();
+      _index = page;
+    });
+  }
 
   Future<void> _close() async {
     final popped = await Navigator.of(context).maybePop();
@@ -666,6 +714,7 @@ class _ImageViewerState extends State<_ImageViewer> {
       _dragDy = 0;
       _dragging = false;
       _dragRejected = false;
+      _swiping = false;
     });
   }
 
@@ -680,9 +729,8 @@ class _ImageViewerState extends State<_ImageViewer> {
     _dragDx = 0;
     _dragDy = 0;
     _dragging = false;
-    // 拡大中の上下ドラッグは「画像をずらして確認する」操作なので、閉じる判定には
-    // 使わない。等倍へ戻す（ピンチアウト）と再び上下スワイプで閉じられる。
-    _dragRejected = _zoomed;
+    _swiping = false;
+    _dragRejected = false;
   }
 
   void _onPointerMove(PointerMoveEvent event) {
@@ -691,12 +739,29 @@ class _ImageViewerState extends State<_ImageViewer> {
     final nextDy = _dragDy + event.delta.dy;
     final absDx = nextDx.abs();
     final absDy = nextDy.abs();
-    if (!_dragging && math.max(absDx, absDy) > _dragSlop) {
+    if (!_dragging && !_swiping && math.max(absDx, absDy) > _dragSlop) {
       if (absDx > absDy) {
-        _dragRejected = true;
-        return;
+        // 横向き。等倍なら PageView がそのままページ送りに使う。拡大中は画像の
+        // パンに任せつつ、端に着いてからのはみ出しだけ数える。
+        if (!_zoomed) {
+          _dragRejected = true;
+          return;
+        }
+        _swiping = true;
+        // この時点の指と画像の位置を控える。どちらもまだこのイベント分は動いて
+        // いない（画像を動かすのは下の InteractiveViewer で、こちらが先に呼ばれ
+        // る）ので、離した時点の値と素直に引き比べられる。
+        _swipeAnchorDx = _dragDx;
+        _swipeAnchorX = _imageX;
+      } else {
+        // 縦向き。拡大中は「画像をずらして確認する」操作なので閉じる判定に使わ
+        // ない。等倍へ戻す（ピンチアウト）と再び上下スワイプで閉じられる。
+        if (_zoomed) {
+          _dragRejected = true;
+          return;
+        }
+        _dragging = true;
       }
-      _dragging = true;
     }
     if (!_dragging) {
       _dragDx = nextDx;
@@ -711,7 +776,14 @@ class _ImageViewerState extends State<_ImageViewer> {
 
   void _onPointerUp(PointerUpEvent event) {
     _activePointers.remove(event.pointer);
-    if (_dragging) {
+    if (_swiping) {
+      // 指が動いた分のうち、画像が動かなかった分＝端から引っぱった分。
+      final overscroll =
+          (_dragDx - _swipeAnchorDx) - (_imageX - _swipeAnchorX);
+      if (overscroll.abs() > _swipeDistance) {
+        _turnPage(overscroll < 0 ? 1 : -1);
+      }
+    } else if (_dragging) {
       final elapsed = event.timeStamp - (_dragStartTime ?? event.timeStamp);
       final seconds = elapsed.inMicroseconds / Duration.microsecondsPerSecond;
       final velocity = seconds <= 0 ? 0 : _dragDy / seconds;
@@ -722,6 +794,44 @@ class _ImageViewerState extends State<_ImageViewer> {
       }
     }
     if (_activePointers.isEmpty) _resetDrag();
+  }
+
+  /// トラックパッドの2本指スクロール。デスクトップではドラッグの代わりにこれが
+  /// 来るので、横は隣の画像へ、縦は閉じる操作に割り当てる。マウスホイールは
+  /// InteractiveViewer の拡大縮小なので触らない。
+  ///
+  /// 指を離す合図が無いので、溜まった時点で1回だけ効かせ、慣性が止む（間が空く）
+  /// まで次を受け取らない。
+  void _onPointerSignal(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent) return;
+    if (event.kind != PointerDeviceKind.trackpad) return;
+    final last = _lastScrollTime;
+    _lastScrollTime = event.timeStamp;
+    if (last == null || event.timeStamp - last > _scrollGap) {
+      _scrolled = Offset.zero;
+      _scrollSpent = false;
+    }
+    if (_scrollSpent) return;
+    _scrolled += event.scrollDelta;
+    if (_scrolled.dx.abs() > _scrolled.dy.abs()) {
+      // 横。等倍なら PageView がそのまま送るので、拡大中だけ引き取る。
+      if (!_zoomed || _scrolled.dx.abs() <= _swipeDistance) return;
+      _scrollSpent = true;
+      _turnPage(_scrolled.dx < 0 ? -1 : 1);
+    } else {
+      // 縦。拡大中は画像を上下にずらして見る操作なので閉じない。
+      if (_zoomed || _scrolled.dy.abs() <= _swipeDistance) return;
+      _scrollSpent = true;
+      _close();
+    }
+  }
+
+  /// 隣の画像へ送る。等倍のスワイプと同じく、最初と最後では巻き戻さずそこで
+  /// 止まる（巡回するのは左右のボタンだけ）。
+  void _turnPage(int delta) {
+    final next = _index + delta;
+    if (next < 0 || next >= widget.urls.length) return;
+    _jumpBy(delta);
   }
 
   void _onPointerCancel(PointerCancelEvent event) {
@@ -764,6 +874,7 @@ class _ImageViewerState extends State<_ImageViewer> {
             onPointerMove: _onPointerMove,
             onPointerUp: _onPointerUp,
             onPointerCancel: _onPointerCancel,
+            onPointerSignal: _onPointerSignal,
             child: AnimatedSlide(
               offset: Offset(0, height == 0 ? 0 : _dragDy / height),
               duration: _dragging
@@ -777,11 +888,17 @@ class _ImageViewerState extends State<_ImageViewer> {
                     PageView.builder(
                       controller: _page,
                       itemCount: widget.urls.length,
-                      onPageChanged: (i) => setState(() => _index = i),
+                      // 拡大中は PageView にページ送りをさせない。指の動きは画像
+                      // をずらして見る操作に使い、端まで寄せ切ってからのスワイプ
+                      // だけ [_onPointerUp] が隣の画像へ回す。
+                      physics: _zoomed
+                          ? const NeverScrollableScrollPhysics()
+                          : null,
+                      onPageChanged: _onPageChanged,
                       itemBuilder: (context, i) => _ZoomableImage(
                         url: widget.urls[i],
                         onDismiss: _close,
-                        onScaleChanged: (scale) => _scales[i] = scale,
+                        onZoomChanged: (zoom) => _onZoomChanged(i, zoom),
                       ),
                     ),
                     if (multiple) ...[
@@ -817,13 +934,14 @@ class _ZoomableImage extends StatefulWidget {
   const _ZoomableImage({
     required this.url,
     required this.onDismiss,
-    required this.onScaleChanged,
+    required this.onZoomChanged,
   });
   final Uri url;
   final VoidCallback onDismiss;
 
-  /// 拡大率が変わるたび呼ぶ。親が「拡大中は閉じるスワイプを止める」判定に使う。
-  final ValueChanged<double> onScaleChanged;
+  /// 拡大率や寄せ切っている端が変わるたび呼ぶ。親が「拡大中は閉じるスワイプを
+  /// 止める」「端からのスワイプは隣の画像へ送る」判定に使う。
+  final ValueChanged<_PageZoom> onZoomChanged;
 
   @override
   State<_ZoomableImage> createState() => _ZoomableImageState();
@@ -835,7 +953,9 @@ class _ZoomableImageState extends State<_ZoomableImage> {
   ImageStreamListener? _listener;
   RemoteImage? _provider;
   Size? _imageSize;
-  double _scale = 1;
+
+  /// 直近に親へ伝えた見え方。同じ内容を繰り返し伝えないために持つ。
+  _PageZoom _zoom = (scale: 1, x: 0);
 
   /// 大きすぎて自動読み込みを見送った。タップされるまで通信しない。
   bool _tooLarge = false;
@@ -843,7 +963,7 @@ class _ZoomableImageState extends State<_ZoomableImage> {
   @override
   void initState() {
     super.initState();
-    _controller.addListener(_reportScale);
+    _controller.addListener(_reportZoom);
   }
 
   @override
@@ -852,11 +972,20 @@ class _ZoomableImageState extends State<_ZoomableImage> {
     _updateProvider();
   }
 
-  void _reportScale() {
-    final scale = _controller.value.getMaxScaleOnAxis();
-    if ((scale - _scale).abs() < 0.001) return;
-    _scale = scale;
-    widget.onScaleChanged(scale);
+  void _reportZoom() {
+    final matrix = _controller.value;
+    final zoom = (
+      scale: matrix.getMaxScaleOnAxis(),
+      // 画像が画面上で横にどこまで動いたか。端に着くと動かなくなるので、親は
+      // これが動かないことで「もうずらせない」と分かる。
+      x: MatrixUtils.transformPoint(matrix, Offset.zero).dx,
+    );
+    if ((zoom.scale - _zoom.scale).abs() < 0.001 &&
+        (zoom.x - _zoom.x).abs() < 0.001) {
+      return;
+    }
+    _zoom = zoom;
+    widget.onZoomChanged(zoom);
   }
 
   /// 「読み込む」を選んだ。以後この URL は上限を上げて読む。
@@ -916,7 +1045,7 @@ class _ZoomableImageState extends State<_ZoomableImage> {
     if (_stream != null && _listener != null) {
       _stream!.removeListener(_listener!);
     }
-    _controller.removeListener(_reportScale);
+    _controller.removeListener(_reportZoom);
     _controller.dispose();
     super.dispose();
   }
