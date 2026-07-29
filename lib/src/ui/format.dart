@@ -7,6 +7,16 @@ String formatCompact(num n) {
   return n.round().toString();
 }
 
+/// バイト数を短く。`820KB` / `12.3MB` のように、大きさが一目で分かる桁で。
+String formatBytes(int bytes) {
+  if (bytes < 1024) return '${bytes}B';
+  final kb = bytes / 1024;
+  if (kb < 1024) return '${kb.round()}KB';
+  final mb = kb / 1024;
+  if (mb < 10) return '${mb.toStringAsFixed(1)}MB';
+  return '${mb.round()}MB';
+}
+
 /// スレ作成からの経過を相対表記に。
 String formatAge(DateTime createdUtc, {DateTime? now}) {
   final d = (now ?? DateTime.now()).toUtc().difference(createdUtc);
