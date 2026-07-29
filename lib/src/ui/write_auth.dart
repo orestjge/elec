@@ -50,6 +50,90 @@ Future<void> showWriteErrorDialog(BuildContext context, String message) {
   );
 }
 
+/// 書いている最中にスレが止まった（dat落ち・完走）ときの知らせ。
+///
+/// 入力欄が黙って無効になるだけでは、書きかけを抱えたまま送れない理由が分から
+/// ない。何が起きたかをその場で言い、書きかけを手元に残せるようにする。
+Future<void> showThreadStoppedDialog(
+  BuildContext context, {
+  required String statusLabel,
+  required String draft,
+}) {
+  return showDialog<void>(
+    context: context,
+    builder: (_) => ThreadStoppedDialog(statusLabel: statusLabel, draft: draft),
+  );
+}
+
+class ThreadStoppedDialog extends StatelessWidget {
+  const ThreadStoppedDialog({
+    super.key,
+    required this.statusLabel,
+    required this.draft,
+  });
+
+  /// 止まった理由のラベル（`dat落ち` / `完走`）。スレ画面の表示と同じ言葉を使う。
+  final String statusLabel;
+
+  /// 書きかけの本文。空なら「コピー」は出さない。
+  final String draft;
+
+  String get _title => statusLabel == '完走' ? 'スレッドが完走しました' : 'スレッドがdat落ちしました';
+
+  String get _reason => statusLabel == '完走'
+      ? '書いている間にこのスレッドは 1000 に達しました。もう書き込めません。'
+      : '書いている間にこのスレッドは過去ログへ移りました。もう書き込めません。';
+
+  Future<void> _copy(BuildContext context) async {
+    await Clipboard.setData(ClipboardData(text: draft));
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('本文をコピーしました')));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return AlertDialog(
+      title: Text(_title),
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 560),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(_reason),
+              if (draft.trim().isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Text(
+                  '書きかけの本文は入力欄に残してあります。コピーして次スレへ持っていけます。',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        if (draft.trim().isNotEmpty)
+          TextButton.icon(
+            onPressed: () => _copy(context),
+            icon: const Icon(Icons.copy),
+            label: const Text('本文をコピー'),
+          ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('閉じる'),
+        ),
+      ],
+    );
+  }
+}
+
 class WriteErrorDialog extends StatelessWidget {
   const WriteErrorDialog({super.key, required this.message});
 
