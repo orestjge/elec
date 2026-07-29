@@ -6,8 +6,10 @@ import 'package:flutter/material.dart';
 
 import 'audio_player_widget.dart';
 import 'embed_urls.dart';
+import 'format.dart';
 import 'image_urls.dart';
 import 'nico_thumbnail.dart';
+import 'remote_image.dart';
 import 'video_player_screen.dart';
 import 'video_thumbnail.dart';
 
@@ -201,42 +203,128 @@ class _ThumbState extends State<_Thumb> {
   void _openViewer() =>
       openImageViewer(context, widget.urls, initialIndex: widget.index);
 
+  /// 「読み込む」を選んだ。以後この URL は上限を上げて読む。
+  void _load() => setState(() => ImageLoadPolicy.allow(_url));
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     // グロ指定があり、まだ解除していない間だけモザイクを掛ける。最初のタップは
     // 全画面を開かず解除に使い、不意にグロ画像を大きく表示しないようにする。
     final masked = widget.blurred && !_revealed;
+    // 既に大きすぎると分かっている URL は、通信する前にカードへ落とす。
+    // 初めて見る URL は読みに行き、上限で弾かれたら errorBuilder が同じ絵を出す。
+    final skipped = ImageLoadPolicy.skipsAutoLoad(_url);
     return GestureDetector(
       onTap: masked ? () => setState(() => _revealed = true) : _openViewer,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(10),
         child: Stack(
           children: [
-            Image.network(
-              _url.toString(),
-              height: widget.size,
-              width: widget.size,
-              fit: BoxFit.cover,
-              loadingBuilder: (context, child, progress) {
-                if (progress == null) return child;
-                return _Placeholder(
-                  size: widget.size,
-                  color: scheme.surfaceContainerHighest,
-                  child: const CircularProgressIndicator(strokeWidth: 2),
-                );
-              },
-              errorBuilder: (context, error, stack) => _Placeholder(
+            if (skipped)
+              _TooLargeThumb(
                 size: widget.size,
-                color: scheme.surfaceContainerHighest,
-                child: Icon(
-                  Icons.broken_image_outlined,
-                  color: scheme.onSurfaceVariant,
+                bytes: ImageLoadPolicy.knownBytes(_url),
+                onLoad: _load,
+              )
+            else
+              Image(
+                image: RemoteImage(
+                  _url,
+                  // サムネイルは一辺 [size] の正方形に cover で敷く。物理ピクセル
+                  // に直した分だけデコードすれば足りる。
+                  target: Size.square(
+                    widget.size * MediaQuery.devicePixelRatioOf(context),
+                  ),
+                  cover: true,
+                  maxBytes: ImageLoadPolicy.limitFor(_url),
                 ),
+                height: widget.size,
+                width: widget.size,
+                fit: BoxFit.cover,
+                loadingBuilder: (context, child, progress) {
+                  if (progress == null) return child;
+                  return _Placeholder(
+                    size: widget.size,
+                    color: scheme.surfaceContainerHighest,
+                    child: const CircularProgressIndicator(strokeWidth: 2),
+                  );
+                },
+                errorBuilder: (context, error, stack) {
+                  if (error is ImageTooLargeException) {
+                    return _TooLargeThumb(
+                      size: widget.size,
+                      bytes: error.bytes,
+                      onLoad: _load,
+                    );
+                  }
+                  return _Placeholder(
+                    size: widget.size,
+                    color: scheme.surfaceContainerHighest,
+                    child: Icon(
+                      Icons.broken_image_outlined,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  );
+                },
               ),
-            ),
             if (masked) const Positioned.fill(child: _GuroMask()),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 自動読み込みを見送った画像のサムネイル枠。タップで読み込む。
+class _TooLargeThumb extends StatelessWidget {
+  const _TooLargeThumb({
+    required this.size,
+    required this.bytes,
+    required this.onLoad,
+  });
+
+  final double size;
+
+  /// 分かっていればバイト数。未知なら大きさは出さない。
+  final int? bytes;
+  final VoidCallback onLoad;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return GestureDetector(
+      // 親（全画面を開く）へは渡さない。まず読み込むかどうかの選択が先。
+      onTap: onLoad,
+      child: _Placeholder(
+        size: size,
+        color: scheme.surfaceContainerHighest,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.image_outlined, color: scheme.onSurfaceVariant),
+              const SizedBox(height: 4),
+              Text(
+                bytes == null ? '大きい画像' : '大きい画像 ${formatBytes(bytes!)}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                'タップで読み込む',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: scheme.primary,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -406,18 +494,20 @@ class _EmbedThumb extends StatelessWidget {
     // YouTube は静的サムネ URL を持つ。ニコニコは getthumbinfo API で解決してから
     // 敷く（解決前・失敗時は無地の再生カード）。
     final direct = video.thumbnailUrl;
-    if (direct != null) return _card(context, thumbnailUrl: direct);
+    if (direct != null) {
+      return _card(context, thumbnail: Uri.tryParse(direct));
+    }
     if (video.kind == EmbedKind.niconico) {
       return FutureBuilder<Uri?>(
         future: NicoThumbnails.resolve(video.id),
         builder: (context, snapshot) =>
-            _card(context, thumbnailUrl: snapshot.data?.toString()),
+            _card(context, thumbnail: snapshot.data),
       );
     }
-    return _card(context, thumbnailUrl: null);
+    return _card(context, thumbnail: null);
   }
 
-  Widget _card(BuildContext context, {required String? thumbnailUrl}) {
+  Widget _card(BuildContext context, {required Uri? thumbnail}) {
     final scheme = Theme.of(context).colorScheme;
     final aspectRatio = video.kind == EmbedKind.youtube ? 16 / 9 : 1.25;
     return InkWell(
@@ -435,14 +525,20 @@ class _EmbedThumb extends StatelessWidget {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            if (thumbnailUrl != null)
-              Image.network(
-                thumbnailUrl,
+            if (thumbnail != null)
+              Image(
+                image: RemoteImage(
+                  thumbnail,
+                  target:
+                      Size(size * aspectRatio, size) *
+                      MediaQuery.devicePixelRatioOf(context),
+                  cover: true,
+                ),
                 fit: BoxFit.cover,
                 errorBuilder: (context, error, stack) => const SizedBox(),
               ),
             // サムネイルの上に薄い暗幕を敷き、再生アイコンと見出しを読みやすく。
-            if (thumbnailUrl != null)
+            if (thumbnail != null)
               const DecoratedBox(
                 decoration: BoxDecoration(color: Colors.black26),
               ),
@@ -450,7 +546,7 @@ class _EmbedThumb extends StatelessWidget {
               child: Icon(
                 Icons.play_circle_fill,
                 size: 52,
-                color: thumbnailUrl != null ? Colors.white : scheme.primary,
+                color: thumbnail != null ? Colors.white : scheme.primary,
               ),
             ),
             Positioned(
@@ -683,7 +779,7 @@ class _ImageViewerState extends State<_ImageViewer> {
                       itemCount: widget.urls.length,
                       onPageChanged: (i) => setState(() => _index = i),
                       itemBuilder: (context, i) => _ZoomableImage(
-                        url: widget.urls[i].toString(),
+                        url: widget.urls[i],
                         onDismiss: _close,
                         onScaleChanged: (scale) => _scales[i] = scale,
                       ),
@@ -723,7 +819,7 @@ class _ZoomableImage extends StatefulWidget {
     required this.onDismiss,
     required this.onScaleChanged,
   });
-  final String url;
+  final Uri url;
   final VoidCallback onDismiss;
 
   /// 拡大率が変わるたび呼ぶ。親が「拡大中は閉じるスワイプを止める」判定に使う。
@@ -737,14 +833,23 @@ class _ZoomableImageState extends State<_ZoomableImage> {
   final TransformationController _controller = TransformationController();
   ImageStream? _stream;
   ImageStreamListener? _listener;
+  RemoteImage? _provider;
   Size? _imageSize;
   double _scale = 1;
+
+  /// 大きすぎて自動読み込みを見送った。タップされるまで通信しない。
+  bool _tooLarge = false;
 
   @override
   void initState() {
     super.initState();
     _controller.addListener(_reportScale);
-    _resolveImageSize();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _updateProvider();
   }
 
   void _reportScale() {
@@ -754,18 +859,53 @@ class _ZoomableImageState extends State<_ZoomableImage> {
     widget.onScaleChanged(scale);
   }
 
-  void _resolveImageSize() {
-    final stream = NetworkImage(widget.url).resolve(const ImageConfiguration());
-    final listener = ImageStreamListener((info, _) {
-      if (!mounted) return;
-      setState(() {
-        _imageSize = Size(
-          info.image.width.toDouble(),
-          info.image.height.toDouble(),
-        );
-      });
-    });
-    _stream?.removeListener(_listener!);
+  /// 「読み込む」を選んだ。以後この URL は上限を上げて読む。
+  void _load() {
+    ImageLoadPolicy.allow(widget.url);
+    setState(() => _tooLarge = false);
+    _updateProvider();
+  }
+
+  /// 画面いっぱいの表示に必要な分だけデコードする provider を組み直し、
+  /// 原寸の縦横比を取りに行く（余白タップで閉じる判定に使う）。
+  ///
+  /// 表示に使う provider と同じものを見るのが要点。標準の [NetworkImage] を
+  /// 別に resolve すると、原寸デコードがもう 1 枚メモリに載ってしまう。
+  void _updateProvider() {
+    if (_tooLarge || ImageLoadPolicy.skipsAutoLoad(widget.url)) {
+      _tooLarge = true;
+      return;
+    }
+    final media = MediaQuery.of(context);
+    final target = media.size * media.devicePixelRatio;
+    final provider = RemoteImage(
+      widget.url,
+      target: target,
+      maxBytes: ImageLoadPolicy.limitFor(widget.url),
+    );
+    if (provider == _provider) return;
+    _provider = provider;
+
+    final stream = provider.resolve(const ImageConfiguration());
+    final listener = ImageStreamListener(
+      (info, _) {
+        if (!mounted) return;
+        // 縮めてデコードしていても縦横比は変わらないので、fit 矩形はこれで出せる。
+        setState(() {
+          _imageSize = Size(
+            info.image.width.toDouble(),
+            info.image.height.toDouble(),
+          );
+        });
+      },
+      onError: (error, _) {
+        if (!mounted) return;
+        setState(() => _tooLarge = error is ImageTooLargeException);
+      },
+    );
+    if (_stream != null && _listener != null) {
+      _stream!.removeListener(_listener!);
+    }
     _stream = stream;
     _listener = listener;
     stream.addListener(listener);
@@ -814,6 +954,12 @@ class _ZoomableImageState extends State<_ZoomableImage> {
 
   @override
   Widget build(BuildContext context) {
+    if (_tooLarge) {
+      return _TooLargeImage(
+        bytes: ImageLoadPolicy.knownBytes(widget.url),
+        onLoad: _load,
+      );
+    }
     return LayoutBuilder(
       builder: (context, constraints) {
         final viewport = Size(constraints.maxWidth, constraints.maxHeight);
@@ -824,8 +970,8 @@ class _ZoomableImageState extends State<_ZoomableImage> {
               transformationController: _controller,
               minScale: 1,
               maxScale: 5,
-              child: Image.network(
-                widget.url,
+              child: Image(
+                image: _provider!,
                 fit: BoxFit.contain,
                 loadingBuilder: (context, child, progress) => progress == null
                     ? child
@@ -851,6 +997,36 @@ class _ZoomableImageState extends State<_ZoomableImage> {
           ],
         );
       },
+    );
+  }
+}
+
+/// 全画面ビューアで、自動読み込みを見送った画像に出す案内。
+class _TooLargeImage extends StatelessWidget {
+  const _TooLargeImage({required this.bytes, required this.onLoad});
+
+  /// 分かっていればバイト数。
+  final int? bytes;
+  final VoidCallback onLoad;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.image_outlined, color: Colors.white54, size: 64),
+          const SizedBox(height: 12),
+          Text(
+            bytes == null
+                ? '大きい画像なので読み込んでいません'
+                : '${formatBytes(bytes!)} の大きい画像です',
+            style: const TextStyle(color: Colors.white70),
+          ),
+          const SizedBox(height: 12),
+          FilledButton.tonal(onPressed: onLoad, child: const Text('読み込む')),
+        ],
+      ),
     );
   }
 }
