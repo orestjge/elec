@@ -3046,7 +3046,11 @@ class _ComposerState extends State<_Composer> {
                   child: TextField(
                     controller: widget.controller,
                     focusNode: widget.focusNode,
-                    enabled: widget.enabled,
+                    // 停止スレでも欄は生かしたまま読み取り専用にする。無効
+                    // （enabled: false）にすると書きかけを選択もコピーもできず、
+                    // 次スレへ持っていく手立てが無くなるため。書けないことは
+                    // ヒントと、無効になった送信・添付ボタンで示す。
+                    readOnly: !widget.enabled,
                     minLines: 1,
                     maxLines: 5,
                     textInputAction: TextInputAction.newline,

@@ -1040,10 +1040,10 @@ void main() {
     expect(find.text('最初のレス'), findsOneWidget);
     // dat落ちラベル。
     expect(find.text('2レス ・ dat落ち'), findsOneWidget);
-    // 書き込み欄は無効（停止扱い）。ヒントも停止中に変わる。
+    // 書き込み欄は読み取り専用（停止扱い）。ヒントも停止中に変わる。
     expect(find.widgetWithText(TextField, 'レスを書く'), findsNothing);
     final field = tester.widget<TextField>(find.byType(TextField));
-    expect(field.enabled, isFalse);
+    expect(field.readOnly, isTrue);
   });
 
   testWidgets('書いている最中にdat落ちしたらモーダルで知らせ、書きかけは残す', (tester) async {
@@ -1069,9 +1069,20 @@ void main() {
     expect(find.text('本文をコピー'), findsOneWidget);
     await tester.tap(find.text('閉じる'));
     await tester.pumpAndSettle();
+
+    // モーダルを閉じたあとも、書きかけは欄に残り、選択してコピーできる。
+    // enabled: false だと選択もできず、取り出す手立てが無くなる。
     final field = tester.widget<TextField>(find.byType(TextField));
     expect(field.controller!.text, '書きかけ');
-    expect(field.enabled, isFalse);
+    expect(field.readOnly, isTrue);
+    expect(field.enabled, isNot(false));
+    // 送信・添付は止めたまま。
+    expect(
+      tester
+          .widget<IconButton>(find.widgetWithIcon(IconButton, Icons.send))
+          .onPressed,
+      isNull,
+    );
   });
 
   testWidgets('書いている最中に完走したらモーダルで知らせる', (tester) async {
