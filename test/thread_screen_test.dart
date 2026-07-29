@@ -1040,10 +1040,117 @@ void main() {
     expect(find.text('最初のレス'), findsOneWidget);
     // dat落ちラベル。
     expect(find.text('2レス ・ dat落ち'), findsOneWidget);
-    // 書き込み欄は無効（停止扱い）。ヒントも停止中に変わる。
+    // 書き込み欄は読み取り専用（停止扱い）。ヒントも停止中に変わる。
     expect(find.widgetWithText(TextField, 'レスを書く'), findsNothing);
     final field = tester.widget<TextField>(find.byType(TextField));
-    expect(field.enabled, isFalse);
+    expect(field.readOnly, isTrue);
+  });
+
+  testWidgets('書いている最中にdat落ちしたらモーダルで知らせ、書きかけは残す', (tester) async {
+    final f = QueueFetcher([
+      ok(res1),
+      redirect('/liveedge/kako/1762/17621/1762103691.dat'),
+      ok([...res1, ...res2]),
+    ]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    final composer = find.widgetWithText(TextField, 'レスを書く');
+    await tester.tap(composer);
+    await tester.enterText(composer, '書きかけ');
+    await tester.pump();
+
+    // ポーリングで過去ログへ飛ばされる（＝閲覧中に dat落ち）。
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+
+    expect(find.text('スレッドがdat落ちしました'), findsOneWidget);
+    // 書きかけは消さない。コピーして次スレへ持っていける。
+    expect(find.text('本文をコピー'), findsOneWidget);
+    await tester.tap(find.text('閉じる'));
+    await tester.pumpAndSettle();
+
+    // モーダルを閉じたあとも、書きかけは欄に残り、選択してコピーできる。
+    // enabled: false だと選択もできず、取り出す手立てが無くなる。
+    final field = tester.widget<TextField>(find.byType(TextField));
+    expect(field.controller!.text, '書きかけ');
+    expect(field.readOnly, isTrue);
+    expect(field.enabled, isNot(false));
+    // 送信・添付は止めたまま。
+    expect(
+      tester
+          .widget<IconButton>(find.widgetWithIcon(IconButton, Icons.send))
+          .onPressed,
+      isNull,
+    );
+  });
+
+  testWidgets('書いている最中に完走したらモーダルで知らせる', (tester) async {
+    final f = QueueFetcher([
+      ok(res1),
+      ok([...res1, ...over1000]),
+    ]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.widgetWithText(TextField, 'レスを書く'), '書きかけ');
+    await tester.pump();
+
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+
+    expect(find.text('スレッドが完走しました'), findsOneWidget);
+  });
+
+  // 一覧のポーリングが subject.txt から消えたことに気づくと、親から
+  // initialStatusLabel が降りてくる。dat 本体はまだ 200 を返し続けるので、
+  // 「書き込み終了だが過去ログにはまだ移っていない」状態はこの経路でしか
+  // 分からない。
+  testWidgets('一覧側がdat落ちに気づいたときも書いている最中ならモーダルで知らせる', (tester) async {
+    final f = QueueFetcher([ok(res1)]);
+    final label = ValueNotifier<String?>(null);
+    addTearDown(label.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ValueListenableBuilder<String?>(
+          valueListenable: label,
+          builder: (_, value, _) => ThreadScreen(
+            threadKey: '1762103691',
+            threadTitle: 'テストスレ',
+            fetcher: f,
+            pollInterval: const Duration(seconds: 5),
+            readHistory: ReadHistory(MemoryReadHistoryStorage()),
+            initialStatusLabel: value,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.widgetWithText(TextField, 'レスを書く'), '書きかけ');
+    await tester.pump();
+
+    label.value = 'dat落ち';
+    await tester.pumpAndSettle();
+
+    expect(find.text('スレッドがdat落ちしました'), findsOneWidget);
+  });
+
+  testWidgets('書いていなければdat落ちしてもモーダルは出さない', (tester) async {
+    final f = QueueFetcher([
+      ok(res1),
+      redirect('/liveedge/kako/1762/17621/1762103691.dat'),
+      ok([...res1, ...res2]),
+    ]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(find.text('2レス ・ dat落ち'), findsOneWidget);
   });
 
   testWidgets('dat も過去ログも無ければ「見つかりません」を出す', (tester) async {

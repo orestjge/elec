@@ -538,8 +538,9 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    // 書けないが、書きかけを取り出せるよう欄は読み取り専用で生かす。
     final field = tester.widget<TextField>(find.byType(TextField));
-    expect(field.enabled, isFalse);
+    expect(field.readOnly, isTrue);
     expect(find.text('書き込み停止中'), findsOneWidget);
 
     await tester.tap(find.byIcon(Icons.send));
@@ -569,8 +570,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('1レス ・ dat落ち'), findsOneWidget);
+    // 書けないが、書きかけを取り出せるよう欄は読み取り専用で生かす。
     final field = tester.widget<TextField>(find.byType(TextField));
-    expect(field.enabled, isFalse);
+    expect(field.readOnly, isTrue);
     expect(find.text('書き込み停止中'), findsOneWidget);
 
     await tester.tap(find.byIcon(Icons.send));

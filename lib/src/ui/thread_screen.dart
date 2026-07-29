@@ -174,6 +174,10 @@ class _ThreadScreenState extends State<ThreadScreen>
   /// dat も過去ログも見つからなかった（完全に消えた）スレか。
   bool _notFound = false;
 
+  /// 書き込み中に止まったことを知らせ済みか。一度止まったスレは戻らないので、
+  /// 知らせるのも一度きりにする。
+  bool _stoppedNoticeShown = false;
+
   /// スクロールで実際に見えた最大レス番号（＝どこまで読んだか）。可視性で
   /// 追跡する。これより後ろのレスが「未読」で、「最新へ」の件数の基準になる。
   int _furthestRead = 0;
@@ -256,6 +260,12 @@ class _ThreadScreenState extends State<ThreadScreen>
   @override
   void didUpdateWidget(ThreadScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
+    // 一覧のポーリングが「subject.txt から消えた」と気づいた＝ dat落ち。dat 本体は
+    // しばらく 200 を返し続けるので（eddist は archive まで現行 URL のまま）、
+    // この経路でしか分からない止まり方がある。
+    if (widget.initialStatusLabel != oldWidget.initialStatusLabel) {
+      _notifyStoppedWhileComposing(_canWriteWith(oldWidget.initialStatusLabel));
+    }
     if (widget.active == oldWidget.active) return;
     if (widget.active) {
       _enter();
@@ -350,10 +360,13 @@ class _ThreadScreenState extends State<ThreadScreen>
   /// 末尾（最新レス）が見えているか。追従・「最新へ」ボタンに使う。
   bool get _atBottom => _state.res.isEmpty || _atBottomNow;
 
-  String? get _statusLabel {
+  String? get _statusLabel => _statusLabelWith(widget.initialStatusLabel);
+
+  /// 一覧から引き継いだラベルを [inherited] としたときの表示ラベル。
+  /// 一覧のポーリングでラベルが変わる前後を比べるため、引数で受ける。
+  String? _statusLabelWith(String? inherited) {
     // 過去ログ（dat落ち）は取得して初めて分かる。完走判定より優先して示す。
     if (_state.pastLog) return 'dat落ち';
-    final inherited = widget.initialStatusLabel;
     if (inherited != null) return inherited;
     if (_state.res.length >= 1000 ||
         _state.res.any((r) => r.kind == ResKind.over1000)) {
@@ -366,7 +379,10 @@ class _ThreadScreenState extends State<ThreadScreen>
 
   /// 書き込み可能か。停止スレ（dat落ち・完走）でなく、かつ板が書き込みに対応
   /// している（現状 eddist のみ。5ch 書き込みは Phase 2）こと。
-  bool get _canWrite => !_isStopped && widget.endpoints.supportsWrite;
+  bool get _canWrite => _canWriteWith(widget.initialStatusLabel);
+
+  bool _canWriteWith(String? inherited) =>
+      _statusLabelWith(inherited) == null && widget.endpoints.supportsWrite;
 
   Future<void> _initialLoad() async {
     try {
@@ -479,11 +495,13 @@ class _ThreadScreenState extends State<ThreadScreen>
       final wasAtBottom = _atBottom;
       final wasShortContent = _contentFitsViewport();
       final previousResCount = _state.res.length;
+      final wasWritable = _canWrite;
       final r = await _dat.fetch(_url, prev: force ? DatState.empty : _state);
       if (!mounted) return;
       // 閲覧中に dat落ちした（過去ログへ飛ばされた）。停止扱いへ切り替える。
       if (r.state.pastLog && !_state.pastLog) {
         setState(() => _state = r.state);
+        _notifyStoppedWhileComposing(wasWritable);
         return;
       }
       final newRes = _newResSince(r.state, previousResCount);
@@ -492,6 +510,8 @@ class _ThreadScreenState extends State<ThreadScreen>
         _awaitingOwnPost = false; // 自分のレスが現れたので再取得ループを止める
         if (!mounted) return;
         setState(() => _state = r.state);
+        // 1000 に達して完走した場合も、dat落ちと同じく書けなくなる。
+        _notifyStoppedWhileComposing(wasWritable);
         if (_searching) return;
         // 末尾に居たなら追従する。
         if (wasShortContent) {
@@ -506,6 +526,30 @@ class _ThreadScreenState extends State<ThreadScreen>
       _fetching = false;
       if (mounted) setState(() => _polling = false);
     }
+  }
+
+  /// 書いている最中にスレが止まった（dat落ち・完走）ことを知らせる。
+  ///
+  /// [wasWritable] は変化前の書き込み可否。可 → 不可へ変わったときだけ出す。
+  /// 入力欄は黙って無効になるだけなので、書きかけを抱えたまま送れなくなった
+  /// 理由が分からない。書いている人にだけモーダルで割り込み、本文を手元に
+  /// 残せるようにする。空欄のまま眺めているだけなら題名の脇のラベルで足りる
+  /// ので邪魔をしない。
+  void _notifyStoppedWhileComposing(bool wasWritable) {
+    if (!wasWritable || _canWrite || _stoppedNoticeShown) return;
+    final draft = _composer.text;
+    if (draft.trim().isEmpty && !_composerFocus.hasFocus) return;
+    _stoppedNoticeShown = true;
+    final label = _statusLabel ?? 'dat落ち';
+    // 一覧の更新から来たときは build の途中なので、フレームを跨いでから出す。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      // 送れない欄にキーボードを出したままにしない。
+      if (_composerFocus.hasFocus) _composerFocus.unfocus();
+      unawaited(
+        showThreadStoppedDialog(context, statusLabel: label, draft: draft),
+      );
+    });
   }
 
   List<Res> _newResSince(DatState state, int previousResCount) {
@@ -3002,7 +3046,11 @@ class _ComposerState extends State<_Composer> {
                   child: TextField(
                     controller: widget.controller,
                     focusNode: widget.focusNode,
-                    enabled: widget.enabled,
+                    // 停止スレでも欄は生かしたまま読み取り専用にする。無効
+                    // （enabled: false）にすると書きかけを選択もコピーもできず、
+                    // 次スレへ持っていく手立てが無くなるため。書けないことは
+                    // ヒントと、無効になった送信・添付ボタンで示す。
+                    readOnly: !widget.enabled,
                     minLines: 1,
                     maxLines: 5,
                     textInputAction: TextInputAction.newline,
