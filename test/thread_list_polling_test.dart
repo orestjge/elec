@@ -5,6 +5,7 @@ import 'package:elec/src/net/token_storage.dart';
 import 'package:elec/src/ui/thread_list_screen.dart';
 import 'package:elec/src/ui/thread_tile.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jis0208/jis0208.dart';
 
@@ -200,10 +201,10 @@ void main() {
       subjectOk(
         // bump 順（サーバ順）。この中で 4 群に分かれる。
         '1.dat<>スレA (10)\n'
-        '2.dat<>スレB (12)\n' // 開いた後に +4
-        '3.dat<>スレC (5)\n' // 追いついている
-        '4.dat<>スレD (2)\n' // 一覧でも初見
-        '5.dat<>スレE (7)\n', // 一覧で見たが開いていない
+            '2.dat<>スレB (12)\n' // 開いた後に +4
+            '3.dat<>スレC (5)\n' // 追いついている
+            '4.dat<>スレD (2)\n' // 一覧でも初見
+            '5.dat<>スレE (7)\n', // 一覧で見たが開いていない
         'LM1',
       ),
     ]);
@@ -886,6 +887,55 @@ void main() {
 
     // 板追加の導線＝ドロワーが開いている。
     expect(find.text('URLで板を追加'), findsOneWidget);
+  });
+
+  /// クリップボードを [text] に見せかけて「URLで板を追加」を開き、入力欄の中身を返す。
+  Future<String> addBoardFieldText(WidgetTester tester, String text) async {
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async => call.method == 'Clipboard.getData'
+          ? <String, dynamic>{'text': text}
+          : null,
+    );
+    addTearDown(() {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      );
+    });
+
+    final fetcher = QueueFetcher([subjectOk('1.dat<>スレ (1)\n', 'LM1')]);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadListScreen(
+          fetcher: fetcher,
+          pollInterval: const Duration(seconds: 15),
+          readHistory: ReadHistory(MemoryReadHistoryStorage()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.drag(find.byType(CustomScrollView), const Offset(500, 0));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('URLで板を追加'));
+    await tester.pumpAndSettle();
+
+    return tester
+        .widget<TextField>(find.byType(TextField).last)
+        .controller!
+        .text;
+  }
+
+  testWidgets('板を追加: クリップボードが板 URL なら貼っておく', (tester) async {
+    expect(
+      await addBoardFieldText(tester, ' https://mi.5ch.net/news4vip/ '),
+      'https://mi.5ch.net/news4vip/',
+    );
+  });
+
+  testWidgets('板を追加: クリップボードが URL でなければ空のまま', (tester) async {
+    expect(await addBoardFieldText(tester, 'コピーしたレス本文'), '');
   });
 
   testWidgets('一覧で長押し後の左ドラッグでは直近スレを開かない', (tester) async {

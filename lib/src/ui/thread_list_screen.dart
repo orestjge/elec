@@ -1494,8 +1494,11 @@ class _BoardDrawer extends StatelessWidget {
     final navigator = Navigator.of(context);
     final clipboard = await Clipboard.getData(Clipboard.kTextPlain);
     if (!context.mounted) return;
+    // クリップボードが板 URL のときだけ先に入れておく。関係ない文字列
+    // （コピーしたレス本文など）を勝手に貼ると消す手間の方が大きい。
+    final copied = clipboard?.text?.trim() ?? '';
     final controller = TextEditingController(
-      text: clipboard?.text?.trim() ?? '',
+      text: parseBoardUrl(Uri.tryParse(copied) ?? Uri()) == null ? '' : copied,
     );
     final input = await showDialog<String>(
       context: context,
