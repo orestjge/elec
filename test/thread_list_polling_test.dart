@@ -83,17 +83,25 @@ void main() {
     await tester.pump(const Duration(seconds: 15));
     await tester.pumpAndSettle();
     expect(fetcher.calls, 2);
-    expect(find.text('あとから来たスレ'), findsOneWidget);
+    // 取得はできているが、新スレは並べ直すまで順番待ち。ピルで件数だけ知らせる。
+    expect(find.text('あとから来たスレ'), findsNothing);
+    expect(find.text('新しいスレ 1件'), findsOneWidget);
+    // レス数の変化（10 → 12）は行を動かさないのでその場で反映する。
+    expect(find.textContaining('12'), findsWidgets);
 
     // さらに 15 秒。304 なので一覧は変わらない。
     await tester.pump(const Duration(seconds: 15));
     await tester.pumpAndSettle();
     expect(fetcher.calls, 3);
-    // 304 だったので一覧は 2 件のまま。
+    expect(find.text('新しいスレ 1件'), findsOneWidget);
+
+    // 取り込めば一覧に出る。
+    await tester.tap(find.text('新しいスレ 1件'));
+    await tester.pumpAndSettle();
     expect(find.text('あとから来たスレ'), findsOneWidget);
   });
 
-  testWidgets('自動更新では並び順を固定し、新スレは末尾に付く（ソート変更で貼り直す）', (tester) async {
+  testWidgets('自動更新では並び順を固定し、新スレは出さずに待たせる（ソート変更で貼り直す）', (tester) async {
     final fetcher = QueueFetcher([
       subjectOk('1.dat<>スレA (10)\n2.dat<>スレB (5)\n3.dat<>スレC (3)\n', 'LM1'),
       // ポーリング: C が最新レスで bump 先頭へ変化＋新スレ D が出現。
@@ -121,13 +129,14 @@ void main() {
 
     expect(order(), ['スレA', 'スレB', 'スレC']);
 
-    // ポーリングで bump 順は C,A,B,D に変わるが、表示は固定のまま。新スレ D
-    // だけ末尾に付く。
+    // ポーリングで bump 順は C,A,B,D に変わるが、表示は固定のまま。新スレ D は
+    // 場所が決まっていないので、まだ一覧に出さない。
     await tester.pump(const Duration(seconds: 15));
     await tester.pumpAndSettle();
-    expect(order(), ['スレA', 'スレB', 'スレC', 'スレD']);
+    expect(order(), ['スレA', 'スレB', 'スレC']);
 
-    // ソート変更（明示操作）では並び順を貼り直す。新着＝スレ番号の新しい順。
+    // ソート変更（明示操作）では並び順を貼り直す。ここで D も取り込まれる。
+    // 新着＝スレ番号の新しい順。
     await tester.tap(find.byTooltip('並べ替え'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('新着'));
@@ -183,9 +192,57 @@ void main() {
     expect(seenOf('スレA'), ThreadSeen.opened);
   });
 
-  testWidgets('見るべき順は 初見 → 新着あり → 既読 → 見送ったスレ に並べる', (tester) async {
+  testWidgets('手動更新でも、目に入ったスレは新顔でなくなる', (tester) async {
+    final fetcher = QueueFetcher([
+      subjectOk('1.dat<>スレA (10)\n2.dat<>スレB (5)\n', 'LM1'),
+      // ポーリング: A にレスが付き、新スレ C が立つ。
+      subjectOk('1.dat<>スレA (12)\n2.dat<>スレB (5)\n3.dat<>スレC (1)\n', 'LM2'),
+    ]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadListScreen(
+          fetcher: fetcher,
+          pollInterval: const Duration(seconds: 15),
+          readHistory: ReadHistory(MemoryReadHistoryStorage()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    ThreadSeen seenOf(String title) => tester
+        .widget<ThreadTile>(
+          find.widgetWithText(ThreadTile, title, skipOffstage: false),
+        )
+        .seen;
+
+    expect(seenOf('スレA'), ThreadSeen.fresh);
+    expect(seenOf('スレB'), ThreadSeen.fresh);
+
+    // 自動更新では点を動かさない（見ているそばで表示が変わらない）。
+    await tester.pump(const Duration(seconds: 15));
+    await tester.pumpAndSettle();
+    expect(seenOf('スレA'), ThreadSeen.fresh);
+
+    // 引っ張って更新。明示操作で並べ直す＝行が動いてよい瞬間なので、ここで
+    // 目に入ったぶんを新顔から外す（画面を開き直すまで新顔のままにしない）。
+    await tester.fling(
+      find.byType(CustomScrollView).first,
+      const Offset(0, 300),
+      1000,
+    );
+    await tester.pumpAndSettle();
+    expect(seenOf('スレA'), ThreadSeen.listed);
+    expect(seenOf('スレB'), ThreadSeen.listed);
+    // この更新ではじめて一覧に出たスレは新顔のまま。
+    expect(seenOf('スレC'), ThreadSeen.fresh);
+  });
+
+  testWidgets('新着・未読優先は 初めて見る → 新着レスあり → 既読 → スレタイだけ見た に並べる', (
+    tester,
+  ) async {
     final history = ReadHistory(MemoryReadHistoryStorage());
-    // 一覧で見たことがある＝初見ではない（4 は初見のまま）。
+    // 一覧で見たことがある＝初めて見るスレではない（4 だけが初めて見るスレ）。
     await history.markListed(['1', '2', '3', '5']);
     // 開いたスレ。2 は開いた後にレスが増えた＝新着あり、3 は追いついている。
     await history.markOpenedThread(
@@ -203,7 +260,7 @@ void main() {
         '1.dat<>スレA (10)\n'
             '2.dat<>スレB (12)\n' // 開いた後に +4
             '3.dat<>スレC (5)\n' // 追いついている
-            '4.dat<>スレD (2)\n' // 一覧でも初見
+            '4.dat<>スレD (2)\n' // スレタイも見ていない＝初めて見るスレ
             '5.dat<>スレE (7)\n', // 一覧で見たが開いていない
         'LM1',
       ),
@@ -222,18 +279,18 @@ void main() {
 
     await tester.tap(find.byTooltip('並べ替え'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('見るべき順'));
+    await tester.tap(find.text('新着・未読優先'));
     await tester.pumpAndSettle();
 
     final order = tester
         .widgetList<ThreadTile>(find.byType(ThreadTile))
         .map((w) => w.thread.title)
         .toList();
-    // D=初見 → B=新着あり → C=既読 → A,E=見送った（各群は bump 順のまま）。
+    // D=初めて見る → B=新着レスあり → C=既読 → A,E=スレタイだけ見た（各群は bump 順のまま）。
     expect(order, ['スレD', 'スレB', 'スレC', 'スレA', 'スレE']);
   });
 
-  testWidgets('末尾に付いた新スレは、その後の自動更新で入れ替わらない', (tester) async {
+  testWidgets('順番待ちの新スレが増えても、表示中の行は動かない', (tester) async {
     final fetcher = QueueFetcher([
       subjectOk('1.dat<>スレA (10)\n', 'LM1'),
       // 新スレ B・C が出現（サーバ順は C が先）。
@@ -263,15 +320,186 @@ void main() {
 
     expect(order(), ['スレA']);
 
-    // 現れた順（サーバ順）に末尾へ積まれる。
+    // B・C が来ても一覧は動かない。件数だけが増える。
     await tester.pump(const Duration(seconds: 15));
     await tester.pumpAndSettle();
-    expect(order(), ['スレA', 'スレC', 'スレB']);
+    expect(order(), ['スレA']);
+    expect(find.text('新しいスレ 2件'), findsOneWidget);
 
-    // サーバ順が変わっても、積んだ場所からは動かない。D だけがさらに末尾へ。
+    // さらにサーバ順が入れ替わり D も出るが、待たせている間は同じく動かない。
     await tester.pump(const Duration(seconds: 15));
     await tester.pumpAndSettle();
-    expect(order(), ['スレA', 'スレC', 'スレB', 'スレD']);
+    expect(order(), ['スレA']);
+    expect(find.text('新しいスレ 3件'), findsOneWidget);
+
+    // 取り込んで初めて場所が決まる。既定は新着・未読優先なので、取り込んだ 3 件
+    // （まだ一度も出していない＝新顔）が最終的なサーバの bump 順で上に来て、
+    // 出しっぱなしだった A は「スレタイだけ見た」に下がる。
+    await tester.tap(find.text('新しいスレ 3件'));
+    await tester.pumpAndSettle();
+    expect(order(), ['スレB', 'スレD', 'スレC', 'スレA']);
+  });
+
+  testWidgets('自動更新で新スレが来ると新着ピルが出て、タップで並べ直す', (tester) async {
+    final fetcher = QueueFetcher([
+      subjectOk('1.dat<>スレA (10)\n2.dat<>スレB (5)\n', 'LM1'),
+      // ポーリング: 新スレ C・D が出現（サーバ順では先頭）。
+      subjectOk(
+        '4.dat<>スレD (1)\n3.dat<>スレC (2)\n1.dat<>スレA (11)\n2.dat<>スレB (5)\n',
+        'LM2',
+      ),
+    ]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadListScreen(
+          fetcher: fetcher,
+          pollInterval: const Duration(seconds: 15),
+          readHistory: ReadHistory(MemoryReadHistoryStorage()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    List<String> order() => tester
+        .widgetList<ThreadTile>(find.byType(ThreadTile))
+        .map((w) => w.thread.title)
+        .toList();
+
+    // 何も来ていないうちはピルを出さない（常設の更新ボタンにはしない）。
+    expect(find.textContaining('新しいスレ'), findsNothing);
+
+    await tester.pump(const Duration(seconds: 15));
+    await tester.pumpAndSettle();
+
+    // 新スレはまだ一覧に出さない（既存の行を動かさないため）。ピルが件数を出す。
+    expect(order(), ['スレA', 'スレB']);
+    expect(find.text('新しいスレ 2件'), findsOneWidget);
+
+    await tester.tap(find.text('新しいスレ 2件'));
+    await tester.pumpAndSettle();
+
+    // 取り込んでサーバの bump 順に並び、ピルは片付く。
+    expect(order(), ['スレD', 'スレC', 'スレA', 'スレB']);
+    expect(find.textContaining('新しいスレ'), findsNothing);
+  });
+
+  testWidgets('新スレが上に来ない並び順では、ピルを押しても先頭へ戻さない', (tester) async {
+    // レス数順。立ったばかりの新スレ（レス 1）は最下部に収まるので、先頭へ戻すと
+    // 目当ての行から遠ざけたうえ、見ていた場所も失わせることになる。
+    String board(String extra) => [
+      extra,
+      for (var i = 1; i <= 20; i++) '$i.dat<>スレ$i (${120 - i})\n',
+    ].join();
+    final fetcher = QueueFetcher([
+      subjectOk(board(''), 'LM1'),
+      subjectOk(board('99.dat<>できたてスレ (1)\n'), 'LM2'),
+    ]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadListScreen(
+          fetcher: fetcher,
+          pollInterval: const Duration(seconds: 15),
+          readHistory: ReadHistory(MemoryReadHistoryStorage()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('並べ替え'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('レス数'));
+    await tester.pumpAndSettle();
+
+    // 一覧の途中まで下りてから新スレを迎える。
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -400));
+    await tester.pumpAndSettle();
+    double offset() => tester
+        .state<ScrollableState>(
+          find.descendant(
+            of: find.byType(CustomScrollView),
+            matching: find.byType(Scrollable),
+          ),
+        )
+        .position
+        .pixels;
+    final before = offset();
+    expect(before, greaterThan(0));
+
+    await tester.pump(const Duration(seconds: 15));
+    await tester.pumpAndSettle();
+    expect(find.text('新しいスレ 1件'), findsOneWidget);
+
+    await tester.tap(find.text('新しいスレ 1件'));
+    await tester.pumpAndSettle();
+
+    // 取り込んでピルは片付くが、見ていた場所はそのまま。
+    expect(find.textContaining('新しいスレ'), findsNothing);
+    expect(offset(), before);
+  });
+
+  testWidgets('新着ピルは引っ張って更新でも片付く', (tester) async {
+    final fetcher = QueueFetcher([
+      subjectOk('1.dat<>スレA (10)\n', 'LM1'),
+      subjectOk('2.dat<>スレB (1)\n1.dat<>スレA (10)\n', 'LM2'),
+    ]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadListScreen(
+          fetcher: fetcher,
+          pollInterval: const Duration(seconds: 15),
+          readHistory: ReadHistory(MemoryReadHistoryStorage()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 15));
+    await tester.pumpAndSettle();
+    expect(find.text('新しいスレ 1件'), findsOneWidget);
+
+    await tester.fling(find.text('スレA'), const Offset(0, 300), 1000);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('新しいスレ'), findsNothing);
+  });
+
+  testWidgets('新着ピルは現行表示だけ・検索で消えるスレは数えない', (tester) async {
+    final fetcher = QueueFetcher([
+      subjectOk('1.dat<>料理スレ (10)\n', 'LM1'),
+      // 新スレ 2 件。片方だけが検索語に一致する。
+      subjectOk('3.dat<>野球スレ (1)\n2.dat<>料理スレ2 (1)\n1.dat<>料理スレ (10)\n', 'LM2'),
+    ]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadListScreen(
+          fetcher: fetcher,
+          pollInterval: const Duration(seconds: 15),
+          readHistory: ReadHistory(MemoryReadHistoryStorage()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('スレ検索'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '料理');
+    await tester.pumpAndSettle();
+
+    await tester.pump(const Duration(seconds: 15));
+    await tester.pumpAndSettle();
+
+    // 出てくるのは「料理スレ2」だけなので 1 件。タップ先に無いスレは数えない。
+    expect(find.text('新しいスレ 1件'), findsOneWidget);
+
+    // 履歴・お気に入りは subject の新スレとは母集団が違うので出さない。
+    // （検索中は下部バーが検索欄になるので、閉じてからチップを押す）
+    await tester.tap(find.byTooltip('検索を閉じる'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('お気に入り'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('新しいスレ'), findsNothing);
   });
 
   testWidgets('自動更新で subject から落ちたスレは、dat落ちチップを付けて同じ場所に残す', (tester) async {

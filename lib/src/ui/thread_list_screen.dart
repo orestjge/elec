@@ -18,15 +18,19 @@ import 'settings_screen.dart';
 import 'thread_screen.dart';
 import 'thread_tile.dart';
 
-/// スレッド一覧の並べ替え方法。
+/// スレッド一覧の並べ替え方法。**宣言順がそのまま並べ替えシートの並び**になる。
 enum ThreadSort {
-  bump('最近レス順', 'レスが新しいスレ順（掲示板の定番）', Icons.sort),
-
-  /// 見るべき順。初見 → 新着あり → 既読 → 一度も開いていない、の 4 段。
+  /// 初めて見るスレ → 新着レスのあるスレ → 既読スレ → それ以外、の 4 段。
   ///
-  /// 一覧を上から流すだけで「まだ知らないスレ」と「続きが来たスレ」を先に拾え、
-  /// 一度見送ったスレ（一覧で見たが開かなかった）は下にまとまる。
-  checkOrder('見るべき順', '初見 → 新着あり → 既読 → 見送ったスレ', Icons.playlist_add_check),
+  /// 一覧を上から流すだけで「まだ知らないスレ」と「続きが来たスレ」を先に拾える。
+  /// 最後の群は、スレタイは一覧で見たが一度も開いていないスレ。説明文には出さない
+  /// （前の 3 つを優先＝残りは下、と読めるため）。
+  unreadFirst(
+    '新着・未読優先',
+    '初めて見るスレ、新着レスのあるスレ、既読スレの順に優先して表示します。',
+    Icons.playlist_add_check,
+  ),
+  bump('最近レス順', 'レスが新しいスレ順', Icons.sort),
   momentum('勢い', '1日あたりのレス数が多い順', Icons.bolt),
   resCount('レス数', 'レスの多い順', Icons.forum_outlined),
   newest('新着', '新しく立った順', Icons.schedule),
@@ -110,9 +114,13 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   ThreadFilter _filter = ThreadFilter.current;
   NewThreadDraft _newThreadDraft = const NewThreadDraft();
 
-  /// 表示ごとの既定の並び。現行は掲示板の定番＝最近レス順、履歴は最後に見た順。
+  /// 表示ごとの既定の並び。現行は新着・未読優先、履歴は最後に見た順。
+  ///
+  /// 新着ありは母集団が「開いた＆未読レスが残っている」スレだけ＝
+  /// [ThreadSort.unreadFirst] では全部が同じ群に入り、並べても bump 順のままな
+  /// ので、そちらは最近レス順のままにする。
   static const Map<ThreadFilter, ThreadSort> _defaultSort = {
-    ThreadFilter.current: ThreadSort.bump,
+    ThreadFilter.current: ThreadSort.unreadFirst,
     ThreadFilter.unreadNew: ThreadSort.bump,
     ThreadFilter.history: ThreadSort.lastSeen,
     ThreadFilter.favorites: ThreadSort.lastSeen,
@@ -157,13 +165,20 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   /// 次の並べ替え直しまで置いておく。[_reorder] で固定順に無いものを捨てる。
   final Map<String, ThreadSummary> _lastKnown = {};
 
-  /// 画面を開いた時点で「一覧で見たことがある」だったスレ。表示中は動かさない
-  /// （[_seenState]）。
-  late final Set<String> _listedAtOpen;
+  /// 「一覧で見たことがある」だったスレの控え。表示中は動かさず、一覧を取り直した
+  /// とき（手動更新・順番待ちの取り込み）に撮り直す（[_refreshListedSnapshot]）。
+  ///
+  /// ソート変更や表示の切り替えでは撮り直さない。同じ一覧を組み替えているだけで
+  /// 「見た」が増えたわけではないし、[ThreadSort.unreadFirst] はこの控えを読む側な
+  /// ので、切り替えた瞬間に撮り直すと「初めて見るスレ」の群がいつも空になる。
+  late Set<String> _listedAtOpen;
 
   /// 今回一覧に出したスレ。ポーリングのたび・画面を閉じるときにまとめて保存する
   /// （スクロールのたびに書くと、そのつど履歴ファイル全体を書き直すことになる）。
   final Set<String> _pendingListed = {};
+
+  /// 一覧のスクロール位置。並べ直した新スレが先頭に来たとき、そこへ戻すために持つ。
+  final _listScroll = ScrollController();
 
   Timer? _timer;
   bool _fetching = false; // 多重取得の抑止
@@ -178,7 +193,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
       encoding: widget.endpoints.textEncoding,
     );
     _history = widget.readHistory ?? ReadHistory.shared;
-    _listedAtOpen = Set.of(_history.listedThreads);
+    _refreshListedSnapshot();
     // 前回見ていたスレを控えに置く。表に出るまで取得もポーリングもしないので、
     // 置くだけならただの待機（[ThreadScreen.active] 参照）。
     _parked = _history.lastViewedThread?.toSummary();
@@ -200,6 +215,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
     _timer?.cancel();
     _swipeStartTimer?.cancel();
     _pages.dispose();
+    _listScroll.dispose();
     _search.dispose();
     final fetcher = _fetcher;
     if (_ownsFetcher && fetcher is HttpClientFetcher) {
@@ -232,6 +248,14 @@ class _ThreadListScreenState extends State<ThreadListScreen>
     if (_pendingListed.isEmpty) return;
     unawaited(_history.markListed(_pendingListed.toList()));
     _pendingListed.clear();
+  }
+
+  /// 「一覧で見た」の控え（[_listedAtOpen]）を撮り直す。今回目に入ったぶんを先に
+  /// 履歴へ移してから撮るので、いま一覧に出ているスレはここで新顔でなくなる。
+  /// [ReadHistory.markListed] は保存だけが非同期で、控え自体はその場で増える。
+  void _refreshListedSnapshot() {
+    _flushListed();
+    _listedAtOpen = Set.of(_history.listedThreads);
   }
 
   void _startPolling() {
@@ -309,6 +333,10 @@ class _ThreadListScreenState extends State<ThreadListScreen>
         if (!r.notModified) _adoptState(r.state);
         _error = null;
         _loading = false;
+        // 一覧を取り直した＝ここまでが「前に見た一覧」。新顔の控えも撮り直し、
+        // 今回目に入ったスレを新顔から外す（[_refreshListedSnapshot]）。並べる
+        // 前に撮る（[ThreadSort.unreadFirst] の先頭群がこの控えで決まるため）。
+        _refreshListedSnapshot();
         _reorder(); // 手動更新なので並び順を貼り直す
       });
     } catch (e) {
@@ -317,26 +345,22 @@ class _ThreadListScreenState extends State<ThreadListScreen>
     }
   }
 
-  /// 取得結果を採用する。行を残せるよう各スレの最後の姿を控え、初めて見たスレは
-  /// 固定順の末尾に積む。
+  /// 取得結果を採用する。行を残せるよう各スレの最後の姿を控える。
   ///
-  /// 積んだ時点で場所が決まるので、あとはそこから動かない。固定順に入れずに毎回
-  /// 「今のサーバ順で末尾へ」としていたときは、末尾の新スレ同士が更新のたびに
-  /// 入れ替わってしまっていた。
+  /// 初めて見たスレは固定順（[_order]）にはまだ入れない。表示中の行を動かさずに
+  /// 挿し込める場所は末尾しかないが、そこは並び順が示す場所ではない（「最近レス順」
+  /// なら本来いちばん上に来るスレを、いちばん不活発な位置に置くことになる）。
+  /// 「一覧には居るが場違い」という状態を作らず、並べ直すまで順番待ちにしておき、
+  /// [_NewThreadsPill] で件数だけ知らせる。
   void _adoptState(SubjectState state) {
     _state = state;
     for (final thread in state.threads) {
       _lastKnown[thread.key] = thread;
     }
-    final order = _order;
-    if (order == null) return; // 初回。この直後に _reorder が全体を敷き直す。
-    final known = order.toSet();
-    for (final thread in state.threads) {
-      if (known.add(thread.key)) order.add(thread.key);
-    }
   }
 
   /// 現在のデータと選択中ソートで並び順を確定し、固定スナップショットを更新する。
+  /// 順番待ちのスレ（[_pendingArrivals]）もここで場所が決まり、一覧に出る。
   void _reorder() {
     final state = _state;
     if (state != null) {
@@ -351,8 +375,8 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   /// 表示する並び。固定スナップショット [_order] の順に現在のデータを当てる。
   /// [_order] 未設定なら都度ソート。
   ///
-  /// 新しく現れたスレは [_adoptState] が末尾に積んであるので、ここでは何もしない
-  /// （末尾の新スレ同士も動かない）。
+  /// [_order] に無いスレ＝前回の並べ直し以降に現れたスレは、ここには出さない
+  /// （[_pendingArrivals] で数えて [_NewThreadsPill] から取り込む）。
   ///
   /// subject.txt から落ちたスレは最後の姿（[_lastKnown]）のまま同じ場所に残す。
   /// 消して詰めると下の行が繰り上がり、見ていた位置がズレるため。
@@ -362,19 +386,82 @@ class _ThreadListScreenState extends State<ThreadListScreen>
     if (order == null) return _sorted(threads);
     final byKey = {for (final t in threads) t.key: t};
     final result = <ThreadSummary>[];
-    final placed = <String>{};
     for (final key in order) {
       final t = byKey[key] ?? _lastKnown[key];
-      if (t != null) {
-        result.add(t);
-        placed.add(key);
-      }
-    }
-    // 念のための取りこぼし避け（通常は [_adoptState] が積んでいるので空回り）。
-    for (final t in threads) {
-      if (!placed.contains(t.key)) result.add(t);
+      if (t != null) result.add(t);
     }
     return result;
+  }
+
+  /// 取得済みだが、まだ固定順に場所が無い＝一覧に出していないスレ。
+  List<ThreadSummary> _pendingArrivals() {
+    final state = _state;
+    final order = _order;
+    if (state == null || order == null) return const [];
+    final placed = order.toSet();
+    return [
+      for (final t in state.threads)
+        if (!placed.contains(t.key)) t,
+    ];
+  }
+
+  /// ピルに出す「まだ一覧に出していない新スレ」の件数。0 ならピルを出さない。
+  ///
+  /// 自動更新で来た新スレは並べ直すまで順番待ちのままなので、放っておくと
+  /// 気づけない。「引っ張って更新」でしか取り込めないと、リストの途中に居るときは
+  /// 先頭まで戻ってから引く二段構えになるので、件数を出して 1 タップで済ませる。
+  ///
+  /// 数えるのは**取り込んだら実際に出てくる行**だけ。NG・検索・絞り込みで消える
+  /// スレを勘定に入れると、タップしても何も出てこないピルになる。
+  int _newArrivalCount() {
+    // 履歴・お気に入りは subject.txt の新スレとは母集団が違うので出さない。
+    if (_filter != ThreadFilter.current) return 0;
+    final pending = _pendingArrivals();
+    if (pending.isEmpty) return 0;
+    return _filteredThreads(pending).length;
+  }
+
+  /// 新着ピルのタップ。順番待ちのスレを取り込んで、今の並び順で固定順を貼り直す。
+  ///
+  /// 新スレの行き先は並び順しだいで、上とは限らない（「新着」なら先頭だが、
+  /// 「レス数」ならレス 1 のスレは最下部、「勢い」なら中ほど）。先頭へ戻すのは
+  /// 実際に先頭付近へ来たときだけにする。来ていないのに戻すと、目当ての行から
+  /// 遠ざけたうえ、見ていた場所も失わせることになる。
+  void _applyNewArrivals() {
+    // 取り込む前に控える（_reorder のあとは順番待ちでなくなり、見分けがつかない）。
+    final arrived = {for (final t in _pendingArrivals()) t.key};
+    // 順番待ちを取り込む＝一覧の中身が入れ替わるので、手動更新と同じ扱いにする。
+    // 取り込むスレはまだ一度も出していない＝控えに入らないので、新顔のまま出る。
+    setState(() {
+      _refreshListedSnapshot();
+      _reorder();
+    });
+    if (!_listScroll.hasClients) return;
+    if (!_landedAtTop(arrived)) return;
+    // 遠くから滑らせると間の行を全部組み立てることになる。離れていれば跳ぶ。
+    if (_listScroll.offset > 2000) {
+      _listScroll.jumpTo(0);
+    } else {
+      _listScroll.animateTo(
+        0,
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeOutCubic,
+      );
+    }
+  }
+
+  /// 並べ直した結果、新スレが一覧の頭に来たか（＝先頭へ戻る意味があるか）。
+  bool _landedAtTop(Set<String> arrived) {
+    if (arrived.isEmpty || _state == null) return false;
+    final shown = _filteredThreads(_orderedThreads());
+    // 1 行目ちょうどとは限らない（既存スレを挟むことはある）ので、最初の画面に
+    // 入るくらいまでを「頭」とみなす。
+    const topRows = 5;
+    final limit = shown.length < topRows ? shown.length : topRows;
+    for (var i = 0; i < limit; i++) {
+      if (arrived.contains(shown[i].key)) return true;
+    }
+    return false;
   }
 
   List<ThreadSummary> _filteredThreads(List<ThreadSummary> threads) {
@@ -435,10 +522,10 @@ class _ThreadListScreenState extends State<ThreadListScreen>
 
   /// このスレをどこまで見たか。
   ///
-  /// 「一覧で見た」の判定は**画面を開いた時点の控え**（[_listedAtOpen]）で決める。
-  /// その場で控えを見にいくと、スクロールして目に入った瞬間に点が変わってしまう
-  /// （見ているそばで表示が動く）。今回目に入ったぶんは [_pendingListed] に貯めて、
-  /// 次に開いたときから効かせる。
+  /// 「一覧で見た」の判定は**控え**（[_listedAtOpen]）で決める。その場で履歴を
+  /// 見にいくと、スクロールして目に入った瞬間に点が変わってしまう（見ているそばで
+  /// 表示が動く）。今回目に入ったぶんは [_pendingListed] に貯めておき、一覧を取り
+  /// 直したときに控えごと入れ替えて効かせる（[_refreshListedSnapshot]）。
   ThreadSeen _seenState(ThreadSummary t) {
     if (_history.isRead(t.key)) return ThreadSeen.opened;
     return _listedAtOpen.contains(t.key) ? ThreadSeen.listed : ThreadSeen.fresh;
@@ -461,8 +548,8 @@ class _ThreadListScreenState extends State<ThreadListScreen>
       case ThreadSort.bump:
         // subject.txt は既にサーバの bump 順（最終書き込み順）。そのまま。
         return threads;
-      case ThreadSort.checkOrder:
-        // 見るべき順。初見 → 続きがある → 読み終わっている → 一度も開いていない。
+      case ThreadSort.unreadFirst:
+        // 初めて見る → 新着レスがある → 既読（追いついている）→ スレタイだけ見た。
         // 各群は bump 順（入力順）を保つ。
         final fresh = <ThreadSummary>[];
         final unreadRes = <ThreadSummary>[];
@@ -948,6 +1035,10 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   }
 
   Widget _list() {
+    // 出す行はここで一度だけ確定する（絞り込み・NG・検索を毎回たどらない）。
+    final threads = _state == null
+        ? const <ThreadSummary>[]
+        : _filteredThreads(_orderedThreads());
     return Scaffold(
       key: _scaffoldKey,
       // 左ドロワーから板を切り替え・追加する。左端スワイプ（既定）に加え、一覧上を
@@ -974,37 +1065,64 @@ class _ThreadListScreenState extends State<ThreadListScreen>
         filter: _filter,
         onSelectFilter: _selectFilter,
       ),
-      body: RefreshIndicator(
-        onRefresh: _refresh,
-        child: Listener(
-          behavior: HitTestBehavior.translucent,
-          onPointerDown: _handlePointerDown,
-          onPointerMove: _handlePointerMove,
-          onPointerUp: _handlePointerUp,
-          onPointerCancel: _handlePointerCancel,
-          child: CustomScrollView(
-            slivers: [
-              SliverAppBar.medium(
-                title: Text(widget.board.title),
-                actions: [
-                  _PollingIndicator(active: _polling),
-                  _SortButton(sort: _sort, onPressed: _pickSort),
-                  _OverflowMenu(
-                    onOpenUrl: _openThreadFromUrl,
-                    onOpenSettings: _openSettings,
-                  ),
-                  const SizedBox(width: 4),
-                ],
+      // 一覧のスクロール位置は主スクロール（[PrimaryScrollController]）として渡す。
+      // CustomScrollView に controller を直接与えると primary でなくなり、横並びの
+      // ページ送りとの取り合いが変わって、長押ししてからの左ドラッグでスレ面へ
+      // 移ってしまう（長押しメニューを出したまま指を動かしたときの誤爆）。
+      body: PrimaryScrollController(
+        controller: _listScroll,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            RefreshIndicator(
+              onRefresh: _refresh,
+              child: Listener(
+                behavior: HitTestBehavior.translucent,
+                onPointerDown: _handlePointerDown,
+                onPointerMove: _handlePointerMove,
+                onPointerUp: _handlePointerUp,
+                onPointerCancel: _handlePointerCancel,
+                child: CustomScrollView(
+                  slivers: [
+                    SliverAppBar.medium(
+                      title: Text(widget.board.title),
+                      actions: [
+                        _PollingIndicator(active: _polling),
+                        _SortButton(sort: _sort, onPressed: _pickSort),
+                        _OverflowMenu(
+                          onOpenUrl: _openThreadFromUrl,
+                          onOpenSettings: _openSettings,
+                        ),
+                        const SizedBox(width: 4),
+                      ],
+                    ),
+                    _body(threads),
+                  ],
+                ),
               ),
-              _body(),
-            ],
-          ),
+            ),
+            // 折りたたんだ AppBar のすぐ下に浮かせる。AppBar は pinned ではないので
+            // スクロールで消えるが、ピルは同じ位置に残って 1 タップで並べ直せる。
+            // 隙間は広めに取る。詰めるとヘッダーの一部（タブや小見出しの類）に
+            // 見えてしまい、一覧の上に別に浮いている物だと分かりにくい。
+            Positioned(
+              top: MediaQuery.paddingOf(context).top + kToolbarHeight + 20,
+              left: 12,
+              right: 12,
+              child: Center(
+                child: _NewThreadsPill(
+                  count: _newArrivalCount(),
+                  onTap: _applyNewArrivals,
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _body() {
+  Widget _body(List<ThreadSummary> threads) {
     if (_loading) {
       return const SliverFillRemaining(
         hasScrollBody: false,
@@ -1017,7 +1135,6 @@ class _ThreadListScreenState extends State<ThreadListScreen>
         child: _ErrorView(error: _error!, onRetry: _refresh),
       );
     }
-    final threads = _filteredThreads(_orderedThreads());
     if (threads.isEmpty) {
       return SliverFillRemaining(
         hasScrollBody: false,
@@ -1048,6 +1165,134 @@ class _ThreadListScreenState extends State<ThreadListScreen>
           );
         },
       ),
+    );
+  }
+}
+
+/// 一覧の上に浮く「新しいスレ N件」。タップで取り込み、今の並び順に並べ直す。
+///
+/// 文言どおり、この N 件は**まだ一覧に出ていない**（[_ThreadListScreenState.
+/// _pendingArrivals]）。取り込む前に末尾へ積んでおくやり方もあるが、それだと
+/// 「一覧には居るのに、この文言では居ないように読める」というズレが残る。
+///
+/// 常設の更新ボタンは置かない（自動更新があるのに押す物があると、押さないと
+/// 古いように見える）。取り込むものがあるときだけ現れ、片付けば消える。件数を
+/// 出すのは、押した先に何が待っているかが分かると押す判断が要らなくなるため。
+///
+/// **どこへも飛ばない**ことを、見た目でも言う。押した先で新スレがどこへ行くかは
+/// 並び順しだい（「新着」なら上、「レス数」なら下、「勢い」なら中ほど）なので、
+/// 方向を示すものを一切持たせない:
+///
+/// - アイコンは矢印（↑）ではなく更新。起きること＝一覧の貼り直しだけを示す。
+/// - 出入りは上下に動かさず、その場での淡い拡大とフェード。上から降りてくると
+///   「上から来た物＝上に戻る操作」に読める。
+/// - 塗りは [ThreadScreen] の「最新へ」ボタンと**あえて変える**。あちらは
+///   primary の塗りつぶしで「今いる場所から目的地へ飛ぶ」主要動作。こちらは
+///   任意の取り込みなので、淡い面＋輪郭に落として同類に見えないようにする。
+class _NewThreadsPill extends StatefulWidget {
+  const _NewThreadsPill({required this.count, required this.onTap});
+
+  final int count;
+  final VoidCallback onTap;
+
+  @override
+  State<_NewThreadsPill> createState() => _NewThreadsPillState();
+}
+
+class _NewThreadsPillState extends State<_NewThreadsPill>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _anim = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 220),
+    reverseDuration: const Duration(milliseconds: 160),
+    value: widget.count > 0 ? 1 : 0,
+  );
+
+  /// 最後に出した件数。消えていく途中で「0件」に化けないよう保持する。
+  int _shown = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _shown = widget.count;
+  }
+
+  @override
+  void didUpdateWidget(covariant _NewThreadsPill oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.count > 0) {
+      _shown = widget.count;
+      _anim.forward();
+    } else {
+      _anim.reverse();
+    }
+  }
+
+  @override
+  void dispose() {
+    _anim.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return AnimatedBuilder(
+      animation: _anim,
+      builder: (context, _) {
+        // 消えきったら木から外す。見えないピルが一覧の上に残ってタップを吸ったり
+        // 読み上げに引っかかったりしないようにする。
+        if (_anim.isDismissed) return const SizedBox.shrink();
+        final t = Curves.easeOutCubic.transform(_anim.value);
+        return Opacity(
+          opacity: t,
+          // その場でふっと出て、その場で消える。動かさないことで「行き先」を
+          // 匂わせない。わずかに縮んだところから戻すぶんだけ、出たことは分かる。
+          child: Transform.scale(
+            scale: 0.94 + 0.06 * t,
+            child: Material(
+              color: scheme.secondaryContainer,
+              // 一覧の行の上に浮いていることは影で示す。塗りを落としたぶん、
+              // 面だけだと背景に沈んで押せる物に見えない。
+              elevation: 2,
+              shadowColor: scheme.shadow,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+                side: BorderSide(color: scheme.outlineVariant),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: InkWell(
+                onTap: widget.onTap,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 8,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.refresh,
+                        size: 16,
+                        color: scheme.onSecondaryContainer,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        '新しいスレ $_shown件',
+                        style: TextStyle(
+                          color: scheme.onSecondaryContainer,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }
