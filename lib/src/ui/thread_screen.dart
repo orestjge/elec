@@ -20,6 +20,7 @@ import 'attachment_uploader.dart';
 import 'compose_style.dart';
 import 'back_swipe.dart';
 import 'embed_urls.dart';
+import 'image_set_screen.dart';
 import 'image_urls.dart';
 import 'ng_screen.dart';
 import 'post_images.dart';
@@ -49,7 +50,7 @@ class ThreadScreen extends StatefulWidget {
     this.imgurUploader,
     this.imageUploadSettings,
     this.fileUploadSettings,
-    this.pickAndUploadImage,
+    this.pickAndUploadImages,
     this.pickAndUploadFile,
     this.initialStatusLabel,
     this.initialResCount = 0,
@@ -122,7 +123,7 @@ class ThreadScreen extends StatefulWidget {
   final FileUploadSettings? fileUploadSettings;
 
   /// 画像選択からアップロードまでを丸ごと差し替えるためのフック。
-  final Future<Uri?> Function()? pickAndUploadImage;
+  final Future<List<Uri>> Function()? pickAndUploadImages;
 
   /// ファイル選択からアップロードまでを丸ごと差し替えるためのフック。
   final Future<Uri?> Function()? pickAndUploadFile;
@@ -1181,7 +1182,7 @@ class _ThreadScreenState extends State<ThreadScreen>
           },
           onTapUrl: _openUrl,
           onSend: _submit,
-          onPickAndUploadImage: _pickAndUploadImage,
+          onPickAndUploadImages: _pickAndUploadImages,
           onPickAndUploadFile: _pickAndUploadFile,
           onShowActions: _showResActions,
           isOwnPost: (n) => _history.isOwnPost(widget.threadKey, n),
@@ -1519,7 +1520,7 @@ class _ThreadScreenState extends State<ThreadScreen>
         imagePicker: _imagePicker,
         imgurUploader: _imgurUploader,
         imageUploadSettings: _imageUploadSettings,
-        pickAndUploadImage: widget.pickAndUploadImage,
+        pickAndUploadImages: widget.pickAndUploadImages,
         defaultName: widget.defaultName,
       ),
     );
@@ -1586,10 +1587,14 @@ class _ThreadScreenState extends State<ThreadScreen>
 
   // ---- 書き込み ----
 
-  Future<Uri?> _pickAndUploadImage() async {
-    final injected = widget.pickAndUploadImage;
+  Future<List<Uri>> _pickAndUploadImages() async {
+    final injected = widget.pickAndUploadImages;
     if (injected != null) return injected();
-    return _uploader.pickAndUploadImage(_showSnackIfMounted);
+    return _uploader.pickAndUploadImages(
+      _showSnackIfMounted,
+      prepare: (picked) async =>
+          mounted ? prepareImagesForUpload(context, picked) : picked,
+    );
   }
 
   Future<Uri?> _pickAndUploadFile() async {
@@ -1766,7 +1771,7 @@ class _ThreadScreenState extends State<ThreadScreen>
               controller: _composer,
               focusNode: _composerFocus,
               onSend: _submit,
-              onPickAndUploadImage: _pickAndUploadImage,
+              onPickAndUploadImages: _pickAndUploadImages,
               onPickAndUploadFile: _pickAndUploadFile,
               enabled: _canWrite,
             ),
@@ -2489,7 +2494,7 @@ class _ConversationSheet extends StatefulWidget {
     required this.onTapReplies,
     required this.onTapUrl,
     required this.onSend,
-    required this.onPickAndUploadImage,
+    required this.onPickAndUploadImages,
     required this.onPickAndUploadFile,
     required this.onShowActions,
     required this.isOwnPost,
@@ -2520,7 +2525,7 @@ class _ConversationSheet extends StatefulWidget {
   final Future<bool> Function(String) onSend;
 
   /// 画像選択とアップロード。成功時はレス本文へ挿入する URL を返す。
-  final Future<Uri?> Function() onPickAndUploadImage;
+  final Future<List<Uri>> Function() onPickAndUploadImages;
 
   /// ファイル選択とアップロード。成功時はレス本文へ挿入する URL を返す。
   final Future<Uri?> Function() onPickAndUploadFile;
@@ -2702,7 +2707,7 @@ class _ConversationSheetState extends State<_ConversationSheet> {
                   controller: _controller,
                   focusNode: _focus,
                   onSend: _handleSend,
-                  onPickAndUploadImage: widget.onPickAndUploadImage,
+                  onPickAndUploadImages: widget.onPickAndUploadImages,
                   onPickAndUploadFile: widget.onPickAndUploadFile,
                   enabled: widget.enabled,
                 ),
@@ -2833,7 +2838,7 @@ class _Composer extends StatefulWidget {
     required this.controller,
     required this.focusNode,
     required this.onSend,
-    required this.onPickAndUploadImage,
+    required this.onPickAndUploadImages,
     required this.onPickAndUploadFile,
     required this.enabled,
   });
@@ -2843,7 +2848,7 @@ class _Composer extends StatefulWidget {
 
   /// 送信。受理されたら true を返す（入力欄をクリアする）。
   final Future<bool> Function(String) onSend;
-  final Future<Uri?> Function() onPickAndUploadImage;
+  final Future<List<Uri>> Function() onPickAndUploadImages;
   final Future<Uri?> Function() onPickAndUploadFile;
   final bool enabled;
 
@@ -2918,8 +2923,11 @@ class _ComposerState extends State<_Composer> {
     }
     setState(() => _uploadingImage = true);
     try {
-      final url = await widget.onPickAndUploadImage();
-      if (url != null) _insertUrl(url.toString());
+      // 複数枚のときは選んだ順に URL を積む。挿入のたびにカーソルが後ろへ
+      // 進むので、そのまま並べれば 1 行 1 URL になる。
+      for (final url in await widget.onPickAndUploadImages()) {
+        _insertUrl(url.toString());
+      }
     } finally {
       if (mounted) setState(() => _uploadingImage = false);
     }
