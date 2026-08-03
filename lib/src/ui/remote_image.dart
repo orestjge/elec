@@ -25,6 +25,8 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
+import '../net/image_cache_store.dart';
+
 /// これを超える画像は自動で読み込まない（利用者がタップしたら読む）。
 ///
 /// 掲示板に貼られる写真はおおむね数 MB に収まる。それを大きく超えるものは
@@ -220,8 +222,12 @@ class RemoteImage extends ImageProvider<RemoteImage> {
     ImageDecoderCallback decode,
   ) async {
     try {
-      // 同じ URL を別の大きさで開き直したときは、落とし直さず本文を使い回す。
-      final bytes = _BytesCache.get(url) ?? await _fetch(chunkEvents);
+      // 本文は 3 段で探す。メモリ（直前に見たもの）→ ディスク（前に見たもの）
+      // → 通信。同じ URL を別の大きさで開き直すたびに落とすのは無駄なので。
+      final bytes =
+          _BytesCache.get(url) ??
+          await _readFromDisk(url) ??
+          await _fetch(chunkEvents);
       if (bytes.isEmpty) throw Exception('empty image: $url');
       final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
       return await decode(buffer, getTargetSize: _targetSize);
@@ -233,6 +239,14 @@ class RemoteImage extends ImageProvider<RemoteImage> {
     } finally {
       unawaited(chunkEvents.close());
     }
+  }
+
+  /// ディスクに覚えているものを読む。読めたらメモリ側にも載せる。
+  Future<Uint8List?> _readFromDisk(Uri url) async {
+    final bytes = await ImageCacheStore.shared.read(url);
+    if (bytes == null) return null;
+    _BytesCache.put(url, bytes);
+    return bytes;
   }
 
   /// 上限を超えないよう打ち切りながら本文を受け取る。
@@ -289,6 +303,8 @@ class RemoteImage extends ImageProvider<RemoteImage> {
         ImageLoadPolicy.remember(url, received);
         final bytes = builder.takeBytes();
         _BytesCache.put(url, bytes);
+        // 書き終わりを待つ必要はない（表示はもう進められる）。
+        unawaited(ImageCacheStore.shared.write(url, bytes));
         completer.complete(bytes);
       },
       onError: (Object e, StackTrace s) {

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
@@ -6,6 +8,7 @@ import 'src/net/board.dart';
 import 'src/net/board_store.dart';
 import 'src/net/endpoints.dart';
 import 'src/net/file_upload_settings.dart';
+import 'src/net/image_cache_store.dart';
 import 'src/net/image_upload_settings.dart';
 import 'src/net/ng_store.dart';
 import 'src/net/read_history.dart';
@@ -23,6 +26,9 @@ Future<void> main() async {
     ReadHistory.shared.load(),
     NgStore.shared.load(),
   ]);
+  // 画像キャッシュの置き場を用意して、溜まっているぶんを刈る。表示を待たせる
+  // 必要は無いので待たない。
+  unawaited(ImageCacheStore.shared.open());
   runApp(const ElecApp());
 }
 

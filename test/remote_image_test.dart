@@ -3,6 +3,7 @@ import 'dart:io' as io;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:elec/src/net/image_cache_store.dart';
 import 'package:elec/src/ui/format.dart';
 import 'package:elec/src/ui/post_images.dart';
 import 'package:elec/src/ui/remote_image.dart';
@@ -118,14 +119,33 @@ Future<ImageInfo> _resolve(ImageProvider provider) {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  late io.Directory cacheDir;
+
   setUp(() {
     ImageLoadPolicy.reset();
     PaintingBinding.instance.imageCache.clear();
     PaintingBinding.instance.imageCache.clearLiveImages();
     RemoteImage.resetClient();
+    // ディスクキャッシュはテストごとに使い捨てる。既定のままだと
+    // path_provider がテスト環境で解決できず、当たり外れが分かりにくい。
+    cacheDir = io.Directory.systemTemp.createTempSync('elec_remote_image');
+    ImageCacheStore.shared = ImageCacheStore(directory: cacheDir);
   });
 
-  tearDown(RemoteImage.resetClient);
+  tearDown(() {
+    RemoteImage.resetClient();
+    ImageCacheStore.resetShared();
+    if (cacheDir.existsSync()) cacheDir.deleteSync(recursive: true);
+  });
+
+  /// ディスクへの書き込みは表示を待たせないよう投げっぱなしにしてある。
+  /// 落ち着くまで少しだけ待つ。
+  Future<void> waitForDiskWrite(Uri url) async {
+    for (var i = 0; i < 50; i++) {
+      if (await ImageCacheStore.shared.read(url) != null) return;
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+  }
 
   test('大きすぎる画像は本文を読まずに諦める', () async {
     final url = Uri.parse('https://example.com/huge.jpg');
@@ -215,6 +235,29 @@ void main() {
           throwsA(anything),
         );
       }
+    }, createHttpClient: (_) => client);
+
+    expect(client.requests, 1);
+  });
+
+  test('前に見た画像はディスクから読み、通信し直さない', () async {
+    final url = Uri.parse('https://example.com/again.png');
+    final bytes = await _png(400, 300);
+    final client = _FakeHttpClient(
+      _FakeResponse(bytes, contentLength: bytes.length),
+    );
+
+    await io.HttpOverrides.runZoned(() async {
+      RemoteImage.resetClient();
+      await _resolve(RemoteImage(url, target: const Size(160, 160)));
+      await waitForDiskWrite(url);
+
+      // アプリを開き直した状態にする（メモリ側は全部捨てる）。
+      RemoteImage.resetClient();
+      PaintingBinding.instance.imageCache.clear();
+      PaintingBinding.instance.imageCache.clearLiveImages();
+
+      await _resolve(RemoteImage(url, target: const Size(160, 160)));
     }, createHttpClient: (_) => client);
 
     expect(client.requests, 1);
