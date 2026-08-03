@@ -248,7 +248,13 @@ class _ThumbState extends State<_Thumb> {
                   return _Placeholder(
                     size: widget.size,
                     color: scheme.surfaceContainerHighest,
-                    child: const CircularProgressIndicator(strokeWidth: 2),
+                    // 何割まで来たかが分かると、止まっているのか進んでいるのか
+                    // が読める。バイト数はサムネイルが小さいときは出さない。
+                    child: _LoadProgress(
+                      progress: progress,
+                      showBytes: widget.size >= 120,
+                      color: scheme.onSurfaceVariant,
+                    ),
                   );
                 },
                 errorBuilder: (context, error, stack) {
@@ -584,6 +590,53 @@ class _EmbedThumb extends StatelessWidget {
   }
 }
 
+/// 読み込み中の進み具合。全体の大きさが分かっていれば「1.2MB / 3.4MB」と
+/// 何割まで来たかを出す。Content-Length を返さないホストでは総量が分からない
+/// ので、受け取ったぶんだけを出して回り続ける。
+class _LoadProgress extends StatelessWidget {
+  const _LoadProgress({
+    required this.progress,
+    required this.showBytes,
+    required this.color,
+  });
+
+  final ImageChunkEvent progress;
+  final bool showBytes;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final total = progress.expectedTotalBytes;
+    final loaded = progress.cumulativeBytesLoaded;
+    final ratio = total == null || total <= 0 ? null : loaded / total;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox(
+          width: 28,
+          height: 28,
+          child: CircularProgressIndicator(
+            strokeWidth: 2,
+            value: ratio,
+            color: color,
+          ),
+        ),
+        if (showBytes) ...[
+          const SizedBox(height: 8),
+          Text(
+            total == null
+                ? formatBytes(loaded)
+                : '${formatBytes(loaded)} / ${formatBytes(total)}',
+            style: Theme.of(
+              context,
+            ).textTheme.labelSmall?.copyWith(color: color),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
 class _Placeholder extends StatelessWidget {
   const _Placeholder({
     required this.color,
@@ -778,8 +831,7 @@ class _ImageViewerState extends State<_ImageViewer> {
     _activePointers.remove(event.pointer);
     if (_swiping) {
       // 指が動いた分のうち、画像が動かなかった分＝端から引っぱった分。
-      final overscroll =
-          (_dragDx - _swipeAnchorDx) - (_imageX - _swipeAnchorX);
+      final overscroll = (_dragDx - _swipeAnchorDx) - (_imageX - _swipeAnchorX);
       if (overscroll.abs() > _swipeDistance) {
         _turnPage(overscroll < 0 ? 1 : -1);
       }
@@ -1104,7 +1156,13 @@ class _ZoomableImageState extends State<_ZoomableImage> {
                 fit: BoxFit.contain,
                 loadingBuilder: (context, child, progress) => progress == null
                     ? child
-                    : const Center(child: CircularProgressIndicator()),
+                    : Center(
+                        child: _LoadProgress(
+                          progress: progress,
+                          showBytes: true,
+                          color: Colors.white70,
+                        ),
+                      ),
                 errorBuilder: (context, error, stack) => const Center(
                   child: Icon(
                     Icons.broken_image_outlined,

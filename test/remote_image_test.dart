@@ -3,6 +3,7 @@ import 'dart:io' as io;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:elec/src/net/image_cache_store.dart';
 import 'package:elec/src/ui/format.dart';
 import 'package:elec/src/ui/post_images.dart';
 import 'package:elec/src/ui/remote_image.dart';
@@ -67,8 +68,14 @@ class _FakeHttpClient implements io.HttpClient {
   _FakeHttpClient(this.response);
   final _FakeResponse response;
 
+  /// 何回取りに行ったか。二度落としていないかを見る。
+  int requests = 0;
+
   @override
-  Future<io.HttpClientRequest> getUrl(Uri url) async => _FakeRequest(response);
+  Future<io.HttpClientRequest> getUrl(Uri url) async {
+    requests += 1;
+    return _FakeRequest(response);
+  }
 
   @override
   void close({bool force = false}) {}
@@ -112,14 +119,33 @@ Future<ImageInfo> _resolve(ImageProvider provider) {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  late io.Directory cacheDir;
+
   setUp(() {
     ImageLoadPolicy.reset();
     PaintingBinding.instance.imageCache.clear();
     PaintingBinding.instance.imageCache.clearLiveImages();
     RemoteImage.resetClient();
+    // ディスクキャッシュはテストごとに使い捨てる。既定のままだと
+    // path_provider がテスト環境で解決できず、当たり外れが分かりにくい。
+    cacheDir = io.Directory.systemTemp.createTempSync('elec_remote_image');
+    ImageCacheStore.shared = ImageCacheStore(directory: cacheDir);
   });
 
-  tearDown(RemoteImage.resetClient);
+  tearDown(() {
+    RemoteImage.resetClient();
+    ImageCacheStore.resetShared();
+    if (cacheDir.existsSync()) cacheDir.deleteSync(recursive: true);
+  });
+
+  /// ディスクへの書き込みは表示を待たせないよう投げっぱなしにしてある。
+  /// 落ち着くまで少しだけ待つ。
+  Future<void> waitForDiskWrite(Uri url) async {
+    for (var i = 0; i < 50; i++) {
+      if (await ImageCacheStore.shared.read(url) != null) return;
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+  }
 
   test('大きすぎる画像は本文を読まずに諦める', () async {
     final url = Uri.parse('https://example.com/huge.jpg');
@@ -158,6 +184,83 @@ void main() {
         throwsA(isA<ImageTooLargeException>()),
       );
     }, createHttpClient: (_) => _FakeHttpClient(response));
+  });
+
+  test('同じ画像を別の大きさで開いても、落とすのは一度だけ', () async {
+    final url = Uri.parse('https://example.com/photo.png');
+    final bytes = await _png(400, 300);
+    final client = _FakeHttpClient(
+      _FakeResponse(bytes, contentLength: bytes.length),
+    );
+
+    await io.HttpOverrides.runZoned(() async {
+      RemoteImage.resetClient();
+      // サムネイル相当 → 全画面相当。目標サイズが違うので ImageCache には
+      // 当たらないが、本文は使い回せる。
+      final thumb = await _resolve(
+        RemoteImage(url, target: const Size(160, 160), cover: true),
+      );
+      final full = await _resolve(
+        RemoteImage(url, target: const Size(1200, 900)),
+      );
+      // デコードは表示サイズごとにやり直す（ここは使い回せない）。
+      expect(thumb.image.width, lessThan(full.image.width));
+    }, createHttpClient: (_) => client);
+
+    expect(client.requests, 1);
+  });
+
+  test('大きい画像ほど覚える価値がある（置き場の合計を超えても捨てない）', () async {
+    // 自動読み込みの上限（8MiB）を超える＝利用者がタップして読み込むと決めた
+    // 大きさ。一番待たされるものなので、開き直しで落とし直さないこと。
+    final huge = Uint8List(12 << 20);
+    final client = _FakeHttpClient(
+      _FakeResponse(huge, contentLength: huge.length),
+    );
+    final url = Uri.parse('https://example.com/huge.png');
+
+    await io.HttpOverrides.runZoned(() async {
+      RemoteImage.resetClient();
+      ImageLoadPolicy.allow(url);
+      // 中身は画像として読めないのでデコードは失敗するが、本文は覚えている。
+      for (var i = 0; i < 2; i++) {
+        await expectLater(
+          _resolve(
+            RemoteImage(
+              url,
+              target: Size.square(160.0 * (i + 1)),
+              maxBytes: imageHardMaxBytes,
+            ),
+          ),
+          throwsA(anything),
+        );
+      }
+    }, createHttpClient: (_) => client);
+
+    expect(client.requests, 1);
+  });
+
+  test('前に見た画像はディスクから読み、通信し直さない', () async {
+    final url = Uri.parse('https://example.com/again.png');
+    final bytes = await _png(400, 300);
+    final client = _FakeHttpClient(
+      _FakeResponse(bytes, contentLength: bytes.length),
+    );
+
+    await io.HttpOverrides.runZoned(() async {
+      RemoteImage.resetClient();
+      await _resolve(RemoteImage(url, target: const Size(160, 160)));
+      await waitForDiskWrite(url);
+
+      // アプリを開き直した状態にする（メモリ側は全部捨てる）。
+      RemoteImage.resetClient();
+      PaintingBinding.instance.imageCache.clear();
+      PaintingBinding.instance.imageCache.clearLiveImages();
+
+      await _resolve(RemoteImage(url, target: const Size(160, 160)));
+    }, createHttpClient: (_) => client);
+
+    expect(client.requests, 1);
   });
 
   test('取得に失敗した画像は大きさを覚えない', () async {

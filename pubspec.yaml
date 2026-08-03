@@ -49,8 +49,11 @@ dependencies:
   # 認証ページ(/auth-code)をシステムブラウザで開く。macOS/Android/iOS 共通。
   url_launcher: ^6.3.0
 
-  # トークン保存先のディレクトリ解決。
+  # トークン保存先と画像キャッシュのディレクトリ解決。
   path_provider: ^2.1.0
+
+  # 画像キャッシュのファイル名（URL の SHA-1）。
+  crypto: ^3.0.0
 
   # レスのインデックス指定スクロール（前回位置から開く・最新へ）と可視レス追跡。
   scrollable_positioned_list: ^0.3.8

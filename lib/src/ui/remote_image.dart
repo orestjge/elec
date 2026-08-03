@@ -23,7 +23,9 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/painting.dart';
+import 'package:flutter/widgets.dart';
+
+import '../net/image_cache_store.dart';
 
 /// これを超える画像は自動で読み込まない（利用者がタップしたら読む）。
 ///
@@ -91,6 +93,71 @@ class ImageLoadPolicy {
   }
 }
 
+/// 取得した本文を直近のぶんだけ覚えておく置き場。
+///
+/// **サムネイルと全画面は目標サイズが違う＝別のキャッシュ key** なので、
+/// サムネイルをタップして開くと `ImageCache` には当たらず取り直しになる。
+/// デコードのやり直しは表示サイズが違う以上どうしようもないが、**同じ URL を
+/// 二度落とすのは無駄**（開くたびに待たされる）。直近のものだけ本文を持っておき、
+/// 開いたときは通信を省いてデコードだけで済ませる。
+class _BytesCache {
+  _BytesCache._();
+
+  /// 置き場の合計。デコード後の画像はこれとは別に `ImageCache` が持つので、
+  /// 欲張らず数枚ぶんに留める。
+  ///
+  /// ただし**大きさで覚える対象を選り好みはしない**。上限を超える画像は利用者が
+  /// タップして読み込むと決めたもの＝一番待たされたもので、それを覚えないのでは
+  /// 開き直すたびに待たせることになる。合計を超えたときは古い方から捨てるが、
+  /// **最後の 1 枚は必ず残す**ので、大きい画像はそれ 1 枚だけが残る形になる。
+  static const int _budget = 24 << 20; // 24MiB
+
+  /// 挿入順を保つ Map。先頭が一番古い。
+  static final Map<String, Uint8List> _entries = {};
+  static int _total = 0;
+  static bool _observing = false;
+
+  static Uint8List? get(Uri url) {
+    final key = url.toString();
+    final bytes = _entries.remove(key);
+    if (bytes == null) return null;
+    _entries[key] = bytes; // 使ったものを新しい側へ回す
+    return bytes;
+  }
+
+  static void put(Uri url, Uint8List bytes) {
+    _observeMemoryPressure();
+    final key = url.toString();
+    final old = _entries.remove(key);
+    if (old != null) _total -= old.length;
+    _entries[key] = bytes;
+    _total += bytes.length;
+    while (_total > _budget && _entries.length > 1) {
+      final oldest = _entries.keys.first;
+      _total -= _entries.remove(oldest)!.length;
+    }
+  }
+
+  /// 端末がメモリを欲しがったら真っ先に手放す。ここは無くても表示できる
+  /// （通信し直すだけ）ので、抱えたまま落ちるより捨てた方がよい。
+  static void _observeMemoryPressure() {
+    if (_observing) return;
+    _observing = true;
+    WidgetsBinding.instance.addObserver(_MemoryPressureObserver());
+  }
+
+  @visibleForTesting
+  static void clear() {
+    _entries.clear();
+    _total = 0;
+  }
+}
+
+class _MemoryPressureObserver with WidgetsBindingObserver {
+  @override
+  void didHaveMemoryPressure() => _BytesCache.clear();
+}
+
 /// バイト数と表示サイズに上限を掛けて画像を読む [ImageProvider]。
 ///
 /// [target] は**物理ピクセル**での目標サイズ（論理サイズ × devicePixelRatio）。
@@ -122,10 +189,12 @@ class RemoteImage extends ImageProvider<RemoteImage> {
   static io.HttpClient get _client => _sharedClient ??= io.HttpClient();
 
   /// テストの `HttpOverrides` 差し替えに追従できるよう、共有クライアントを捨てる。
+  /// 覚えている本文も一緒に捨てる（前のテストの結果を使い回さない）。
   @visibleForTesting
   static void resetClient() {
     _sharedClient?.close(force: true);
     _sharedClient = null;
+    _BytesCache.clear();
   }
 
   @override
@@ -153,7 +222,12 @@ class RemoteImage extends ImageProvider<RemoteImage> {
     ImageDecoderCallback decode,
   ) async {
     try {
-      final bytes = await _fetch(chunkEvents);
+      // 本文は 3 段で探す。メモリ（直前に見たもの）→ ディスク（前に見たもの）
+      // → 通信。同じ URL を別の大きさで開き直すたびに落とすのは無駄なので。
+      final bytes =
+          _BytesCache.get(url) ??
+          await _readFromDisk(url) ??
+          await _fetch(chunkEvents);
       if (bytes.isEmpty) throw Exception('empty image: $url');
       final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
       return await decode(buffer, getTargetSize: _targetSize);
@@ -165,6 +239,14 @@ class RemoteImage extends ImageProvider<RemoteImage> {
     } finally {
       unawaited(chunkEvents.close());
     }
+  }
+
+  /// ディスクに覚えているものを読む。読めたらメモリ側にも載せる。
+  Future<Uint8List?> _readFromDisk(Uri url) async {
+    final bytes = await ImageCacheStore.shared.read(url);
+    if (bytes == null) return null;
+    _BytesCache.put(url, bytes);
+    return bytes;
   }
 
   /// 上限を超えないよう打ち切りながら本文を受け取る。
@@ -219,7 +301,11 @@ class RemoteImage extends ImageProvider<RemoteImage> {
       onDone: () {
         if (completer.isCompleted) return;
         ImageLoadPolicy.remember(url, received);
-        completer.complete(builder.takeBytes());
+        final bytes = builder.takeBytes();
+        _BytesCache.put(url, bytes);
+        // 書き終わりを待つ必要はない（表示はもう進められる）。
+        unawaited(ImageCacheStore.shared.write(url, bytes));
+        completer.complete(bytes);
       },
       onError: (Object e, StackTrace s) {
         if (!completer.isCompleted) completer.completeError(e, s);
