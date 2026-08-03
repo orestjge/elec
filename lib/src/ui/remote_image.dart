@@ -103,10 +103,12 @@ class _BytesCache {
 
   /// 置き場の合計。デコード後の画像はこれとは別に `ImageCache` が持つので、
   /// 欲張らず数枚ぶんに留める。
+  ///
+  /// ただし**大きさで覚える対象を選り好みはしない**。上限を超える画像は利用者が
+  /// タップして読み込むと決めたもの＝一番待たされたもので、それを覚えないのでは
+  /// 開き直すたびに待たせることになる。合計を超えたときは古い方から捨てるが、
+  /// **最後の 1 枚は必ず残す**ので、大きい画像はそれ 1 枚だけが残る形になる。
   static const int _budget = 24 << 20; // 24MiB
-
-  /// 1 枚で置き場を埋めないよう、大きすぎるものは覚えない。
-  static const int _maxEntry = _budget ~/ 3;
 
   /// 挿入順を保つ Map。先頭が一番古い。
   static final Map<String, Uint8List> _entries = {};
@@ -122,7 +124,6 @@ class _BytesCache {
   }
 
   static void put(Uri url, Uint8List bytes) {
-    if (bytes.length > _maxEntry) return;
     _observeMemoryPressure();
     final key = url.toString();
     final old = _entries.remove(key);

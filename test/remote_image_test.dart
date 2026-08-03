@@ -190,6 +190,36 @@ void main() {
     expect(client.requests, 1);
   });
 
+  test('大きい画像ほど覚える価値がある（置き場の合計を超えても捨てない）', () async {
+    // 自動読み込みの上限（8MiB）を超える＝利用者がタップして読み込むと決めた
+    // 大きさ。一番待たされるものなので、開き直しで落とし直さないこと。
+    final huge = Uint8List(12 << 20);
+    final client = _FakeHttpClient(
+      _FakeResponse(huge, contentLength: huge.length),
+    );
+    final url = Uri.parse('https://example.com/huge.png');
+
+    await io.HttpOverrides.runZoned(() async {
+      RemoteImage.resetClient();
+      ImageLoadPolicy.allow(url);
+      // 中身は画像として読めないのでデコードは失敗するが、本文は覚えている。
+      for (var i = 0; i < 2; i++) {
+        await expectLater(
+          _resolve(
+            RemoteImage(
+              url,
+              target: Size.square(160.0 * (i + 1)),
+              maxBytes: imageHardMaxBytes,
+            ),
+          ),
+          throwsA(anything),
+        );
+      }
+    }, createHttpClient: (_) => client);
+
+    expect(client.requests, 1);
+  });
+
   test('取得に失敗した画像は大きさを覚えない', () async {
     final url = Uri.parse('https://example.com/gone.jpg');
     final response = _FakeResponse(
