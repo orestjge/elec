@@ -67,8 +67,14 @@ class _FakeHttpClient implements io.HttpClient {
   _FakeHttpClient(this.response);
   final _FakeResponse response;
 
+  /// 何回取りに行ったか。二度落としていないかを見る。
+  int requests = 0;
+
   @override
-  Future<io.HttpClientRequest> getUrl(Uri url) async => _FakeRequest(response);
+  Future<io.HttpClientRequest> getUrl(Uri url) async {
+    requests += 1;
+    return _FakeRequest(response);
+  }
 
   @override
   void close({bool force = false}) {}
@@ -158,6 +164,30 @@ void main() {
         throwsA(isA<ImageTooLargeException>()),
       );
     }, createHttpClient: (_) => _FakeHttpClient(response));
+  });
+
+  test('同じ画像を別の大きさで開いても、落とすのは一度だけ', () async {
+    final url = Uri.parse('https://example.com/photo.png');
+    final bytes = await _png(400, 300);
+    final client = _FakeHttpClient(
+      _FakeResponse(bytes, contentLength: bytes.length),
+    );
+
+    await io.HttpOverrides.runZoned(() async {
+      RemoteImage.resetClient();
+      // サムネイル相当 → 全画面相当。目標サイズが違うので ImageCache には
+      // 当たらないが、本文は使い回せる。
+      final thumb = await _resolve(
+        RemoteImage(url, target: const Size(160, 160), cover: true),
+      );
+      final full = await _resolve(
+        RemoteImage(url, target: const Size(1200, 900)),
+      );
+      // デコードは表示サイズごとにやり直す（ここは使い回せない）。
+      expect(thumb.image.width, lessThan(full.image.width));
+    }, createHttpClient: (_) => client);
+
+    expect(client.requests, 1);
   });
 
   test('取得に失敗した画像は大きさを覚えない', () async {
