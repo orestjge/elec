@@ -110,8 +110,9 @@ void main() {
           fetcher: poster,
           authStore: AuthStore(MemoryTokenStorage()),
           authLauncher: FakeLauncher(),
-          pickAndUploadImage: () async =>
-              Uri.parse('https://i.imgur.com/example.jpg'),
+          pickAndUploadImages: () async => [
+            Uri.parse('https://i.imgur.com/example.jpg'),
+          ],
         ),
       ),
     );

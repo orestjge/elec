@@ -434,8 +434,9 @@ void main() {
           authLauncher: FakeLauncher(),
           pollInterval: const Duration(seconds: 60),
           readHistory: ReadHistory(MemoryReadHistoryStorage()),
-          pickAndUploadImage: () async =>
-              Uri.parse('https://i.imgur.com/example.jpg'),
+          pickAndUploadImages: () async => [
+            Uri.parse('https://i.imgur.com/example.jpg'),
+          ],
         ),
       ),
     );

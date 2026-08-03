@@ -11,6 +11,7 @@ import '../net/http_fetcher.dart';
 import 'attachment_uploader.dart';
 import 'compose_style.dart';
 import 'embed_urls.dart';
+import 'image_set_screen.dart';
 import 'image_urls.dart';
 import 'post_images.dart';
 import 'write_auth.dart';
@@ -25,7 +26,7 @@ class NewThreadScreen extends StatefulWidget {
     this.authStore,
     this.authLauncher = const SystemBrowserLauncher(),
     this.attachmentUploader,
-    this.pickAndUploadImage,
+    this.pickAndUploadImages,
     this.pickAndUploadFile,
     this.maxTitle,
     this.maxBody,
@@ -52,7 +53,7 @@ class NewThreadScreen extends StatefulWidget {
   final AttachmentUploader? attachmentUploader;
 
   /// テスト用に画像・ファイル選択を差し替えるフック。指定時は実際の選択を行わない。
-  final Future<Uri?> Function()? pickAndUploadImage;
+  final Future<List<Uri>> Function()? pickAndUploadImages;
   final Future<Uri?> Function()? pickAndUploadFile;
 
   @override
@@ -141,10 +142,17 @@ class _NewThreadScreenState extends State<NewThreadScreen> {
     if (_busy) return;
     setState(() => _uploadingImage = true);
     try {
-      final url =
-          await (widget.pickAndUploadImage?.call() ??
-              _uploader.pickAndUploadImage(_showSnack));
-      if (url != null) _insertUrl(url.toString());
+      final urls =
+          await (widget.pickAndUploadImages?.call() ??
+              _uploader.pickAndUploadImages(
+                _showSnack,
+                prepare: (picked) async =>
+                    mounted ? prepareImagesForUpload(context, picked) : picked,
+              ));
+      // 複数枚のときは選んだ順に URL を積む。
+      for (final url in urls) {
+        _insertUrl(url.toString());
+      }
     } finally {
       if (mounted) setState(() => _uploadingImage = false);
     }
