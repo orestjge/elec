@@ -12,6 +12,7 @@ import '../net/endpoints.dart';
 import '../net/http_fetcher.dart';
 import '../net/ng_store.dart';
 import '../net/read_history.dart';
+import '../net/thread_sort_settings.dart';
 import 'board_catalog_screen.dart';
 import 'new_thread_screen.dart';
 import 'settings_screen.dart';
@@ -70,6 +71,7 @@ class ThreadListScreen extends StatefulWidget {
     this.pollInterval = const Duration(seconds: 5),
     this.readHistory,
     this.authStore,
+    this.sortSettings,
   });
 
   /// 表示中の板。タイトル・機能ゲート・ドロワーの現在選択に使う。
@@ -84,6 +86,9 @@ class ThreadListScreen extends StatefulWidget {
 
   /// 書き込み認証情報。既定はアプリ共有インスタンス（テストで差し替え可能）。
   final AuthStore? authStore;
+
+  /// 覚えておく並べ替え。既定はアプリ共有インスタンス（テストで差し替え可能）。
+  final ThreadSortSettings? sortSettings;
 
   /// 自動更新の間隔（フォアグラウンド時）。
   ///
@@ -119,6 +124,9 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   /// 新着ありは母集団が「開いた＆未読レスが残っている」スレだけ＝
   /// [ThreadSort.unreadFirst] では全部が同じ群に入り、並べても bump 順のままな
   /// ので、そちらは最近レス順のままにする。
+  ///
+  /// 現行だけは、シートで選んだものを覚えてこの既定を上書きする
+  /// （[ThreadSortSettings]）。
   static const Map<ThreadFilter, ThreadSort> _defaultSort = {
     ThreadFilter.current: ThreadSort.unreadFirst,
     ThreadFilter.unreadNew: ThreadSort.bump,
@@ -127,7 +135,11 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   };
 
   /// ユーザーが表示ごとに選んだ並び。未選択なら [_defaultSort] に従う。
+  /// 現行のぶんは保存済みの並びで初期化する（[initState]）。
   final Map<ThreadFilter, ThreadSort> _sortByFilter = {};
+
+  ThreadSortSettings get _sortSettings =>
+      widget.sortSettings ?? ThreadSortSettings.shared;
 
   /// 現在の表示に適用する並び。
   ThreadSort get _sort => _sortByFilter[_filter] ?? _defaultSort[_filter]!;
@@ -193,6 +205,11 @@ class _ThreadListScreenState extends State<ThreadListScreen>
       encoding: widget.endpoints.textEncoding,
     );
     _history = widget.readHistory ?? ReadHistory.shared;
+    // 前回シートで選んだ現行の並び。起動時に読み込み済みなので同期で取れる。
+    final savedSort = ThreadSort.values
+        .where((s) => s.name == _sortSettings.currentSort)
+        .firstOrNull;
+    if (savedSort != null) _sortByFilter[ThreadFilter.current] = savedSort;
     _refreshListedSnapshot();
     // 前回見ていたスレを控えに置く。表に出るまで取得もポーリングもしないので、
     // 置くだけならただの待機（[ThreadScreen.active] 参照）。
@@ -606,9 +623,21 @@ class _ThreadListScreenState extends State<ThreadListScreen>
               children: [
                 Padding(
                   padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
-                  child: Text(
-                    '並べ替え',
-                    style: Theme.of(context).textTheme.titleMedium,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '並べ替え',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      // 覚えるのは現行だけなので、そこだけ書き添える。
+                      if (_filter == ThreadFilter.current)
+                        Text(
+                          '選択した並びは保持されます',
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: scheme.onSurfaceVariant),
+                        ),
+                    ],
                   ),
                 ),
                 for (final s in ThreadSort.values)
@@ -637,6 +666,10 @@ class _ThreadListScreenState extends State<ThreadListScreen>
         _sortByFilter[_filter] = picked;
         _reorder(); // ソート変更は明示操作なので並び順を貼り直す
       });
+      // 現行の並びだけ、次に開いたときの既定として覚える。
+      if (_filter == ThreadFilter.current) {
+        unawaited(_sortSettings.saveCurrentSort(picked.name));
+      }
     }
   }
 
