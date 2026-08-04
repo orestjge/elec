@@ -162,7 +162,7 @@ class _ThreadScreenState extends State<ThreadScreen>
   /// 初回表示で合わせるインデックス（前回位置 / 末尾 / 先頭）。
   int _initialIndex = 0;
 
-  /// 末尾（最新レス）が画面に見えているか。追従・「最新へ」ボタンに使う。
+  /// 末尾（最新レス）が画面に見えているか。新着の自動追従に使う。
   bool _atBottomNow = false;
 
   DatState _state = DatState.empty;
@@ -180,7 +180,7 @@ class _ThreadScreenState extends State<ThreadScreen>
   bool _stoppedNoticeShown = false;
 
   /// スクロールで実際に見えた最大レス番号（＝どこまで読んだか）。可視性で
-  /// 追跡する。これより後ろのレスが「未読」で、「最新へ」の件数の基準になる。
+  /// 追跡し、スレ一覧の既読位置として保存する。
   int _furthestRead = 0;
 
   /// 一度でも取得を始めたか。控えのまま一度も表に出ていない画面は false。
@@ -358,7 +358,7 @@ class _ThreadScreenState extends State<ThreadScreen>
     _timer = Timer.periodic(widget.pollInterval, (_) => _poll());
   }
 
-  /// 末尾（最新レス）が見えているか。追従・「最新へ」ボタンに使う。
+  /// 末尾（最新レス）が見えているか。新着の自動追従に使う。
   bool get _atBottom => _state.res.isEmpty || _atBottomNow;
 
   String? get _statusLabel => _statusLabelWith(widget.initialStatusLabel);
@@ -573,12 +573,10 @@ class _ThreadScreenState extends State<ThreadScreen>
       if (p.index == lastIndex && p.itemTrailingEdge <= 1.0001) atBottom = true;
     }
     final readAdvanced = maxRes > _furthestRead;
-    if (maxRes != _furthestRead || atBottom != _atBottomNow) {
-      setState(() {
-        _furthestRead = maxRes;
-        _atBottomNow = atBottom;
-      });
-    }
+    // どちらも表示には出ない（既読の保存と新着追従の判定にだけ使う）ので、
+    // スクロールのたびに一覧を組み直さないよう setState は挟まない。
+    _furthestRead = maxRes;
+    _atBottomNow = atBottom;
     if (readAdvanced) _persistReadPosition(maxRes);
   }
 
@@ -622,7 +620,7 @@ class _ThreadScreenState extends State<ThreadScreen>
     return '';
   }
 
-  /// 「最新へ」ボタン・追従で末尾へスクロールする。
+  /// 追従・書き込み後などに末尾へスクロールする。
   void _scrollToBottom() {
     if (!_itemScroll.isAttached || _items.isEmpty) return;
     if (_contentFitsViewport()) {
@@ -846,8 +844,10 @@ class _ThreadScreenState extends State<ThreadScreen>
   }
 
   /// レスの長押しで出すアクション。対象レスの内容を上部に出し、その下に
-  /// 全体コピー・本文コピー・ID コピー・必死の操作を並べる。
-  void _showResActions(Res res) {
+  /// 返信・全体コピー・本文コピー・ID コピー・必死の操作を並べる。
+  /// [onReply] を渡すと返信の宛先をそちらの入力欄にできる（会話シートなど、
+  /// main の入力欄がシートに隠れている場面用）。
+  void _showResActions(Res res, {void Function(int)? onReply}) {
     final id = res.id;
     final idCount = _idCounts(_state.res)[id] ?? 1;
     final idOrdinal = _idOrdinals(_state.res)[res.number] ?? 1;
@@ -891,6 +891,17 @@ class _ThreadScreenState extends State<ThreadScreen>
                 ),
               ),
               const Divider(height: 1),
+              // 返信アイコンも小さいので、ここからも `>>N` を入れられるように
+              // しておく。書き込めないスレ・板では出さない。
+              if (_canWrite)
+                ListTile(
+                  leading: const Icon(Icons.reply),
+                  title: Text('>>${res.number} に返信'),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    (onReply ?? _reply)(res.number);
+                  },
+                ),
               // 番号横の吹き出しは小さいので、押し外してこのメニューが開いた
               // ときでも同じ返信一覧へ入れるようにしておく。
               if (replyCount > 0)
@@ -1075,13 +1086,21 @@ class _ThreadScreenState extends State<ThreadScreen>
                   itemCount: posts.length,
                   itemBuilder: (context, i) {
                     final post = posts[i];
+                    // 返信先は main の入力欄。このシートに隠れたままだと打てない
+                    // ので、閉じてから `>>N` を入れる。
+                    void replyAndClose(int number) {
+                      Navigator.pop(context);
+                      _reply(number);
+                    }
+
                     if (_ng.matches(post) &&
                         !_revealedNg.contains(post.number)) {
                       return _NgPlaceholder(
                         number: post.number,
                         onReveal: () =>
                             setSheetState(() => _revealedNg.add(post.number)),
-                        onLongPress: () => _showResActions(post),
+                        onLongPress: () =>
+                            _showResActions(post, onReply: replyAndClose),
                       );
                     }
                     return PostItem(
@@ -1103,8 +1122,9 @@ class _ThreadScreenState extends State<ThreadScreen>
                         Navigator.pop(context);
                         _showConversation(n);
                       },
-                      onReply: _reply,
-                      onLongPress: () => _showResActions(post),
+                      onReply: replyAndClose,
+                      onLongPress: () =>
+                          _showResActions(post, onReply: replyAndClose),
                       isOwn: _history.isOwnPost(widget.threadKey, post.number),
                       isReplyToOwn: _isReplyToOwnPost(post),
                       blurImages: guroMasked.contains(post.number),
@@ -1811,9 +1831,6 @@ class _ThreadScreenState extends State<ThreadScreen>
     }
     _items = items;
 
-    // 未読（まだスクロールで到達していない）レス数。スクロールで減る。
-    final unread = res.length - _furthestRead;
-
     // スレ内検索中は一致箇所をハイライトし、今ジャンプ先の一致レスを強調する。
     final searchQuery = _searching ? _searchController.text.trim() : '';
     final searchMatches = searchQuery.isEmpty ? const <Res>[] : _searchMatches;
@@ -1882,15 +1899,6 @@ class _ThreadScreenState extends State<ThreadScreen>
               onJump: _jumpToIndex,
               labelForIndex: _resLabelForIndex,
               markers: _mapMarkers(items, searchMatches, replies),
-            ),
-          ),
-        if (!_atBottom)
-          Positioned(
-            right: 12,
-            bottom: 12,
-            child: _JumpToLatestButton(
-              unread: unread > 0 ? unread : 0,
-              onTap: _scrollToBottom,
             ),
           ),
       ],
@@ -2344,46 +2352,6 @@ class _FastScrollerState extends State<_FastScroller> {
   }
 }
 
-/// 末尾を見ていないときに出す「最新へ」ボタン。未読件数（スクロールで未到達
-/// のレス数）を出す。
-class _JumpToLatestButton extends StatelessWidget {
-  const _JumpToLatestButton({required this.unread, required this.onTap});
-  final int unread;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Material(
-      color: scheme.primary,
-      elevation: 3,
-      borderRadius: BorderRadius.circular(20),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(20),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.arrow_downward, size: 16, color: scheme.onPrimary),
-              const SizedBox(width: 6),
-              Text(
-                unread > 0 ? '未読 $unread' : '最新へ',
-                style: TextStyle(
-                  color: scheme.onPrimary,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 13,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 /// NG 判定されたレスの代わりに出す薄い行。タップで一時表示、長押しでメニュー
 /// （ID の NG 解除など）を出す。
 class _NgPlaceholder extends StatelessWidget {
@@ -2530,8 +2498,8 @@ class _ConversationSheet extends StatefulWidget {
   /// ファイル選択とアップロード。成功時はレス本文へ挿入する URL を返す。
   final Future<Uri?> Function() onPickAndUploadFile;
 
-  /// レス長押しでアクションメニューを出す。
-  final ValueChanged<Res> onShowActions;
+  /// レス長押しでアクションメニューを出す。返信はシート内の入力欄へ渡す。
+  final void Function(Res res, {void Function(int)? onReply}) onShowActions;
   final bool Function(int number) isOwnPost;
 
   /// 自分のレスへ返信している（自分宛の）レスか。
@@ -2653,8 +2621,10 @@ class _ConversationSheetState extends State<_ConversationSheet> {
                                 onReveal: () => setState(
                                   () => widget.revealedNg.add(entry.res.number),
                                 ),
-                                onLongPress: () =>
-                                    widget.onShowActions(entry.res),
+                                onLongPress: () => widget.onShowActions(
+                                  entry.res,
+                                  onReply: _replyLocal,
+                                ),
                               )
                             : PostItem(
                                 res: entry.res,
@@ -2674,8 +2644,10 @@ class _ConversationSheetState extends State<_ConversationSheet> {
                                     0,
                                 onTapReplies: widget.onTapReplies,
                                 onReply: _replyLocal,
-                                onLongPress: () =>
-                                    widget.onShowActions(entry.res),
+                                onLongPress: () => widget.onShowActions(
+                                  entry.res,
+                                  onReply: _replyLocal,
+                                ),
                                 isOwn: widget.isOwnPost(entry.res.number),
                                 isReplyToOwn: widget.isReplyToOwn(entry.res),
                                 showReplyToOwnAccent: false,

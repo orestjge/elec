@@ -528,6 +528,23 @@ void main() {
     expect(copied.single, contains('最初のレス'));
   });
 
+  testWidgets('レス長押しのアクションから返信すると入力欄に >>N が入る', (tester) async {
+    final f = QueueFetcher([
+      ok([...res1, ...res2]),
+    ]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    await tester.longPress(find.text('2').first);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('>>2 に返信'));
+    await tester.pumpAndSettle();
+
+    final field = tester.widget<TextField>(find.byType(TextField));
+    expect(field.controller!.text, '>>2\n');
+  });
+
   testWidgets('ユーザー名をタップすると全文を表示する', (tester) async {
     final longName = 'とても長いユーザー名' * 6;
     final f = QueueFetcher([
