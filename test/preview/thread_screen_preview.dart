@@ -22,6 +22,7 @@ import 'dart:ui' as ui;
 import 'package:edge_core/edge_core.dart';
 import 'package:elec/src/net/board.dart';
 import 'package:elec/src/net/read_history.dart';
+import 'package:elec/src/net/thread_view_settings.dart';
 import 'package:elec/src/ui/thread_screen.dart';
 import 'package:elec/theme.dart';
 import 'package:flutter/material.dart';
@@ -93,6 +94,8 @@ Future<void> _shoot(
   String out, {
   double width = 420,
   bool watchoi = false,
+  ThreadLayout layout = ThreadLayout.number,
+  int? lastSeen,
 }) async {
   tester.view.physicalSize = Size(width * 2, 900 * 2);
   tester.view.devicePixelRatio = 2;
@@ -100,6 +103,10 @@ Future<void> _shoot(
 
   final history = ReadHistory(MemoryReadHistoryStorage());
   await history.markOwnPost('1762103691', 8);
+  // 既読位置を入れると新着ラインが出る（ツリー表示ではここが境界になる）。
+  if (lastSeen != null) await history.markRead('1762103691', lastSeen);
+  final view = ThreadViewSettings(MemoryThreadViewSettingsStorage());
+  await view.setLayout(layout);
 
   await tester.pumpWidget(
     MaterialApp(
@@ -114,6 +121,7 @@ Future<void> _shoot(
           // 撮っている間にポーリングが走らないよう十分長くする。
           pollInterval: const Duration(hours: 1),
           readHistory: history,
+          threadViewSettings: view,
           // 一覧から開いたときと同じに、板の既定名を渡す（名無しの名前が省かれる）。
           defaultName: Board.eddibb.defaultName,
         ),
@@ -162,6 +170,27 @@ void main() {
       ElecTheme.light(),
       '$dir/thread_watchoi.png',
       watchoi: true,
+    );
+  });
+
+  // ツリー表示（未読スレ）。返信がぶら下がって字下げされる。
+  testWidgets('tree', (tester) async {
+    await _shoot(
+      tester,
+      ElecTheme.light(),
+      '$dir/thread_tree.png',
+      layout: ThreadLayout.tree,
+    );
+  });
+
+  // ツリー表示＋新着。新着ラインから下は番号順のまま積み、指し先を薄く再掲する。
+  testWidgets('tree with arrivals', (tester) async {
+    await _shoot(
+      tester,
+      ElecTheme.light(),
+      '$dir/thread_tree_arrivals.png',
+      layout: ThreadLayout.tree,
+      lastSeen: 10,
     );
   });
 

@@ -88,6 +88,13 @@ void main() {
       find.byWidgetPredicate((w) => w.runtimeType.toString() == '_ResNumber');
   Finder resNumber(int nth) => resNumbers().at(nth);
 
+  /// 入力欄の上に出る返信先の帯。
+  Finder replyTargetBar() => find.byWidgetPredicate(
+    (w) => w.runtimeType.toString() == '_ReplyTargetBar',
+  );
+  Finder inReplyTargetBar(String text) =>
+      find.descendant(of: replyTargetBar(), matching: find.text(text));
+
   TextSpan textSpanContaining(WidgetTester tester, String text) {
     for (final rich in tester.widgetList<RichText>(find.byType(RichText))) {
       if (rich.text.toPlainText().contains(text)) return rich.text as TextSpan;
@@ -165,6 +172,89 @@ void main() {
     await tester.pump();
 
     expect(find.text('>>1\n'), findsOneWidget); // 入力欄に反映
+    // 誰への返信を書いているかが入力欄の上に出る（番号＋本文の頭）。
+    expect(inReplyTargetBar('>>1'), findsOneWidget);
+    expect(inReplyTargetBar('最初のレス'), findsOneWidget);
+  });
+
+  testWidgets('入力中の >>N から返信先を出し、押すと会話が開く', (tester) async {
+    final f = QueueFetcher([
+      ok([...res1, ...res2, ...res3]),
+    ]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    final composer = find.widgetWithText(TextField, 'レスを書く');
+    await tester.enterText(composer, '>>2 そうだね');
+    await tester.pump();
+
+    expect(inReplyTargetBar('>>2'), findsOneWidget);
+    await tester.tap(inReplyTargetBar('>>2'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('会話 #2'), findsOneWidget);
+  });
+
+  testWidgets('返信先が数件なら1件1行で本文の頭まで出す', (tester) async {
+    final f = QueueFetcher([
+      ok([...res1, ...res2, ...res3]),
+    ]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.widgetWithText(TextField, 'レスを書く'),
+      '>>1 >>2 まとめて',
+    );
+    await tester.pump();
+
+    expect(inReplyTargetBar('>>1'), findsOneWidget);
+    expect(inReplyTargetBar('>>2'), findsOneWidget);
+    // それぞれの行に本文の頭が付く。
+    expect(inReplyTargetBar('最初のレス'), findsOneWidget);
+    expect(inReplyTargetBar('>>1 同じIDの2つ目'), findsOneWidget);
+  });
+
+  testWidgets('返信先が多いときは頭の3件だけ出して残りは件数で示す', (tester) async {
+    final many = <int>[];
+    for (var i = 1; i <= 5; i++) {
+      many.addAll(
+        datLine('名無し<><>2025/11/03(月) 02:14:5$i.907 ID:aaa<> レス$i <>'),
+      );
+    }
+    await tester.pumpWidget(app(QueueFetcher([ok(many)])));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.widgetWithText(TextField, 'レスを書く'),
+      '>>1 >>2 >>3 >>4 まとめて',
+    );
+    await tester.pump();
+
+    // 頭の 3 件は本文付きの行のまま。4 件目は出さず、件数だけ添える。
+    expect(inReplyTargetBar('>>1'), findsOneWidget);
+    expect(inReplyTargetBar('レス1'), findsOneWidget);
+    expect(inReplyTargetBar('>>3'), findsOneWidget);
+    expect(inReplyTargetBar('>>4'), findsNothing);
+    expect(inReplyTargetBar('レス4'), findsNothing);
+    expect(inReplyTargetBar('他1件に返信'), findsOneWidget);
+  });
+
+  testWidgets('まだ無い番号への >>N では返信先を出さない', (tester) async {
+    final f = QueueFetcher([
+      ok([...res1, ...res2]),
+    ]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.widgetWithText(TextField, 'レスを書く'),
+      '>>99 打ち間違い',
+    );
+    await tester.pump();
+
+    // 帯そのものが出ない。
+    expect(replyTargetBar(), findsNothing);
   });
 
   testWidgets('レス入力中はキーボードを閉じるボタンで下書きを残してフォーカスを外せる', (tester) async {

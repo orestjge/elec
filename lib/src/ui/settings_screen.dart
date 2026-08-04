@@ -4,17 +4,23 @@ import '../net/file_upload_settings.dart';
 import '../net/image_cache_store.dart';
 import '../net/image_upload_settings.dart';
 import '../net/ng_store.dart';
+import '../net/thread_view_settings.dart';
 import 'file_upload_settings_screen.dart';
 import 'format.dart';
 import 'image_upload_settings_screen.dart';
 import 'ng_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key, ImageCacheStore? imageCache})
-    : _imageCache = imageCache;
+  const SettingsScreen({
+    super.key,
+    ImageCacheStore? imageCache,
+    ThreadViewSettings? threadView,
+  }) : _imageCache = imageCache,
+       _threadView = threadView;
 
   /// テストから差し替えるための置き場。未指定なら共有のものを使う。
   final ImageCacheStore? _imageCache;
+  final ThreadViewSettings? _threadView;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -23,6 +29,8 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   ImageCacheStore get _imageCache =>
       widget._imageCache ?? ImageCacheStore.shared;
+  ThreadViewSettings get _threadView =>
+      widget._threadView ?? ThreadViewSettings.shared;
 
   int? _cacheBytes;
   bool _clearing = false;
@@ -51,12 +59,82 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ).showSnackBar(const SnackBar(content: Text('画像キャッシュを削除しました')));
   }
 
+  /// レスの並べ方を選ぶ。選んだらその場で全スレ画面に効く。
+  Future<void> _pickThreadLayout() async {
+    final picked = await showModalBottomSheet<ThreadLayout>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        final scheme = Theme.of(sheetContext).colorScheme;
+        final current = _threadView.layout;
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+                child: Text(
+                  'レスの並べ方',
+                  style: Theme.of(sheetContext).textTheme.titleMedium,
+                ),
+              ),
+              for (final layout in ThreadLayout.values)
+                ListTile(
+                  leading: Icon(
+                    _layoutIcon(layout),
+                    color: layout == current ? scheme.primary : null,
+                  ),
+                  title: Text(_layoutLabel(layout)),
+                  subtitle: Text(_layoutDescription(layout)),
+                  trailing: layout == current
+                      ? Icon(Icons.check, color: scheme.primary)
+                      : null,
+                  onTap: () => Navigator.pop(sheetContext, layout),
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+    if (picked == null) return;
+    await _threadView.setLayout(picked);
+    if (mounted) setState(() {});
+  }
+
+  static IconData _layoutIcon(ThreadLayout layout) => switch (layout) {
+    ThreadLayout.number => Icons.format_list_numbered,
+    ThreadLayout.tree => Icons.account_tree_outlined,
+  };
+
+  static String _layoutLabel(ThreadLayout layout) => switch (layout) {
+    ThreadLayout.number => '番号順',
+    ThreadLayout.tree => 'ツリー',
+  };
+
+  static String _layoutDescription(ThreadLayout layout) => switch (layout) {
+    ThreadLayout.number => 'dat の順にそのまま並べる',
+    ThreadLayout.tree => '開いた時点までを返信でぶら下げ、そのあとの新着は下へ足す',
+  };
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('設定')),
       body: ListView(
         children: [
+          ListTile(
+            key: const ValueKey('settings-thread-layout'),
+            leading: Icon(_layoutIcon(_threadView.layout)),
+            title: const Text('レスの並べ方'),
+            subtitle: Text(
+              '${_layoutLabel(_threadView.layout)} ・ '
+              '${_layoutDescription(_threadView.layout)}',
+            ),
+            onTap: _pickThreadLayout,
+          ),
+          const Divider(height: 1),
           ListTile(
             leading: const Icon(Icons.cloud_upload_outlined),
             title: const Text('画像アップロード設定'),
