@@ -16,6 +16,7 @@ import '../net/http_fetcher.dart';
 import '../net/imgur_uploader.dart';
 import '../net/ng_store.dart';
 import '../net/read_history.dart';
+import '../net/thread_view_settings.dart';
 import 'attachment_uploader.dart';
 import 'compose_style.dart';
 import 'back_swipe.dart';
@@ -27,6 +28,7 @@ import 'post_images.dart';
 import 'post_item.dart';
 import 'reply_tier.dart';
 import 'thread_map.dart';
+import 'thread_tree.dart';
 import 'video_player_screen.dart';
 import 'write_auth.dart';
 
@@ -46,6 +48,7 @@ class ThreadScreen extends StatefulWidget {
     this.authLauncher = const SystemBrowserLauncher(),
     this.readHistory,
     this.ngStore,
+    this.threadViewSettings,
     this.imagePicker,
     this.imgurUploader,
     this.imageUploadSettings,
@@ -98,6 +101,9 @@ class ThreadScreen extends StatefulWidget {
   /// 既読履歴。離脱時に「見たレス数」を記録する。
   final ReadHistory? readHistory;
 
+  /// レスの並べ方（番号順 / ツリー）。既定はアプリ共有インスタンス。
+  final ThreadViewSettings? threadViewSettings;
+
   /// 一覧側で dat落ち/完走など停止扱いと分かっている場合の表示ラベル。
   ///
   /// dat 本文だけでは「subject.txt から消えた」ことは判定できないため、一覧から
@@ -140,6 +146,7 @@ class _ThreadScreenState extends State<ThreadScreen>
   late final AuthStore _authStore;
   late final ReadHistory _history;
   late final NgStore _ng;
+  late final ThreadViewSettings _view;
   late final ImagePicker _imagePicker;
   late final ImgurUploader _imgurUploader;
   late final ImageUploadSettings _imageUploadSettings;
@@ -156,11 +163,16 @@ class _ThreadScreenState extends State<ThreadScreen>
   final _searchController = TextEditingController();
   final _searchFocus = FocusNode();
 
-  /// 一覧の各行。Res（レス）か [_NewArrivalLine]（新着境界）のどちらか。
+  /// 一覧の各行。[ThreadTreeRow]（レス・返信先の引用）か [_NewArrivalMarker]
+  /// （新着境界）のどちらか。
   List<Object> _items = const [];
 
-  /// 初回表示で合わせるインデックス（前回位置 / 末尾 / 先頭）。
+  /// 初回表示で合わせる位置の決め方（前回位置 / 末尾 / 先頭）。
+  _Landing _landing = _Landing.top;
+
+  /// 初回表示で合わせるインデックス。行を組んだ時点で一度だけ決める。
   int _initialIndex = 0;
+  bool _landingResolved = false;
 
   /// 末尾（最新レス）が画面に見えているか。新着の自動追従に使う。
   bool _atBottomNow = false;
@@ -182,6 +194,10 @@ class _ThreadScreenState extends State<ThreadScreen>
   /// スクロールで実際に見えた最大レス番号（＝どこまで読んだか）。可視性で
   /// 追跡し、スレ一覧の既読位置として保存する。
   int _furthestRead = 0;
+
+  /// ツリー表示で実際に見えたレス番号。番号順に並んでいないので、既読位置は
+  /// これが 1 から続いているところまでで測る（[_onPositions]）。
+  final _seenResNumbers = <int>{};
 
   /// 一度でも取得を始めたか。控えのまま一度も表に出ていない画面は false。
   bool _loadStarted = false;
@@ -226,6 +242,7 @@ class _ThreadScreenState extends State<ThreadScreen>
     _authStore = widget.authStore ?? AuthStore.shared;
     _history = widget.readHistory ?? ReadHistory.shared;
     _ng = widget.ngStore ?? NgStore.shared;
+    _view = widget.threadViewSettings ?? ThreadViewSettings.shared;
     _imagePicker = widget.imagePicker ?? ImagePicker();
     _imgurUploader =
         widget.imgurUploader ??
@@ -243,6 +260,7 @@ class _ThreadScreenState extends State<ThreadScreen>
       fileUploadSettings: _fileUploadSettings,
     );
     _ng.addListener(_onNgChanged);
+    _view.addListener(_onLayoutChanged);
     _positions.itemPositions.addListener(_onPositions);
     WidgetsBinding.instance.addObserver(this);
     // 控えとして置かれただけ（まだ表に出ていない）なら、表に出るまで何もしない。
@@ -322,6 +340,7 @@ class _ThreadScreenState extends State<ThreadScreen>
       unawaited(_history.markRead(widget.threadKey, _furthestRead));
     }
     _ng.removeListener(_onNgChanged);
+    _view.removeListener(_onLayoutChanged);
     _positions.itemPositions.removeListener(_onPositions);
     WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
@@ -430,7 +449,7 @@ class _ThreadScreenState extends State<ThreadScreen>
         _state = r.state;
         _openCount = entry.openCount;
         _furthestRead = lastSeen ?? 0;
-        _initialIndex = entry.initialIndex;
+        _landing = entry.landing;
         _loading = false;
         _error = null;
       });
@@ -446,25 +465,39 @@ class _ThreadScreenState extends State<ThreadScreen>
   /// 全 [total] レスのスレを開いたときの、新着境界（ここから下が新着）と
   /// 着地位置。[lastSeen] は前回どこまで見たか（未読なら null）。
   ///
-  /// - 未読（初回）: 先頭から（インデックス 0）。新着ライン無し。
+  /// - 未読（初回）: 先頭から。新着ライン無し。
   /// - 既読＆新着あり: 前回位置に新着ラインを置き、そこへ合わせる。
   /// - 既読＆新着なし: 末尾（続き）へ。
   ///
-  /// 新着ラインの少し手前に着地させて、直前の流れを思い出せるようにする。
-  ({int openCount, int initialIndex}) _entryPositions(
+  /// 着地の行インデックスは行を組んでから [_landingIndex] で出す。ツリー表示
+  /// ではレス数と行位置が一致しないため。
+  ({int openCount, _Landing landing}) _entryPositions(
     int total,
     int? lastSeen,
   ) {
-    const overlap = 3;
-    if (lastSeen == null) return (openCount: total, initialIndex: 0);
+    if (lastSeen == null) return (openCount: total, landing: _Landing.top);
     if (lastSeen < total) {
-      // 新着ラインの行位置は items 上で lastSeen。数レス手前に寄せる。
-      return (
-        openCount: lastSeen,
-        initialIndex: lastSeen - overlap < 0 ? 0 : lastSeen - overlap,
-      );
+      return (openCount: lastSeen, landing: _Landing.newArrival);
     }
-    return (openCount: total, initialIndex: total > 0 ? total - 1 : 0);
+    return (openCount: total, landing: _Landing.bottom);
+  }
+
+  /// 組み上がった行から初回の着地インデックスを出す。新着ラインへ合わせる場合は
+  /// 少し手前に寄せて、直前の流れを思い出せるようにする。
+  int _landingIndex(List<Object> items) {
+    const overlap = 3;
+    if (items.isEmpty) return 0;
+    switch (_landing) {
+      case _Landing.top:
+        return 0;
+      case _Landing.bottom:
+        return items.length - 1;
+      case _Landing.newArrival:
+        // 前回位置が 0 レス目なら新着ラインは出ない。その場合は先頭から。
+        final marker = items.indexWhere((item) => item is _NewArrivalMarker);
+        if (marker < 0) return 0;
+        return marker - overlap < 0 ? 0 : marker - overlap;
+    }
   }
 
   /// 控えていた画面が表に戻ったときの取り直し。
@@ -559,18 +592,40 @@ class _ThreadScreenState extends State<ThreadScreen>
   }
 
   /// 可視レスから既読位置（最大レス番号）と末尾到達を更新する。
+  ///
+  /// 番号順表示では「見えた最大レス番号」がそのまま既読位置になる（飛ばした
+  /// ぶんは読み飛ばしたものとして扱う）。ツリー表示では並びが番号順でないので、
+  /// 見えた番号を覚えておき **1 から続いているところまで** を既読位置にする。
+  /// ツリーの上の方に出てきた新しい番号のレスで既読位置が飛ぶと、その手前の
+  /// 未読を読まずに読了扱いにしてしまうため。
   void _onPositions() {
     final positions = _positions.itemPositions.value;
     if (positions.isEmpty || _items.isEmpty) return;
     final lastIndex = _items.length - 1;
+    final tree = _view.layout == ThreadLayout.tree;
     var maxRes = _furthestRead;
     var atBottom = false;
     for (final p in positions) {
       // 一部でも見えている行か。
       if (p.itemTrailingEdge <= 0 || p.itemLeadingEdge >= 1) continue;
       final item = _items[p.index];
-      if (item is Res && item.number > maxRes) maxRes = item.number;
+      // 引用行（返信先の再掲）は読んだ位置に数えない。番号が前へ戻るうえ、
+      // 本体はまだ下（新着側）にあるため。
+      if (item is ThreadTreeRow && !item.quote) {
+        if (tree) {
+          _seenResNumbers.add(item.res.number);
+        } else if (item.res.number > maxRes) {
+          maxRes = item.res.number;
+        }
+      }
       if (p.index == lastIndex && p.itemTrailingEdge <= 1.0001) atBottom = true;
+    }
+    if (tree) {
+      var next = maxRes + 1;
+      while (_seenResNumbers.contains(next)) {
+        next++;
+      }
+      maxRes = next - 1;
     }
     final readAdvanced = maxRes > _furthestRead;
     // どちらも表示には出ない（既読の保存と新着追従の判定にだけ使う）ので、
@@ -611,11 +666,11 @@ class _ThreadScreenState extends State<ThreadScreen>
     if (index < 0 || index >= _items.length) return '';
     for (var i = index; i >= 0; i--) {
       final item = _items[i];
-      if (item is Res) return '${item.number}';
+      if (item is ThreadTreeRow && !item.quote) return '${item.res.number}';
     }
     for (var i = index + 1; i < _items.length; i++) {
       final item = _items[i];
-      if (item is Res) return '${item.number}';
+      if (item is ThreadTreeRow && !item.quote) return '${item.res.number}';
     }
     return '';
   }
@@ -778,10 +833,35 @@ class _ThreadScreenState extends State<ThreadScreen>
     );
   }
 
+  /// 入力欄の返信先表示に出すレス。無い番号（まだ来ていない・打ち間違い）なら
+  /// null を返して何も出さない。NG のレスは中身を伏せ、番号だけ出す。
+  _ReplyTarget? _replyTargetFor(int number) {
+    final res = _resByNumber(number);
+    if (res == null) return null;
+    final hidden = _ng.matches(res) && !_revealedNg.contains(number);
+    return _ReplyTarget(number, hidden ? '' : resExcerpt(res));
+  }
+
+  Res? _resByNumber(int number) {
+    final res = _state.res;
+    // dat は 1 始まりの連番なので、まずは位置で当てる。
+    if (number >= 1 &&
+        number <= res.length &&
+        res[number - 1].number == number) {
+      return res[number - 1];
+    }
+    for (final r in res) {
+      if (r.number == number) return r;
+    }
+    return null;
+  }
+
   int? _indexForResNumber(int number) {
     for (var i = 0; i < _items.length; i++) {
       final item = _items[i];
-      if (item is Res && item.number == number) return i;
+      if (item is ThreadTreeRow && !item.quote && item.res.number == number) {
+        return i;
+      }
     }
     return null;
   }
@@ -808,6 +888,40 @@ class _ThreadScreenState extends State<ThreadScreen>
     if (!mounted) return;
     _markerKindCache.clear(); // あぼーん判定が変わるのでスレマップも組み直す
     setState(_revealedNg.clear);
+  }
+
+  /// 並べ方（番号順 / ツリー）が変わったら組み直す。
+  ///
+  /// 行の並びが変わるので、今いちばん上に見えているレスを覚えておいて、組み
+  /// 直したあとで同じレスへ戻す。設定を切り替えただけで読んでいた場所を見失う
+  /// のを避ける。
+  void _onLayoutChanged() {
+    if (!mounted) return;
+    final anchor = _topVisibleResNumber();
+    setState(() {});
+    if (anchor == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_itemScroll.isAttached) return;
+      final index = _indexForResNumber(anchor);
+      if (index != null) _itemScroll.jumpTo(index: index, alignment: 0);
+    });
+  }
+
+  /// いま画面の一番上に見えているレスの番号（引用行・新着ラインは飛ばす）。
+  int? _topVisibleResNumber() {
+    final positions = _positions.itemPositions.value;
+    if (positions.isEmpty || _items.isEmpty) return null;
+    int? topIndex;
+    for (final p in positions) {
+      if (p.itemTrailingEdge <= 0 || p.itemLeadingEdge >= 1) continue;
+      if (topIndex == null || p.index < topIndex) topIndex = p.index;
+    }
+    if (topIndex == null) return null;
+    for (var i = topIndex; i < _items.length; i++) {
+      final item = _items[i];
+      if (item is ThreadTreeRow && !item.quote) return item.res.number;
+    }
+    return null;
   }
 
   /// NG ワード追加ダイアログを出し、追加されたら反映する。
@@ -1311,11 +1425,14 @@ class _ThreadScreenState extends State<ThreadScreen>
     final matched = searchMatches.map((r) => r.number).toSet();
     final markers = <ThreadMapMarker>[];
     for (var i = 0; i < items.length; i++) {
-      final item = items[i];
-      if (item is! Res) {
+      final row = items[i];
+      if (row is! ThreadTreeRow) {
         markers.add(ThreadMapMarker(i, ThreadMapMarkerKind.newArrival));
         continue;
       }
+      // 引用行は同じレスの二度目の登場なので、目印は本体の行にだけ出す。
+      if (row.quote) continue;
+      final item = row.res;
       final kinds = _markerKindsFor(item, hasOwnPosts: ownCount > 0);
       // あぼーんは中身が見えないので目印も出さない（飛んでも読めない）。
       if (kinds == null) continue;
@@ -1794,6 +1911,9 @@ class _ThreadScreenState extends State<ThreadScreen>
               onPickAndUploadImages: _pickAndUploadImages,
               onPickAndUploadFile: _pickAndUploadFile,
               enabled: _canWrite,
+              replyTargetFor: _replyTargetFor,
+              onTapReplyTarget: (number) =>
+                  _showConversation(number, focusNumber: number),
             ),
           ],
         ),
@@ -1820,16 +1940,34 @@ class _ThreadScreenState extends State<ThreadScreen>
     // 「新着」の境界（前回位置）。0 か総数以上なら新着ライン無し。
     final hasNewArrival = _openCount > 0 && _openCount < res.length;
 
-    // 行データを組む（Res か 新着ライン）。インデックス指定スクロールのため
-    // Widget ではなくデータで持ち、[_items] に保存する。
+    // 行データを組む（[ThreadTreeRow] か 新着ライン）。インデックス指定
+    // スクロールのため Widget ではなくデータで持ち、[_items] に保存する。
     final items = <Object>[];
-    for (var i = 0; i < res.length; i++) {
-      if (hasNewArrival && i == _openCount) {
-        items.add(const _NewArrivalMarker());
+    if (_view.layout == ThreadLayout.tree) {
+      // ツリーに固めるのは新着ラインより上（＝開いた時点まで）。新着ラインが
+      // 無ければ全部が対象。あとから来たぶんはツリーへ挿さず下へ積む。
+      final tree = layOutThreadTree(
+        res,
+        settledCount: hasNewArrival ? _openCount : res.length,
+      );
+      items.addAll(tree.settled);
+      if (hasNewArrival) items.add(const _NewArrivalMarker());
+      items.addAll(tree.arrivals);
+    } else {
+      for (var i = 0; i < res.length; i++) {
+        if (hasNewArrival && i == _openCount) {
+          items.add(const _NewArrivalMarker());
+        }
+        items.add(ThreadTreeRow(res: res[i]));
       }
-      items.add(res[i]);
     }
     _items = items;
+    // 着地位置は行が組み上がって初めて出せる（ツリーではレス数と行位置が
+    // 一致しない）。初回の一度きり。
+    if (!_landingResolved) {
+      _landingResolved = true;
+      _initialIndex = _landingIndex(items);
+    }
 
     // スレ内検索中は一致箇所をハイライトし、今ジャンプ先の一致レスを強調する。
     final searchQuery = _searching ? _searchController.text.trim() : '';
@@ -1849,40 +1987,57 @@ class _ThreadScreenState extends State<ThreadScreen>
             initialScrollIndex: _initialIndex,
             itemCount: items.length,
             itemBuilder: (context, i) {
-              final item = items[i];
-              if (item is! Res) return const _NewArrivalLine();
+              final row = items[i];
+              if (row is! ThreadTreeRow) return const _NewArrivalLine();
+              final item = row.res;
               final ngHidden =
                   _ng.matches(item) && !_revealedNg.contains(item.number);
+              // 返信先の再掲。NG のレスはここでも出さない（行だけ畳む）。
+              if (row.quote) {
+                if (ngHidden) return const SizedBox.shrink();
+                return QuotedResRow(
+                  res: item,
+                  onTap: () =>
+                      _showConversation(item.number, focusNumber: item.number),
+                );
+              }
               // レス間は線を引かず、スレ一覧と同じく余白だけで区切る。各レスは
               // 番号・名前の見出し行が始点の目印になる。
               if (ngHidden) {
-                return _NgPlaceholder(
-                  number: item.number,
-                  onReveal: () => setState(() => _revealedNg.add(item.number)),
-                  onLongPress: () => _showResActions(item),
+                return ThreadTreeTier(
+                  depth: row.depth,
+                  child: _NgPlaceholder(
+                    number: item.number,
+                    onReveal: () =>
+                        setState(() => _revealedNg.add(item.number)),
+                    onLongPress: () => _showResActions(item),
+                  ),
                 );
               }
-              return PostItem(
-                res: item,
-                idCount: idCounts[item.id] ?? 1,
-                idOrdinal: idOrdinals[item.number] ?? 1,
-                onTapId: _showIdPosts,
-                onTapRes: _showResPopup,
-                onTapResRange: _showConversationRange,
-                onTapUrl: _openUrl,
-                replyCount: replies[item.number] ?? 0,
-                onTapReplies: _showReplies,
-                onReply: _reply,
-                onBodySelectionActiveChanged: (active) =>
-                    _handleBodySelectionActiveChanged(item.number, active),
-                onLongPress: () => _showResActions(item),
-                bodySelectable: false,
-                isOwn: _history.isOwnPost(widget.threadKey, item.number),
-                isReplyToOwn: _isReplyToOwnPost(item),
-                blurImages: guroMasked.contains(item.number),
-                highlightQuery: searchQuery,
-                isCurrentMatch: item.number == currentMatchNumber,
-                defaultName: widget.defaultName,
+              return ThreadTreeTier(
+                depth: row.depth,
+                child: PostItem(
+                  res: item,
+                  idCount: idCounts[item.id] ?? 1,
+                  idOrdinal: idOrdinals[item.number] ?? 1,
+                  onTapId: _showIdPosts,
+                  onTapRes: _showResPopup,
+                  onTapResRange: _showConversationRange,
+                  onTapUrl: _openUrl,
+                  replyCount: replies[item.number] ?? 0,
+                  onTapReplies: _showReplies,
+                  onReply: _reply,
+                  onBodySelectionActiveChanged: (active) =>
+                      _handleBodySelectionActiveChanged(item.number, active),
+                  onLongPress: () => _showResActions(item),
+                  bodySelectable: false,
+                  isOwn: _history.isOwnPost(widget.threadKey, item.number),
+                  isReplyToOwn: _isReplyToOwnPost(item),
+                  blurImages: guroMasked.contains(item.number),
+                  highlightQuery: searchQuery,
+                  isCurrentMatch: item.number == currentMatchNumber,
+                  defaultName: widget.defaultName,
+                ),
               );
             },
           ),
@@ -2404,6 +2559,9 @@ class _NewArrivalMarker {
   const _NewArrivalMarker();
 }
 
+/// 開いたときの着地位置の決め方。行インデックスは行を組んでから決まる。
+enum _Landing { top, newArrival, bottom }
+
 class _NewArrivalLine extends StatelessWidget {
   const _NewArrivalLine();
 
@@ -2804,6 +2962,102 @@ class _ReplyBar extends StatelessWidget {
   }
 }
 
+/// 入力中の本文が指している返信先 1 件。番号と、1 行に潰した本文の抜粋。
+class _ReplyTarget {
+  const _ReplyTarget(this.number, this.excerpt);
+
+  final int number;
+
+  /// 本文の抜粋。NG のレスなど、中身を出さない場合は空。
+  final String excerpt;
+}
+
+/// 入力欄の上に「今どのレスへの返信を書いているか」を出す帯。
+///
+/// 本文に `>>N` を書いた時点で出る。宛先を確かめるのに書いた本文を遡って読み
+/// 直さずに済むようにするもので、番号を押せばそのレスの会話を開ける。
+class _ReplyTargetBar extends StatelessWidget {
+  const _ReplyTargetBar({required this.targets, this.onTap});
+
+  final List<_ReplyTarget> targets;
+  final ValueChanged<int>? onTap;
+
+  /// 1 件 1 行で出す上限。残りは件数だけ添える。`>>1-50` のような範囲指定で
+  /// 帯が入力欄を押し上げないようにするため。
+  static const _maxShown = 3;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final dim = theme.textTheme.labelSmall?.copyWith(
+      color: scheme.onSurfaceVariant,
+    );
+    final shown = targets.take(_maxShown).toList();
+    final rest = targets.length - shown.length;
+
+    Widget number(_ReplyTarget target) => InkWell(
+      onTap: onTap == null ? null : () => onTap!(target.number),
+      borderRadius: BorderRadius.circular(4),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 2),
+        child: Text(
+          '>>${target.number}',
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: scheme.primary,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+    );
+
+    // 1 件 1 行。番号のうしろに本文の頭を添える（番号だけでは思い出せない）。
+    Widget line(_ReplyTarget target) => Row(
+      children: [
+        number(target),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.only(left: 4),
+            child: Text(
+              target.excerpt.isEmpty ? 'に返信' : target.excerpt,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: dim,
+            ),
+          ),
+        ),
+      ],
+    );
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(2, 0, 2, 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.reply, size: 15, color: scheme.onSurfaceVariant),
+          const SizedBox(width: 4),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (final target in shown) ...[
+                  if (target != shown.first) const SizedBox(height: 2),
+                  line(target),
+                ],
+                // 多いときも頭の数件は同じ形で出し、残りは件数だけ添える。
+                if (rest > 0) ...[
+                  const SizedBox(height: 2),
+                  Text('他$rest件に返信', style: dim),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _Composer extends StatefulWidget {
   const _Composer({
     super.key,
@@ -2813,10 +3067,18 @@ class _Composer extends StatefulWidget {
     required this.onPickAndUploadImages,
     required this.onPickAndUploadFile,
     required this.enabled,
+    this.replyTargetFor,
+    this.onTapReplyTarget,
   });
 
   final TextEditingController controller;
   final FocusNode focusNode;
+
+  /// 本文の `>>N` から返信先を引く。そのレスが無ければ null。
+  final _ReplyTarget? Function(int number)? replyTargetFor;
+
+  /// 返信先の番号を押したとき。会話を開く。
+  final ValueChanged<int>? onTapReplyTarget;
 
   /// 送信。受理されたら true を返す（入力欄をクリアする）。
   final Future<bool> Function(String) onSend;
@@ -2972,6 +3234,12 @@ class _ComposerState extends State<_Composer> {
     final videoUrls = videoUrlsIn(text);
     final audioUrls = audioUrlsIn(text);
     final embedVideos = embedVideosIn(text);
+    final replyTargetFor = widget.replyTargetFor;
+    final replyTargets = <_ReplyTarget>[
+      if (replyTargetFor != null)
+        for (final number in referencedResNumbers(text))
+          if (replyTargetFor(number) case final target?) target,
+    ];
     final hasAttachments =
         imageUrls.isNotEmpty ||
         videoUrls.isNotEmpty ||
@@ -3003,6 +3271,11 @@ class _ComposerState extends State<_Composer> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (replyTargets.isNotEmpty)
+              _ReplyTargetBar(
+                targets: replyTargets,
+                onTap: widget.onTapReplyTarget,
+              ),
             if (hasAttachments) ...[
               ConstrainedBox(
                 constraints: const BoxConstraints(maxHeight: 160),

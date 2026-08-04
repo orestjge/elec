@@ -13,12 +13,14 @@ import 'src/net/image_upload_settings.dart';
 import 'src/net/ng_store.dart';
 import 'src/net/read_history.dart';
 import 'src/net/thread_sort_settings.dart';
+import 'src/net/thread_view_settings.dart';
 import 'src/ui/thread_list_screen.dart';
 import 'theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // 保存済みの認証トークン・板一覧・既読履歴・NG 設定・並べ替えを読み込む。
+  // 保存済みの認証トークン・板一覧・既読履歴・NG 設定・並べ替え・表示設定を
+  // 読み込む。
   await Future.wait([
     AuthStore.shared.load(),
     BoardStore.shared.load(),
@@ -27,6 +29,7 @@ Future<void> main() async {
     ReadHistory.shared.load(),
     NgStore.shared.load(),
     ThreadSortSettings.shared.load(),
+    ThreadViewSettings.shared.load(),
   ]);
   // 画像キャッシュの置き場を用意して、溜まっているぶんを刈る。表示を待たせる
   // 必要は無いので待たない。
