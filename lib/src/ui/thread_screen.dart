@@ -846,8 +846,10 @@ class _ThreadScreenState extends State<ThreadScreen>
   }
 
   /// レスの長押しで出すアクション。対象レスの内容を上部に出し、その下に
-  /// 全体コピー・本文コピー・ID コピー・必死の操作を並べる。
-  void _showResActions(Res res) {
+  /// 返信・全体コピー・本文コピー・ID コピー・必死の操作を並べる。
+  /// [onReply] を渡すと返信の宛先をそちらの入力欄にできる（会話シートなど、
+  /// main の入力欄がシートに隠れている場面用）。
+  void _showResActions(Res res, {void Function(int)? onReply}) {
     final id = res.id;
     final idCount = _idCounts(_state.res)[id] ?? 1;
     final idOrdinal = _idOrdinals(_state.res)[res.number] ?? 1;
@@ -891,6 +893,17 @@ class _ThreadScreenState extends State<ThreadScreen>
                 ),
               ),
               const Divider(height: 1),
+              // 返信アイコンも小さいので、ここからも `>>N` を入れられるように
+              // しておく。書き込めないスレ・板では出さない。
+              if (_canWrite)
+                ListTile(
+                  leading: const Icon(Icons.reply),
+                  title: Text('>>${res.number} に返信'),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    (onReply ?? _reply)(res.number);
+                  },
+                ),
               // 番号横の吹き出しは小さいので、押し外してこのメニューが開いた
               // ときでも同じ返信一覧へ入れるようにしておく。
               if (replyCount > 0)
@@ -1075,13 +1088,21 @@ class _ThreadScreenState extends State<ThreadScreen>
                   itemCount: posts.length,
                   itemBuilder: (context, i) {
                     final post = posts[i];
+                    // 返信先は main の入力欄。このシートに隠れたままだと打てない
+                    // ので、閉じてから `>>N` を入れる。
+                    void replyAndClose(int number) {
+                      Navigator.pop(context);
+                      _reply(number);
+                    }
+
                     if (_ng.matches(post) &&
                         !_revealedNg.contains(post.number)) {
                       return _NgPlaceholder(
                         number: post.number,
                         onReveal: () =>
                             setSheetState(() => _revealedNg.add(post.number)),
-                        onLongPress: () => _showResActions(post),
+                        onLongPress: () =>
+                            _showResActions(post, onReply: replyAndClose),
                       );
                     }
                     return PostItem(
@@ -1103,8 +1124,9 @@ class _ThreadScreenState extends State<ThreadScreen>
                         Navigator.pop(context);
                         _showConversation(n);
                       },
-                      onReply: _reply,
-                      onLongPress: () => _showResActions(post),
+                      onReply: replyAndClose,
+                      onLongPress: () =>
+                          _showResActions(post, onReply: replyAndClose),
                       isOwn: _history.isOwnPost(widget.threadKey, post.number),
                       isReplyToOwn: _isReplyToOwnPost(post),
                       blurImages: guroMasked.contains(post.number),
@@ -2530,8 +2552,8 @@ class _ConversationSheet extends StatefulWidget {
   /// ファイル選択とアップロード。成功時はレス本文へ挿入する URL を返す。
   final Future<Uri?> Function() onPickAndUploadFile;
 
-  /// レス長押しでアクションメニューを出す。
-  final ValueChanged<Res> onShowActions;
+  /// レス長押しでアクションメニューを出す。返信はシート内の入力欄へ渡す。
+  final void Function(Res res, {void Function(int)? onReply}) onShowActions;
   final bool Function(int number) isOwnPost;
 
   /// 自分のレスへ返信している（自分宛の）レスか。
@@ -2653,8 +2675,10 @@ class _ConversationSheetState extends State<_ConversationSheet> {
                                 onReveal: () => setState(
                                   () => widget.revealedNg.add(entry.res.number),
                                 ),
-                                onLongPress: () =>
-                                    widget.onShowActions(entry.res),
+                                onLongPress: () => widget.onShowActions(
+                                  entry.res,
+                                  onReply: _replyLocal,
+                                ),
                               )
                             : PostItem(
                                 res: entry.res,
@@ -2674,8 +2698,10 @@ class _ConversationSheetState extends State<_ConversationSheet> {
                                     0,
                                 onTapReplies: widget.onTapReplies,
                                 onReply: _replyLocal,
-                                onLongPress: () =>
-                                    widget.onShowActions(entry.res),
+                                onLongPress: () => widget.onShowActions(
+                                  entry.res,
+                                  onReply: _replyLocal,
+                                ),
                                 isOwn: widget.isOwnPost(entry.res.number),
                                 isReplyToOwn: widget.isReplyToOwn(entry.res),
                                 showReplyToOwnAccent: false,
