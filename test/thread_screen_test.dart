@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:edge_core/edge_core.dart';
 import 'package:elec/src/net/ng_store.dart';
 import 'package:elec/src/net/read_history.dart';
+import 'package:elec/src/ui/id_icon.dart';
 import 'package:elec/src/ui/thread_map.dart';
 import 'package:elec/src/ui/thread_screen.dart';
 import 'package:flutter/gestures.dart';
@@ -83,10 +84,15 @@ void main() {
     ),
   );
 
-  /// レス番号（返信数を添えたヘッダの左端）。返信があるものはタップで会話ビュー。
-  Finder resNumbers() =>
-      find.byWidgetPredicate((w) => w.runtimeType.toString() == '_ResNumber');
-  Finder resNumber(int nth) => resNumbers().at(nth);
+  /// ヘッダの ID アイコン（identicon）。タップで同一 ID のレス一覧が出る。
+  Finder idIcons(String id) =>
+      find.byWidgetPredicate((w) => w is IdIcon && w.id == id);
+
+  /// ヘッダ左端の返信数（吹き出し＋件数）。**返信が付いたレスにしか出ない。**
+  /// タップで会話ビュー。
+  Finder replyCounts() =>
+      find.byWidgetPredicate((w) => w.runtimeType.toString() == '_ReplyCount');
+  Finder replyCount(int nth) => replyCounts().at(nth);
 
   /// 入力欄の上に出る返信先の帯。
   Finder replyTargetBar() => find.byWidgetPredicate(
@@ -152,9 +158,11 @@ void main() {
 
     expect(find.text('最初のレス'), findsOneWidget);
     expect(find.textContaining('同じIDの2つ目', findRichText: true), findsOneWidget);
-    // 同一 ID は「このレスが何番目か / 合計レス数」付きで出る。
-    expect(find.text('ID:aaa (1/2)'), findsOneWidget);
-    expect(find.text('ID:aaa (2/2)'), findsOneWidget);
+    // 同一 ID は同じ identicon で出て、横に「このレスが何番目か / 合計レス数」
+    // が付く。ID 文字列そのものはアイコンをタップした先のシートで読む。
+    expect(idIcons('aaa'), findsNWidgets(2));
+    expect(find.text('1/2'), findsOneWidget);
+    expect(find.text('2/2'), findsOneWidget);
     // 初回は新着ライン無し。
     expect(find.text('ここから新着'), findsNothing);
   });
@@ -462,16 +470,16 @@ void main() {
     await tester.pumpAndSettle();
 
     // aaa は 2 レス。チップをタップ。
-    await tester.tap(find.text('ID:aaa (1/2)').first);
+    await tester.tap(idIcons('aaa').first);
     await tester.pumpAndSettle();
 
     // シート見出し。
     expect(find.text('ID:aaa  2レス'), findsOneWidget);
 
-    // シート内の先頭（レス 1・返信 2 件）の番号をタップして会話ビューへ。
+    // シート内の先頭（レス 1・返信 2 件）の返信数をタップして会話ビューへ。
     await tester.tap(
       find
-          .descendant(of: find.byType(BottomSheet), matching: resNumbers())
+          .descendant(of: find.byType(BottomSheet), matching: replyCounts())
           .first,
     );
     await tester.pumpAndSettle();
@@ -533,7 +541,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('ID:aaa (1/2)').first);
+    await tester.tap(idIcons('aaa').first);
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('IDをNG'));
@@ -570,7 +578,7 @@ void main() {
     await tester.pumpWidget(app(f));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('ID:aaa (1/2)').first);
+    await tester.tap(idIcons('aaa').first);
     await tester.pumpAndSettle();
 
     expect(find.text('必死チェッカー'), findsOneWidget);
@@ -625,7 +633,8 @@ void main() {
     await tester.pumpWidget(app(f));
     await tester.pumpAndSettle();
 
-    await tester.longPress(find.text('2').first);
+    // ヘッダにレス番号は出さないので、レス 2 の ID アイコンを長押しする。
+    await tester.longPress(idIcons('aaa').at(1));
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('>>2 に返信'));
@@ -798,7 +807,9 @@ void main() {
     await tester.pumpWidget(app(f));
     await tester.pumpAndSettle();
 
-    await tester.longPress(resNumber(1));
+    // レス 2 は返信を集めていないのでヘッダに返信数が無い。ID アイコンを
+    // 長押しする（タップは同一 ID 一覧だが、長押しはレス全体が受ける）。
+    await tester.longPress(idIcons('aaa').at(1));
     await tester.pumpAndSettle();
     expect(find.text('レス全体をコピー'), findsOneWidget);
 
@@ -810,14 +821,14 @@ void main() {
     expect(find.text('会話 #1  2件'), findsOneWidget);
   });
 
-  testWidgets('レス番号横の返信数から会話ビューを出す', (tester) async {
+  testWidgets('ヘッダ左端の返信数から会話ビューを出す', (tester) async {
     final f = QueueFetcher([
       ok([...res1, ...res2, ...res3]),
     ]);
     await tester.pumpWidget(app(f));
     await tester.pumpAndSettle();
 
-    await tester.tap(resNumber(0));
+    await tester.tap(replyCount(0));
     await tester.pumpAndSettle();
 
     expect(find.text('会話 #1  3件'), findsOneWidget);
@@ -833,18 +844,19 @@ void main() {
     );
   });
 
-  testWidgets('返信数を押せるレスは番号の当たり判定を指の大きさまで広げる', (tester) async {
+  testWidgets('返信数は押せる大きさで出し、返信のないレスには出さない', (tester) async {
     final f = QueueFetcher([
       ok([...res1, ...res2, ...res3]),
     ]);
     await tester.pumpWidget(app(f));
     await tester.pumpAndSettle();
 
-    // レス 1 は返信を集めていて押せるので、文字の高さ（16px）ではなく、
-    // ヘッダ行が返信ボタンのために元から持っている高さまで使う。
-    expect(tester.getSize(resNumber(0)).height, greaterThanOrEqualTo(26));
-    // 返信のないレス 3 は 1 行分のままにして、一覧の詰まりを保つ。
-    expect(tester.getSize(resNumber(2)).height, lessThan(26));
+    // レス 1（2 件）とレス 2（1 件）にだけ出る。返信のないレス 3 には出さない
+    // ので、ヘッダは ID アイコンから始まって一覧が詰まる。
+    expect(replyCounts(), findsNWidgets(2));
+    // 押せるものなので、文字の高さ（16px）ではなくヘッダ行が返信ボタンのために
+    // 元から持っている高さまで使う。
+    expect(tester.getSize(replyCount(0)).height, greaterThanOrEqualTo(26));
   });
 
   testWidgets('名無しはヘッダから名前を省き、コテハンだけ残す', (tester) async {
@@ -957,7 +969,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // 会話シートを開く。
-    await tester.tap(resNumber(0));
+    await tester.tap(replyCount(0));
     await tester.pumpAndSettle();
     expect(find.text('会話 #1  3件'), findsOneWidget);
 
@@ -1361,24 +1373,27 @@ void main() {
     ]);
   });
 
-  testWidgets('返信数に応じてレス番号の色と太さを変える', (tester) async {
-    // レス 1 は返信なし、レス 2 は 5 件、レス 3 は 10 件。
+  testWidgets('返信数に応じて件数の色と太さを変える', (tester) async {
+    // レス 2 は 1 件（閾値未満）、レス 3 は 5 件、レス 4 は 10 件。
     final bodies = <int, String>{};
+    bodies[5] = '>>2 ひとつだけ';
     for (var i = 0; i < 5; i++) {
-      bodies[10 + i] = '>>2 $i';
+      bodies[10 + i] = '>>3 $i';
     }
     for (var i = 0; i < 10; i++) {
-      bodies[30 + i] = '>>3 $i';
+      bodies[30 + i] = '>>4 $i';
     }
     final f = QueueFetcher([ok(manyResWithBodies(60, bodies))]);
 
     await tester.pumpWidget(app(f));
     await tester.pumpAndSettle();
 
-    TextStyle styleOfNumber(int number) => tester
+    // 件数そのもののテキストから拾う（同じ数字が本文にもあるので、
+    // 返信数チップの中に限る）。
+    TextStyle styleOfCount(int count) => tester
         .widget<Text>(
           find
-              .descendant(of: resNumbers(), matching: find.text('$number'))
+              .descendant(of: replyCounts(), matching: find.text('$count'))
               .first,
         )
         .style!;
@@ -1386,15 +1401,15 @@ void main() {
     final scheme = Theme.of(
       tester.element(find.byType(ThreadScreen)),
     ).colorScheme;
-    // 返信なしは従来どおり primary。
-    expect(styleOfNumber(1).color, scheme.primary);
-    expect(styleOfNumber(1).fontWeight, FontWeight.w700);
+    // 閾値未満は従来どおり primary。
+    expect(styleOfCount(1).color, scheme.primary);
+    expect(styleOfCount(1).fontWeight, FontWeight.w700);
     // 5 件以上は色が上がる。10 件以上はさらに太くなる（色は同じ＝テキストなので
     // 淡くせず、段階は太さで示す）。
-    expect(styleOfNumber(2).color, scheme.error);
-    expect(styleOfNumber(2).fontWeight, FontWeight.w700);
-    expect(styleOfNumber(3).color, scheme.error);
-    expect(styleOfNumber(3).fontWeight, FontWeight.w800);
+    expect(styleOfCount(5).color, scheme.error);
+    expect(styleOfCount(5).fontWeight, FontWeight.w700);
+    expect(styleOfCount(10).color, scheme.error);
+    expect(styleOfCount(10).fontWeight, FontWeight.w800);
   });
 
   testWidgets('返信数に応じて2段階でスレマップに出す', (tester) async {

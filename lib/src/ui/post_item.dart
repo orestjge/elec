@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'embed_urls.dart';
 import 'mini_player.dart';
 import 'id_color.dart';
+import 'id_icon.dart';
 import 'image_urls.dart';
 import 'post_images.dart';
 import 'reply_tier.dart';
@@ -468,26 +469,27 @@ final _nameSuffixRe = RegExp(r'^(.*?)[\s　]*([(（][^()（）]*[)）])$');
 /// 狭いので、ヘッダ行が右端の返信ボタン（17px + 余白 4px×2 = 25px）のために元から
 /// 持っている高さに合わせる。行全体はここまで既に伸びているため、広げてもレスの
 /// 高さはほとんど増えない。
-const double _resNumberTapHeight = 26;
+const double _replyCountTapHeight = 26;
 
-/// レス番号。返信を集めたレスは番号ごと色を上げ、番号の右に件数を添える。
+/// 受けた返信の件数。**0 件のレスには出さない。**
 ///
-/// 視線の起点である番号に情報を置くので、流し読みしていても「ここで反応が
-/// 集まった」と気づける。段階の基準はスレマップの目印と共有する（[replyTierOf]）
-/// ので、マップで見つけた場所とレス本体の見た目が対応する。
+/// 掲示板では返信数がそのレスの重要度の指標になるので、ヘッダの先頭に置いて
+/// 流し読みでも目に入るようにする。0 件で何も出さないぶん、反応が集まったレス
+/// だけが左に張り出して見える。段階の基準はスレマップの目印と共有する
+/// （[replyTierOf]）ので、マップで見つけた場所とレス本体の見た目が対応する。
 ///
 /// 色は 1 段階だけ上げ、その上の段階は太さで示す。テキストなので淡い色にすると
 /// 読めなくなるため（マップのバーは面なので濃さ 2 段階で出せる）。
-class _ResNumber extends StatelessWidget {
-  const _ResNumber({
+class _ReplyCount extends StatelessWidget {
+  const _ReplyCount({
     required this.number,
     required this.replyCount,
-    required this.onTapReplies,
+    required this.onTap,
   });
 
   final int number;
   final int replyCount;
-  final ValueChanged<int>? onTapReplies;
+  final ValueChanged<int>? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -507,28 +509,24 @@ class _ResNumber extends StatelessWidget {
     final label = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text('$number', style: style),
-        if (replyCount > 0) ...[
-          const SizedBox(width: 3),
-          // 受けた返信の数は吹き出し。返信する操作（ヘッダ右端）は矢印で、
-          // 「付いたもの」と「これからする操作」を形で分ける。
-          Icon(Icons.chat_bubble_outline, size: 13, color: color),
-          const SizedBox(width: 2),
-          Text('$replyCount', style: style),
-        ],
+        // 受けた返信の数は吹き出し。返信する操作（ヘッダ右端）は矢印で、
+        // 「付いたもの」と「これからする操作」を形で分ける。
+        Icon(Icons.chat_bubble_outline, size: 13, color: color),
+        const SizedBox(width: 2),
+        Text('$replyCount', style: style),
       ],
     );
 
-    if (replyCount == 0 || onTapReplies == null) return label;
-    // 件数を出しているときは、そこから返信一覧（会話ビュー）へ入れる。
-    // 余白は右にだけ足す。左を広げると番号が本文の左端からずれてしまうため。
+    if (onTap == null) return label;
+    // ここから返信一覧（会話ビュー）へ入れる。余白は右にだけ足す。ヘッダの
+    // 先頭に来るので、左を広げると件数が本文の左端からずれる。
     return InkWell(
-      onTap: () => onTapReplies!(number),
+      onTap: () => onTap!(number),
       borderRadius: BorderRadius.circular(6),
       child: SizedBox(
-        height: _resNumberTapHeight,
+        height: _replyCountTapHeight,
         child: Padding(
-          padding: const EdgeInsets.only(left: 2, right: 6),
+          padding: const EdgeInsets.only(right: 2),
           // widthFactor: 1 で横幅は中身なりに縮める（Wrap 内で全幅化させない）。
           child: Center(widthFactor: 1, child: label),
         ),
@@ -571,13 +569,11 @@ class _Header extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final lineHeight = _headerLineHeight(theme);
-    // 返信件数が押せるときだけ、番号のスロットを当たり判定の高さまで広げる。
+    // 返信件数が押せるときだけ、件数のスロットを当たり判定の高さまで広げる。
     // 押せないレスは今までどおり 1 行分のままにして、一覧の詰まりを保つ。
-    final numberSlotHeight =
-        replyCount > 0 &&
-            onTapReplies != null &&
-            lineHeight < _resNumberTapHeight
-        ? _resNumberTapHeight
+    final replyCountSlotHeight =
+        onTapReplies != null && lineHeight < _replyCountTapHeight
+        ? _replyCountTapHeight
         : lineHeight;
 
     return Row(
@@ -594,14 +590,34 @@ class _Header extends StatelessWidget {
               runSpacing: 2,
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                _HeaderSlot(
-                  height: numberSlotHeight,
-                  child: _ResNumber(
-                    number: res.number,
-                    replyCount: replyCount,
-                    onTapReplies: onTapReplies,
+                // ヘッダは「どれだけ反応され・誰が・何者で・いつ」の順に読ませる。
+                //
+                // **レス番号は出さない。** 番号は `>>N` から辿るための参照値で、
+                // 読むときには要らない。レスを指定する操作は右端の返信ボタンと
+                // 長押しメニューが受け持つ。
+                if (replyCount > 0)
+                  _HeaderSlot(
+                    height: replyCountSlotHeight,
+                    child: _ReplyCount(
+                      number: res.number,
+                      replyCount: replyCount,
+                      onTap: onTapReplies,
+                    ),
                   ),
-                ),
+                // チップは固定高さのスロットに入れない。狭いときは中身に応じて
+                // 縦に伸び、それでも入らなければ省略する。スロットで 1 行に
+                // 固定すると、折り返したときにチップが潰れる。
+                if (res.id != null)
+                  _IdChip(
+                    id: res.id!,
+                    count: idCount,
+                    ordinal: idOrdinal,
+                    onTap: onTapId,
+                  )
+                else
+                  // ID なしの板。アイコンごと省くと、名無し・返信なしのレスは
+                  // ヘッダが時刻だけになってレスの切れ目が読めなくなる。
+                  const _NoIdChip(),
                 // Wrap の子は Flexible にできないので、極端に長い名前だけは
                 // 行幅で頭打ちにして省略する（通常の名前はそのまま 1 チャンク）。
                 // 名無しは空文字で渡ってくるので、枠ごと出さない。
@@ -616,16 +632,6 @@ class _Header extends StatelessWidget {
                         highlightQuery: highlightQuery,
                       ),
                     ),
-                  ),
-                // チップは固定高さのスロットに入れない。狭いときは中身に応じて
-                // 縦に伸び（最大 2 行）、それでも入らなければ省略する。スロットで
-                // 1 行に固定すると、折り返したときにチップが潰れる。
-                if (res.id != null)
-                  _IdChip(
-                    id: res.id!,
-                    count: idCount,
-                    ordinal: idOrdinal,
-                    onTap: onTapId,
                   ),
                 if (isOwn)
                   _OwnChip(color: scheme.secondary)
@@ -856,6 +862,36 @@ class _TimeLabel extends StatelessWidget {
   }
 }
 
+/// ID なしの板でのアイコン枠。[_IdChip] と同じ大きさ・同じ位置を占め、
+/// ヘッダの左端とレスの切れ目だけを保つ。
+///
+/// 押せない（絞り込む ID が無い）し、輪も色を持たない（連投を数えられない）。
+class _NoIdChip extends StatelessWidget {
+  const _NoIdChip();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Semantics(
+      label: 'IDなし',
+      child: Padding(
+        padding: const EdgeInsets.only(right: 2),
+        child: Container(
+          padding: const EdgeInsets.all(1),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(
+              color: scheme.outlineVariant.withValues(alpha: 0.8),
+              width: 1.2,
+            ),
+          ),
+          child: const IdIconPlaceholder(),
+        ),
+      ),
+    );
+  }
+}
+
 class _IdChip extends StatelessWidget {
   const _IdChip({
     required this.id,
@@ -871,28 +907,53 @@ class _IdChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = idColorForCount(Theme.of(context).colorScheme, count);
-    return InkWell(
-      onTap: onTap == null ? null : () => onTap!(id),
-      borderRadius: BorderRadius.circular(6),
-      child: Container(
-        // 高さ・幅とも中身に合わせて縮める（Wrap 内で全幅化させない）。
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.14),
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Text(
-          count > 1 ? 'ID:$id ($ordinal/$count)' : 'ID:$id',
-          // 狭いときは最大 2 行まで折り返して縦に伸ばし、それでも入らなければ
-          // 省略する。1 行固定にするとチップが潰れるため許容する。
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontSize: 11,
-            height: 1.15,
-            leadingDistribution: TextLeadingDistribution.even,
-            color: color,
-            fontWeight: FontWeight.w600,
+    return Semantics(
+      // 絵には読み上げるものが無いので、元のチップの文言をここに持たせる。
+      // ウィジェットテストもこのラベルでアイコンを掴む。
+      label: count > 1 ? 'ID:$id ($ordinal/$count)' : 'ID:$id',
+      button: onTap != null,
+      child: InkWell(
+        onTap: onTap == null ? null : () => onTap!(id),
+        borderRadius: BorderRadius.circular(6),
+        child: Padding(
+          // 高さ・幅とも中身に合わせて縮める（Wrap 内で全幅化させない）。
+          // 余白は右にだけ足す。ヘッダの先頭に来るので、左を広げるとアイコンが
+          // 本文の左端からずれる。
+          padding: const EdgeInsets.only(right: 2),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(1),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(6),
+                  // 外周のリングだけレス数で色を変える。中の絵は ID ごとの
+                  // 色なので、そこに連投の多さを混ぜると両方読めなくなる。
+                  border: Border.all(
+                    color: color.withValues(alpha: 0.75),
+                    width: 1.2,
+                  ),
+                ),
+                child: IdIcon(id: id),
+              ),
+              if (count > 1) ...[
+                const SizedBox(width: 4),
+                // 上のラベルが「ID:xxx (1/2)」まで読み上げるので、同じことを
+                // 言うこの数字は読み上げから外す。見た目の要約でしかない。
+                ExcludeSemantics(
+                  child: Text(
+                    '$ordinal/$count',
+                    style: TextStyle(
+                      fontSize: 11,
+                      height: 1,
+                      leadingDistribution: TextLeadingDistribution.even,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ],
           ),
         ),
       ),

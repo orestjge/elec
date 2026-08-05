@@ -17,6 +17,8 @@ library;
 import 'package:edge_core/edge_core.dart';
 import 'package:flutter/material.dart';
 
+import 'id_icon.dart';
+
 /// レス一覧の 1 行。番号順表示では [depth] 0 の行が並ぶだけになる。
 class ThreadTreeRow {
   const ThreadTreeRow({required this.res, this.depth = 0, this.quote = false});
@@ -231,12 +233,26 @@ class QuotedResRow extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                res.id == null ? '>>${res.number}' : '>>${res.number} ID:${res.id}',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: dim,
-                  fontWeight: FontWeight.w600,
-                ),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    '>>${res.number}',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: dim,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  // 返信先が誰かはヘッダのアイコンと見比べて分かればいいので、
+                  // ここも同じ絵を出す。この行の ID は押せないため輪は付けない。
+                  if (res.id != null) ...[
+                    const SizedBox(width: 6),
+                    Semantics(
+                      label: 'ID:${res.id}',
+                      child: IdIcon(id: res.id!, size: 14),
+                    ),
+                  ],
+                ],
               ),
               if (excerpt.isNotEmpty)
                 Text(

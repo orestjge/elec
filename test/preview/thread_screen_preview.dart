@@ -52,7 +52,8 @@ class _StaticFetcher implements HttpFetcher {
 /// レス 2 に 5 件・レス 3 に 12 件の返信、レス 8 は自分のレス（＝自分宛も付く）。
 /// [watchoi] を立てると、名前に `</b>(L20 ...)<b>` が付いた板（ワッチョイ有効）の
 /// dat になる。実データと同じ形にしてある（experiment_sample.dat 参照）。
-List<int> _dat({bool watchoi = false}) {
+/// [noId] を立てると ID 表示が無い板の dat になる（日付欄に `ID:` が付かない）。
+List<int> _dat({bool watchoi = false, bool noId = false}) {
   const ids = ['aB3xYz9Qw', 'Kd8mN2pLr', 'Qw7vT4sZx', 'Hj5cB1nMe'];
   final bytes = <int>[];
   for (var i = 1; i <= 60; i++) {
@@ -76,11 +77,10 @@ List<int> _dat({bool watchoi = false}) {
     final name = watchoi
         ? '$base </b>(L20 ${ids[i % ids.length].substring(0, 4)}-6NV7)<b>'
         : base;
+    final date = '2025/11/03(月) 02:14:${i.toString().padLeft(2, '0')}.907';
+    final dateAndId = noId ? date : '$date ID:${ids[i % ids.length]}';
     bytes.addAll(
-      _datLine(
-        '$name<><>2025/11/03(月) 02:14:${i.toString().padLeft(2, '0')}.907 '
-        'ID:${ids[i % ids.length]}<> $body <>${i == 1 ? 'スレタイ' : ''}',
-      ),
+      _datLine('$name<><>$dateAndId<> $body <>${i == 1 ? 'スレタイ' : ''}'),
     );
   }
   return bytes;
@@ -94,6 +94,7 @@ Future<void> _shoot(
   String out, {
   double width = 420,
   bool watchoi = false,
+  bool noId = false,
   ThreadLayout layout = ThreadLayout.number,
   int? lastSeen,
 }) async {
@@ -117,7 +118,7 @@ Future<void> _shoot(
         child: ThreadScreen(
           threadKey: '1762103691',
           threadTitle: 'スレマップと返信数の見た目を確認するスレ',
-          fetcher: _StaticFetcher(_dat(watchoi: watchoi)),
+          fetcher: _StaticFetcher(_dat(watchoi: watchoi, noId: noId)),
           // 撮っている間にポーリングが走らないよう十分長くする。
           pollInterval: const Duration(hours: 1),
           readHistory: history,
@@ -174,6 +175,11 @@ void main() {
   });
 
   // ツリー表示（未読スレ）。返信がぶら下がって字下げされる。
+  // ID 表示が無い板。identicon を出せないので、代わりの枠でレスの切れ目を保つ。
+  testWidgets('no id', (tester) async {
+    await _shoot(tester, ElecTheme.light(), '$dir/thread_no_id.png', noId: true);
+  });
+
   testWidgets('tree', (tester) async {
     await _shoot(
       tester,
