@@ -659,10 +659,6 @@ class _Placeholder extends StatelessWidget {
   }
 }
 
-/// ビューアの 1 ページの見え方。拡大率と、画像が画面上で横にどこまで動いているか。
-/// 拡大中のスワイプを画像のパンに回すかページ送りに回すかの判断に使う。
-typedef _PageZoom = ({double scale, double x});
-
 /// 全画面の画像ビューア。ピンチズーム・パン可能。
 class _ImageViewer extends StatefulWidget {
   const _ImageViewer({required this.urls, required this.initialIndex});
@@ -678,10 +674,15 @@ class _ImageViewerState extends State<_ImageViewer> {
   late int _index;
   final _activePointers = <int>{};
 
-  /// ページごとの現在の見え方。拡大中は上下スワイプを閉じる操作に使わず、左右スワイプ
-  /// も画像が動く間はページ送りにせず、どちらも InteractiveViewer のパン
-  /// （画像をずらして見る）へ譲るために見る。
-  final _zooms = <int, _PageZoom>{};
+  /// 拡大・パンの変換。[PageView] の外側に置いた [InteractiveViewer] が持つ。
+  ///
+  /// ページの中に置くと、ページ送りが流れている間は [Scrollable] が中身を
+  /// [IgnorePointer] で塞いでしまい、指がビューアまで届かず拡大できない。外側なら
+  /// いつでも届く。ページを移ったら等倍へ戻す。
+  final _view = TransformationController();
+
+  /// 直近に見た拡大中かどうか。切り替わったときだけ組み直す。
+  bool _wasZoomed = false;
 
   Duration? _dragStartTime;
   double _dragDx = 0;
@@ -719,10 +720,13 @@ class _ImageViewerState extends State<_ImageViewer> {
     super.initState();
     _index = widget.initialIndex;
     _page = PageController(initialPage: _index);
+    _view.addListener(_onViewChanged);
   }
 
   @override
   void dispose() {
+    _view.removeListener(_onViewChanged);
+    _view.dispose();
     _page.dispose();
     super.dispose();
   }
@@ -731,25 +735,24 @@ class _ImageViewerState extends State<_ImageViewer> {
 
   /// 表示中のページが拡大されているか。等倍のときだけ上下スワイプを閉じる操作・
   /// 左右スワイプをページ送りに割り当て、拡大中はドラッグを画像のパンとして通す。
-  bool get _zoomed => (_zooms[_index]?.scale ?? 1) > 1.01;
+  bool get _zoomed => _view.value.getMaxScaleOnAxis() > 1.01;
 
-  /// 表示中の画像が画面上で横にどこまで動いているか。
-  double get _imageX => _zooms[_index]?.x ?? 0;
+  /// 表示中の画像が画面上で横にどこまで動いているか。端に着くと動かなくなるので、
+  /// これが動かないことで「もうずらせない」と分かる。
+  double get _imageX => MatrixUtils.transformPoint(_view.value, Offset.zero).dx;
 
-  /// ページの見え方が変わった。表示中のページで等倍かどうかが切り替わったときだけ
-  /// 組み直す（左右スワイプの行き先を PageView と画像のパンで入れ替えるため）。
-  /// 端に着いたかどうかはドラッグ中に読むだけなので、組み直しは要らない。
-  void _onZoomChanged(int page, _PageZoom zoom) {
-    final wasZoomed = _zoomed;
-    _zooms[page] = zoom;
-    if (page == _index && _zoomed != wasZoomed) setState(() {});
+  /// 見え方が変わった。等倍かどうかが切り替わったときだけ組み直す（左右スワイプの
+  /// 行き先を PageView と画像のパンで入れ替えるため）。端に着いたかどうかは
+  /// ドラッグ中に読むだけなので、組み直しは要らない。
+  void _onViewChanged() {
+    if (_zoomed == _wasZoomed) return;
+    setState(() => _wasZoomed = _zoomed);
   }
 
-  /// ページが変わった。離れたページの [_ZoomableImage] は破棄され拡大率も等倍へ
-  /// 戻るので、控えていた値も一緒に捨てる（戻ってきたときに拡大中と誤らせない）。
+  /// ページが変わった。次の画像は等倍から見せる。
   void _onPageChanged(int page) {
     setState(() {
-      _zooms.clear();
+      _view.value = Matrix4.identity();
       _index = page;
     });
   }
@@ -774,6 +777,9 @@ class _ImageViewerState extends State<_ImageViewer> {
   void _onPointerDown(PointerDownEvent event) {
     _activePointers.add(event.pointer);
     if (_activePointers.length > 1) {
+      // 2本目が降りた＝ピンチ。ページ送りを止めて（[_pageLocked] が立つ）指を
+      // まるごと拡大縮小へ回す。止めないと PageView のドラッグが先に成立して
+      // しまい、拡大が効かないままページだけ動くことがある。
       _resetDrag();
       _dragRejected = true;
       return;
@@ -902,6 +908,10 @@ class _ImageViewerState extends State<_ImageViewer> {
     );
   }
 
+  /// ページ送りを PageView に任せない状態か。拡大中は指を画像のパンに使い、
+  /// ピンチ中は拡大縮小に使う。
+  bool get _pageLocked => _zoomed || _activePointers.length > 1;
+
   @override
   Widget build(BuildContext context) {
     final multiple = widget.urls.length > 1;
@@ -937,20 +947,24 @@ class _ImageViewerState extends State<_ImageViewer> {
                 opacity: (1 - _dragDy.abs() / 320).clamp(0.5, 1.0),
                 child: Stack(
                   children: [
-                    PageView.builder(
-                      controller: _page,
-                      itemCount: widget.urls.length,
-                      // 拡大中は PageView にページ送りをさせない。指の動きは画像
-                      // をずらして見る操作に使い、端まで寄せ切ってからのスワイプ
-                      // だけ [_onPointerUp] が隣の画像へ回す。
-                      physics: _zoomed
-                          ? const NeverScrollableScrollPhysics()
-                          : null,
-                      onPageChanged: _onPageChanged,
-                      itemBuilder: (context, i) => _ZoomableImage(
-                        url: widget.urls[i],
-                        onDismiss: _close,
-                        onZoomChanged: (zoom) => _onZoomChanged(i, zoom),
+                    InteractiveViewer(
+                      transformationController: _view,
+                      minScale: 1,
+                      maxScale: 5,
+                      child: PageView.builder(
+                        controller: _page,
+                        itemCount: widget.urls.length,
+                        // 拡大中は PageView にページ送りをさせない。指の動きは
+                        // 画像をずらして見る操作に使い、端まで寄せ切ってからの
+                        // スワイプだけ [_onPointerUp] が隣の画像へ回す。
+                        physics: _pageLocked
+                            ? const NeverScrollableScrollPhysics()
+                            : null,
+                        onPageChanged: _onPageChanged,
+                        itemBuilder: (context, i) => _ViewerImage(
+                          url: widget.urls[i],
+                          onDismiss: _close,
+                        ),
                       ),
                     ),
                     if (multiple) ...[
@@ -981,63 +995,32 @@ class _ImageViewerState extends State<_ImageViewer> {
 String _mediaFileName(Uri url) =>
     url.pathSegments.isNotEmpty ? url.pathSegments.last : url.host;
 
-/// 画面全体でピンチズーム・パンでき、画像の外側（余白）タップで閉じられる画像。
-class _ZoomableImage extends StatefulWidget {
-  const _ZoomableImage({
-    required this.url,
-    required this.onDismiss,
-    required this.onZoomChanged,
-  });
+/// ビューアの 1 ページ。画像の外側（余白）タップで閉じられる。
+///
+/// 拡大縮小・パンは親（[PageView] の外側の [InteractiveViewer]）が受け持つので、
+/// ここは表示だけを見る。
+class _ViewerImage extends StatefulWidget {
+  const _ViewerImage({required this.url, required this.onDismiss});
   final Uri url;
   final VoidCallback onDismiss;
 
-  /// 拡大率や寄せ切っている端が変わるたび呼ぶ。親が「拡大中は閉じるスワイプを
-  /// 止める」「端からのスワイプは隣の画像へ送る」判定に使う。
-  final ValueChanged<_PageZoom> onZoomChanged;
-
   @override
-  State<_ZoomableImage> createState() => _ZoomableImageState();
+  State<_ViewerImage> createState() => _ViewerImageState();
 }
 
-class _ZoomableImageState extends State<_ZoomableImage> {
-  final TransformationController _controller = TransformationController();
+class _ViewerImageState extends State<_ViewerImage> {
   ImageStream? _stream;
   ImageStreamListener? _listener;
   RemoteImage? _provider;
   Size? _imageSize;
 
-  /// 直近に親へ伝えた見え方。同じ内容を繰り返し伝えないために持つ。
-  _PageZoom _zoom = (scale: 1, x: 0);
-
   /// 大きすぎて自動読み込みを見送った。タップされるまで通信しない。
   bool _tooLarge = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller.addListener(_reportZoom);
-  }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     _updateProvider();
-  }
-
-  void _reportZoom() {
-    final matrix = _controller.value;
-    final zoom = (
-      scale: matrix.getMaxScaleOnAxis(),
-      // 画像が画面上で横にどこまで動いたか。端に着くと動かなくなるので、親は
-      // これが動かないことで「もうずらせない」と分かる。
-      x: MatrixUtils.transformPoint(matrix, Offset.zero).dx,
-    );
-    if ((zoom.scale - _zoom.scale).abs() < 0.001 &&
-        (zoom.x - _zoom.x).abs() < 0.001) {
-      return;
-    }
-    _zoom = zoom;
-    widget.onZoomChanged(zoom);
   }
 
   /// 「読み込む」を選んだ。以後この URL は上限を上げて読む。
@@ -1097,8 +1080,6 @@ class _ZoomableImageState extends State<_ZoomableImage> {
     if (_stream != null && _listener != null) {
       _stream!.removeListener(_listener!);
     }
-    _controller.removeListener(_reportZoom);
-    _controller.dispose();
     super.dispose();
   }
 
@@ -1123,14 +1104,9 @@ class _ZoomableImageState extends State<_ZoomableImage> {
   }
 
   void _handleTapUp(Offset position, Size viewport) {
-    // タップ位置を変換前の座標へ戻し、画像矩形の外なら閉じる。
-    final inverted = Matrix4.tryInvert(_controller.value);
-    final scenePoint = inverted == null
-        ? position
-        : MatrixUtils.transformPoint(inverted, position);
-    if (!_fittedRect(viewport).contains(scenePoint)) {
-      widget.onDismiss();
-    }
+    // 拡大縮小は親が外側で掛けているので、ここに届く位置は既に変換前の座標。
+    // 画像矩形の外なら閉じる。
+    if (!_fittedRect(viewport).contains(position)) widget.onDismiss();
   }
 
   @override
@@ -1147,33 +1123,28 @@ class _ZoomableImageState extends State<_ZoomableImage> {
         return Stack(
           fit: StackFit.expand,
           children: [
-            InteractiveViewer(
-              transformationController: _controller,
-              minScale: 1,
-              maxScale: 5,
-              child: Image(
-                image: _provider!,
-                fit: BoxFit.contain,
-                loadingBuilder: (context, child, progress) => progress == null
-                    ? child
-                    : Center(
-                        child: _LoadProgress(
-                          progress: progress,
-                          showBytes: true,
-                          color: Colors.white70,
-                        ),
+            Image(
+              image: _provider!,
+              fit: BoxFit.contain,
+              loadingBuilder: (context, child, progress) => progress == null
+                  ? child
+                  : Center(
+                      child: _LoadProgress(
+                        progress: progress,
+                        showBytes: true,
+                        color: Colors.white70,
                       ),
-                errorBuilder: (context, error, stack) => const Center(
-                  child: Icon(
-                    Icons.broken_image_outlined,
-                    color: Colors.white54,
-                    size: 64,
-                  ),
+                    ),
+              errorBuilder: (context, error, stack) => const Center(
+                child: Icon(
+                  Icons.broken_image_outlined,
+                  color: Colors.white54,
+                  size: 64,
                 ),
               ),
             ),
             // 画像より上に薄いレイヤーを重ね、タップだけを拾う。
-            // ピンチ・パンは下の InteractiveViewer に流れる。
+            // ピンチ・パンは外側の InteractiveViewer に流れる。
             Positioned.fill(
               child: GestureDetector(
                 behavior: HitTestBehavior.translucent,

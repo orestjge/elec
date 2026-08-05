@@ -33,7 +33,7 @@ class _StubFetcher implements HttpFetcher {
 
 /// 全画面ビューアの表示中の画像を2本指のピンチで拡大する。
 Future<void> _pinchZoom(WidgetTester tester) async {
-  final center = tester.getCenter(find.byType(InteractiveViewer));
+  final center = tester.getCenter(find.byType(PageView));
   final left = await tester.startGesture(center - const Offset(20, 0));
   final right = await tester.startGesture(center + const Offset(20, 0));
   await tester.pump();
@@ -44,6 +44,13 @@ Future<void> _pinchZoom(WidgetTester tester) async {
   await right.up();
   await tester.pumpAndSettle();
 }
+
+/// 全画面ビューアの現在の拡大率。
+double _viewerScale(WidgetTester tester) => tester
+    .widget<InteractiveViewer>(find.byType(InteractiveViewer))
+    .transformationController!
+    .value
+    .getMaxScaleOnAxis();
 
 /// 2本指スクロール（デスクトップではドラッグの代わりにこれが来る）を送る。
 /// [kind] を mouse にするとホイール相当。
@@ -268,6 +275,53 @@ void main() {
     await tester.drag(find.byType(PageView), const Offset(2000, 0));
     await tester.pumpAndSettle();
     expect(find.text('1/2  a.jpg'), findsOneWidget);
+  });
+
+  testWidgets('ページ送りが流れている最中でもピンチで拡大できる', (tester) async {
+    final urls = [
+      Uri.parse('https://example.com/a.jpg'),
+      Uri.parse('https://example.com/b.png'),
+      Uri.parse('https://example.com/c.webp'),
+    ];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: PostImages(urls: urls)),
+      ),
+    );
+
+    await tester.tap(find.byType(GestureDetector).first);
+    await tester.pumpAndSettle();
+
+    // 隣へ送り、まだ流れ着かないうちにピンチする。
+    await tester.fling(find.byType(PageView), const Offset(-300, 0), 800);
+    await tester.pump(const Duration(milliseconds: 40));
+    await _pinchZoom(tester);
+    expect(_viewerScale(tester), greaterThan(1));
+
+    // ピンチの2本指がページ送りへ流れていない。
+    expect(find.text('3/3  c.webp'), findsNothing);
+  });
+
+  testWidgets('ボタンでのページ送りの最中でもピンチで拡大できる', (tester) async {
+    final urls = [
+      Uri.parse('https://example.com/a.jpg'),
+      Uri.parse('https://example.com/b.png'),
+    ];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: PostImages(urls: urls)),
+      ),
+    );
+
+    await tester.tap(find.byType(GestureDetector).first);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.chevron_right));
+    await tester.pump(const Duration(milliseconds: 40));
+    await _pinchZoom(tester);
+    expect(_viewerScale(tester), greaterThan(1));
   });
 
   testWidgets('動画URLは非対応プラットフォームでは再生カードにする', (tester) async {
