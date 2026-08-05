@@ -405,4 +405,31 @@ void main() {
     await tester.tap(find.text('ニコニコ動画'));
     expect(tapped.single.url, Uri.parse('https://www.nicovideo.jp/watch/sm9'));
   });
+
+  testWidgets('幅が足りないカードは高さも一緒に縮めて 16:9 を保つ', (tester) async {
+    // ツリー表示の深いインデントや狭い端末では、カードの既定幅（160×16/9＝284）が
+    // 入らない。高さを固定したままだと横長の動画が縦長のカードになる。
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Align(
+            alignment: Alignment.topLeft,
+            child: SizedBox(
+              width: 120,
+              child: PostImages(
+                urls: const [],
+                embedVideos: embedVideosIn('https://youtu.be/dQw4w9WgXcQ'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final card = tester.getRect(
+      find.ancestor(of: find.text('YouTube'), matching: find.byType(InkWell)),
+    );
+    expect(card.width, 120);
+    expect(card.width / card.height, moreOrLessEquals(16 / 9));
+  });
 }

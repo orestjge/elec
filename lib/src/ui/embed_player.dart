@@ -1,65 +1,62 @@
-/// YouTube / ニコニコ動画などのサービス動画をアプリ内で開く WebView 画面。
+/// YouTube / ニコニコ動画などのサービス動画をアプリ内で再生する WebView。
+///
+/// 画面ではなく [MiniPlayerHost] に置かれる部品で、全画面と小窓の両方で使う。
+/// 開くのは `mini_player.dart` の `openEmbedPlayer`。
 library;
 
-import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../net/auth_launcher.dart';
 import 'embed_urls.dart';
 
-void openEmbedPlayer(
-  BuildContext context,
-  EmbedVideo video, {
-  ValueChanged<Uri>? onOpenExternally,
-}) {
-  if (!_supportsEmbedWebView) {
-    if (onOpenExternally != null) {
-      onOpenExternally(video.url);
-    } else {
-      const SystemBrowserLauncher().open(video.url);
-    }
-    return;
-  }
-
-  Navigator.of(context).push(
-    PageRouteBuilder<void>(
-      transitionDuration: const Duration(milliseconds: 180),
-      reverseTransitionDuration: const Duration(milliseconds: 180),
-      pageBuilder: (_, _, _) =>
-          EmbedPlayerScreen(video: video, onOpenExternally: onOpenExternally),
-      transitionsBuilder: (_, animation, _, child) =>
-          FadeTransition(opacity: animation, child: child),
-    ),
-  );
-}
-
 @visibleForTesting
 TargetPlatform? debugEmbedPlayerTargetPlatform;
 
-bool get _supportsEmbedWebView {
+/// アプリ内 WebView でサービス動画を再生できるか。macOS には WebView の実装が
+/// 無いので、その場合はブラウザへ回す。
+bool get supportsEmbedWebView {
   return switch (debugEmbedPlayerTargetPlatform ?? defaultTargetPlatform) {
     TargetPlatform.android || TargetPlatform.iOS => true,
     _ => false,
   };
 }
 
-class EmbedPlayerScreen extends StatefulWidget {
-  const EmbedPlayerScreen({
+/// サービス動画を再生する WebView と、その周りの操作。
+///
+/// [mini] のときは**映像だけ**を出す。小窓の操作（移動・全画面へ戻す・閉じる）は
+/// [MiniPlayerHost] 側が映像の上に敷くので、ここでは何も重ねない。
+class EmbedPlayerView extends StatefulWidget {
+  const EmbedPlayerView({
     super.key,
     required this.video,
+    required this.onClose,
+    required this.onMinimize,
+    this.mini = false,
     this.onOpenExternally,
   });
 
   final EmbedVideo video;
+
+  /// 再生をやめる。
+  final VoidCallback onClose;
+
+  /// 小窓へ落とす（再生は続く）。
+  final VoidCallback onMinimize;
+
+  /// 小窓として描くかどうか。
+  final bool mini;
+
+  /// 「ブラウザで開く」の実処理。未指定ならシステムブラウザで開く。
   final ValueChanged<Uri>? onOpenExternally;
 
   @override
-  State<EmbedPlayerScreen> createState() => _EmbedPlayerScreenState();
+  State<EmbedPlayerView> createState() => _EmbedPlayerViewState();
 }
 
-class _EmbedPlayerScreenState extends State<EmbedPlayerScreen> {
+class _EmbedPlayerViewState extends State<EmbedPlayerView> {
   late final WebViewController _controller;
   var _progress = 0;
   var _failed = false;
@@ -90,8 +87,6 @@ class _EmbedPlayerScreenState extends State<EmbedPlayerScreen> {
       );
   }
 
-  Future<void> _close() => Navigator.of(context).maybePop();
-
   void _openExternally() {
     final handler = widget.onOpenExternally;
     if (handler != null) {
@@ -103,15 +98,27 @@ class _EmbedPlayerScreenState extends State<EmbedPlayerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: CallbackShortcuts(
-        bindings: {const SingleActivator(LogicalKeyboardKey.escape): _close},
-        child: Focus(
-          autofocus: true,
-          child: Stack(
-            children: [
-              SafeArea(child: WebViewWidget(controller: _controller)),
+    final mini = widget.mini;
+    // **WebView の居場所を全画面と小窓で変えない。** 組み直すとネイティブの
+    // WebView ごと作り直され、再生が頭に戻る。ノッチ避けも SafeArea を出し入れ
+    // せず、常に居る Padding の値だけを切り替える。
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.escape): widget.onClose,
+      },
+      child: Focus(
+        autofocus: true,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Padding(
+              padding: mini ? EdgeInsets.zero : MediaQuery.paddingOf(context),
+              child: frameEmbedSurface(
+                widget.video,
+                WebViewWidget(controller: _controller),
+              ),
+            ),
+            if (!mini) ...[
               if (_progress < 100 && !_failed)
                 const Positioned(
                   top: 0,
@@ -135,14 +142,23 @@ class _EmbedPlayerScreenState extends State<EmbedPlayerScreen> {
                   alignment: Alignment.topLeft,
                   child: Padding(
                     padding: const EdgeInsets.all(4),
-                    child: IconButton(
-                      tooltip: '閉じる',
-                      color: Colors.white,
-                      style: IconButton.styleFrom(
-                        backgroundColor: Colors.black.withValues(alpha: 0.45),
-                      ),
-                      onPressed: _close,
-                      icon: const Icon(Icons.close),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _chromeButton(
+                          tooltip: '閉じる',
+                          icon: Icons.close,
+                          onPressed: widget.onClose,
+                        ),
+                        const SizedBox(width: 4),
+                        // WebView は指を取るのでスワイプで畳めない。小窓へ
+                        // 落とす操作はボタンで出す。
+                        _chromeButton(
+                          tooltip: '小さくする',
+                          icon: Icons.keyboard_arrow_down,
+                          onPressed: widget.onMinimize,
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -152,24 +168,56 @@ class _EmbedPlayerScreenState extends State<EmbedPlayerScreen> {
                   alignment: Alignment.topRight,
                   child: Padding(
                     padding: const EdgeInsets.all(4),
-                    child: IconButton(
+                    child: _chromeButton(
                       tooltip: 'ブラウザで開く',
-                      color: Colors.white,
-                      style: IconButton.styleFrom(
-                        backgroundColor: Colors.black.withValues(alpha: 0.45),
-                      ),
+                      icon: Icons.open_in_browser,
                       onPressed: _openExternally,
-                      icon: const Icon(Icons.open_in_browser),
                     ),
                   ),
                 ),
               ),
             ],
-          ),
+          ],
         ),
       ),
     );
   }
+
+  Widget _chromeButton({
+    required String tooltip,
+    required IconData icon,
+    required VoidCallback onPressed,
+  }) => IconButton(
+    tooltip: tooltip,
+    color: Colors.white,
+    style: IconButton.styleFrom(
+      backgroundColor: Colors.black.withValues(alpha: 0.45),
+    ),
+    onPressed: onPressed,
+    icon: Icon(icon),
+  );
+}
+
+/// 映像を出す枠。
+///
+/// **YouTube の埋め込みプレーヤーは渡した枠に映像を収める。** 縦画面いっぱいの
+/// WebView を渡すと、その縦長の枠に 16:9 を収めた絵——上下に大きな黒帯、
+/// 再生前のサムネイルも縦長の枠の中——になる。枠のほうを 16:9 に切って中央に
+/// 置けば、映像とサムネイルが枠いっぱいに出る（mp4 のプレーヤーが
+/// `AspectRatio` で映像の比率どおりに出しているのと同じ考え）。
+///
+/// **ニコニコは枠を切らない。** 出しているのは動画だけでなく watch ページ
+/// そのもの（コメント欄も含む）なので、画面いっぱいのほうが読める。
+///
+/// 小窓は枠自体が 16:9 なので、どちらの経路でも見た目は変わらない。
+@visibleForTesting
+Widget frameEmbedSurface(EmbedVideo video, Widget surface) {
+  if (video.kind != EmbedKind.youtube) return surface;
+  // Center を挟むのは AspectRatio に緩い制約を渡すため（きつい制約のままだと
+  // AspectRatio は枠の大きさをそのまま返して何も効かない）。
+  return Center(
+    child: AspectRatio(aspectRatio: 16 / 9, child: surface),
+  );
 }
 
 @visibleForTesting

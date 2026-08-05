@@ -29,7 +29,7 @@ import 'post_item.dart';
 import 'reply_tier.dart';
 import 'thread_map.dart';
 import 'thread_tree.dart';
-import 'video_player_screen.dart';
+import 'mini_player.dart';
 import 'write_auth.dart';
 
 /// スレッド画面。dat を差分ポーリングし、レスを番号順に並べる。

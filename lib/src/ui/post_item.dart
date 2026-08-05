@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'embed_urls.dart';
-import 'embed_player_screen.dart';
+import 'mini_player.dart';
 import 'id_color.dart';
 import 'image_urls.dart';
 import 'post_images.dart';
