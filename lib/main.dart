@@ -14,6 +14,7 @@ import 'src/net/ng_store.dart';
 import 'src/net/read_history.dart';
 import 'src/net/thread_sort_settings.dart';
 import 'src/net/thread_view_settings.dart';
+import 'src/ui/mini_player.dart';
 import 'src/ui/thread_list_screen.dart';
 import 'theme.dart';
 
@@ -50,6 +51,10 @@ class ElecApp extends StatelessWidget {
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
       theme: ElecTheme.light(),
       darkTheme: ElecTheme.dark(),
+      // 動画は Navigator の外（この層）に置く。全画面から小窓へ落としても
+      // 作り直されず、スレを移っても再生が続く。
+      builder: (context, child) =>
+          MiniPlayerHost(child: child ?? const SizedBox.shrink()),
       home: const _BoardHome(),
     );
   }

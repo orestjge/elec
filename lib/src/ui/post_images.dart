@@ -9,9 +9,9 @@ import 'audio_player_widget.dart';
 import 'embed_urls.dart';
 import 'format.dart';
 import 'image_urls.dart';
+import 'mini_player.dart';
 import 'nico_thumbnail.dart';
 import 'remote_image.dart';
-import 'video_player_screen.dart';
 import 'video_thumbnail.dart';
 
 /// 画像URL群を全画面ビューアで開く。
@@ -517,73 +517,80 @@ class _EmbedThumb extends StatelessWidget {
   Widget _card(BuildContext context, {required Uri? thumbnail}) {
     final scheme = Theme.of(context).colorScheme;
     final aspectRatio = video.kind == EmbedKind.youtube ? 16 / 9 : 1.25;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
-      child: Container(
-        height: size,
-        width: size * aspectRatio,
-        decoration: BoxDecoration(
-          color: scheme.surfaceContainerHighest,
+    // **幅が足りないときは高さも一緒に縮める。** 高さを固定して幅だけ詰めると、
+    // ツリー表示の深いインデントや狭い端末で横長の動画が縦長のカードになり、
+    // 16:9 のサムネイルが左右から大きく切り落とされる。
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: size * aspectRatio),
+      child: AspectRatio(
+        aspectRatio: aspectRatio,
+        child: InkWell(
+          onTap: onTap,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: scheme.outlineVariant),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            if (thumbnail != null)
-              Image(
-                image: RemoteImage(
-                  thumbnail,
-                  target:
-                      Size(size * aspectRatio, size) *
-                      MediaQuery.devicePixelRatioOf(context),
-                  cover: true,
-                ),
-                fit: BoxFit.cover,
-                errorBuilder: (context, error, stack) => const SizedBox(),
-              ),
-            // サムネイルの上に薄い暗幕を敷き、再生アイコンと見出しを読みやすく。
-            if (thumbnail != null)
-              const DecoratedBox(
-                decoration: BoxDecoration(color: Colors.black26),
-              ),
-            Center(
-              child: Icon(
-                Icons.play_circle_fill,
-                size: 52,
-                color: thumbnail != null ? Colors.white : scheme.primary,
-              ),
+          child: Container(
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: scheme.outlineVariant),
             ),
-            Positioned(
-              left: 8,
-              right: 8,
-              bottom: 8,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: scheme.surface.withValues(alpha: 0.88),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 7,
-                    vertical: 4,
+            clipBehavior: Clip.antiAlias,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                if (thumbnail != null)
+                  Image(
+                    image: RemoteImage(
+                      thumbnail,
+                      target:
+                          Size(size * aspectRatio, size) *
+                          MediaQuery.devicePixelRatioOf(context),
+                      cover: true,
+                    ),
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stack) => const SizedBox(),
                   ),
-                  child: Text(
-                    video.label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: scheme.onSurface,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
+                // サムネイルの上に薄い暗幕を敷き、再生アイコンと見出しを読みやすく。
+                if (thumbnail != null)
+                  const DecoratedBox(
+                    decoration: BoxDecoration(color: Colors.black26),
+                  ),
+                Center(
+                  child: Icon(
+                    Icons.play_circle_fill,
+                    size: 52,
+                    color: thumbnail != null ? Colors.white : scheme.primary,
+                  ),
+                ),
+                Positioned(
+                  left: 8,
+                  right: 8,
+                  bottom: 8,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: scheme.surface.withValues(alpha: 0.88),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 4,
+                      ),
+                      child: Text(
+                        video.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: scheme.onSurface,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ),
                   ),
                 ),
-              ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );

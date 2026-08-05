@@ -1,9 +1,12 @@
-/// mp4 等の動画直リンクをアプリ内で再生する全画面プレーヤー。
+/// mp4 等の動画直リンクをアプリ内で再生するプレーヤー。
 ///
 /// これまで動画サムネのタップはブラウザへ飛ばしていたが、スレの流れを切らずに
 /// 見られるよう `video_player`（Android: ExoPlayer / iOS・macOS: AVFoundation）で
 /// アプリ内再生する。再生できない形式・コーデックのために「ブラウザで開く」の
 /// 逃げ道は残す。
+///
+/// 画面ではなく [MiniPlayerHost] に置かれる部品で、全画面と小窓の両方で使う。
+/// 開くのは `mini_player.dart` の `openVideoPlayer`。
 library;
 
 import 'dart:async';
@@ -15,53 +18,44 @@ import 'package:video_player/video_player.dart';
 import '../net/auth_launcher.dart';
 import 'audio_player_widget.dart';
 
-/// [url] をアプリ内の全画面プレーヤーで開く。
+/// 動画 URL を再生する部品。
 ///
-/// [onOpenExternally] を渡すと「ブラウザで開く」をそのハンドラに委ねる（画面側の
-/// ランチャーを使いたい場合）。未指定ならシステムブラウザで開く。
-///
-/// 遷移はフェード。スワイプで閉じるとき、映像は指を離した位置に残したまま消えて
-/// ほしいので、スライド系（fullscreenDialog の下方向）だと動きが二重になる。
-void openVideoPlayer(
-  BuildContext context,
-  Uri url, {
-  ValueChanged<Uri>? onOpenExternally,
-}) {
-  Navigator.of(context).push(
-    PageRouteBuilder<void>(
-      transitionDuration: const Duration(milliseconds: 180),
-      reverseTransitionDuration: const Duration(milliseconds: 180),
-      pageBuilder: (_, _, _) =>
-          VideoPlayerScreen(url: url, onOpenExternally: onOpenExternally),
-      transitionsBuilder: (_, animation, _, child) =>
-          FadeTransition(opacity: animation, child: child),
-    ),
-  );
-}
-
-/// 動画 URL を全画面で再生する画面。
-class VideoPlayerScreen extends StatefulWidget {
-  const VideoPlayerScreen({
+/// [mini] のときは**映像だけ**を出す。小窓の操作（移動・全画面へ戻す・閉じる）は
+/// [MiniPlayerHost] 側が映像の上に敷くので、ここでは何も重ねない。
+class VideoPlayerView extends StatefulWidget {
+  const VideoPlayerView({
     super.key,
     required this.url,
+    required this.onClose,
+    required this.onMinimize,
+    this.mini = false,
     this.onOpenExternally,
   });
 
   final Uri url;
 
+  /// 再生をやめる。
+  final VoidCallback onClose;
+
+  /// 小窓へ落とす（再生は続く）。
+  final VoidCallback onMinimize;
+
+  /// 小窓として描くかどうか。
+  final bool mini;
+
   /// 「ブラウザで開く」の実処理。未指定ならシステムブラウザで開く。
   final ValueChanged<Uri>? onOpenExternally;
 
-  /// テスト間でセッションのミュート設定（画面をまたいで覚えている）を戻す。
+  /// テスト間でセッションのミュート設定（動画をまたいで覚えている）を戻す。
   @visibleForTesting
   static void debugResetMuted() =>
-      _VideoPlayerScreenState._mutedByDefault = false;
+      _VideoPlayerViewState._mutedByDefault = false;
 
   @override
-  State<VideoPlayerScreen> createState() => _VideoPlayerScreenState();
+  State<VideoPlayerView> createState() => _VideoPlayerViewState();
 }
 
-class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
+class _VideoPlayerViewState extends State<VideoPlayerView> {
   late final VideoPlayerController _controller;
 
   /// ミュートの選択はアプリ起動中は覚えておく。スレを流し見していると動画は
@@ -72,6 +66,14 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   bool _ready = false;
   bool _failed = false;
   bool _looping = false;
+
+  /// 操作一式を出しているか。**タップで出し入れする**（再生は止まらない）。
+  /// こうしないと、止めないと閉じる・小さくするに手が届かない＝「流しながら
+  /// 小窓にする」ができない。
+  bool _controlsVisible = false;
+
+  /// 再生中に出した操作を自動で引っ込めるためのタイマー。
+  Timer? _hideTimer;
 
   /// シークバーをドラッグ中はつまみが再生位置で飛ばないよう固定する。
   double? _dragValue;
@@ -107,21 +109,56 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       setState(() => _failed = true);
       return;
     }
+    // 最後まで来たら操作を出す。次にすること（もう一度見る・閉じる）が
+    // すぐ選べるようにするため。
+    if (_ended && !_controlsVisible) {
+      _hideTimer?.cancel();
+      setState(() => _controlsVisible = true);
+      return;
+    }
     setState(() {});
+  }
+
+  /// 最後まで再生し終えて止まっている（ループ off）。
+  bool get _ended {
+    final value = _controller.value;
+    return _ready &&
+        !value.isPlaying &&
+        !value.isLooping &&
+        value.duration > Duration.zero &&
+        value.position >= value.duration;
   }
 
   @override
   void dispose() {
+    _hideTimer?.cancel();
     _controller.removeListener(_onControllerUpdate);
     _controller.dispose();
     super.dispose();
   }
 
-  /// 映像のどこをタップしても再生/一時停止する。操作の出し入れは再生状態に
-  /// 従うので（再生中＝進捗線だけ／停止中＝操作一式）、別のトグルは持たない。
+  /// 映像のどこをタップしても**操作一式を出し入れする**（再生は止めない）。
+  /// 止めるのは操作の中央ボタン。
+  void _toggleControls() {
+    if (!_ready || _failed) return;
+    setState(() => _controlsVisible = !_controlsVisible);
+    _scheduleAutoHide();
+  }
+
+  /// 再生中に出した操作は数秒で引っ込める（映像を隠し続けない）。止めていると
+  /// きは触りたいはずなので消さない。
+  void _scheduleAutoHide() {
+    _hideTimer?.cancel();
+    if (!_controlsVisible || !_controller.value.isPlaying) return;
+    _hideTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted) setState(() => _controlsVisible = false);
+    });
+  }
+
   Future<void> _togglePlay() async {
     final value = _controller.value;
     if (value.isPlaying) {
+      _hideTimer?.cancel();
       await _controller.pause();
       return;
     }
@@ -130,6 +167,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       await _controller.seekTo(Duration.zero);
     }
     await _controller.play();
+    _scheduleAutoHide();
   }
 
   Future<void> _toggleMuted() async {
@@ -137,25 +175,19 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     await _controller.setVolume(next ? 0 : 1);
     _mutedByDefault = next;
     if (mounted) setState(() => _muted = next);
+    _scheduleAutoHide();
   }
 
   Future<void> _toggleLooping() async {
     final next = !_looping;
     await _controller.setLooping(next);
     if (mounted) setState(() => _looping = next);
+    _scheduleAutoHide();
   }
 
-  /// 再生中以外（読み込み中・一時停止・再生終了・失敗）は「閉じる」を出す。
-  /// 再生中は映像だけにしたいので出さない（タップで止めれば戻ってくる）。
-  bool get _showClose => !_ready || _failed || !_controller.value.isPlaying;
-
-  /// 閉じる。閉じられなかったとき（この画面がルートで pop 先が無い等）は、
-  /// スワイプで動かしたぶんを元に戻す。放っておくとズレたまま固まって見える。
-  Future<void> _close() async {
-    final popped = await Navigator.of(context).maybePop();
-    if (popped || !mounted) return;
-    _resetDrag();
-  }
+  /// 操作一式（と閉じる・小さくする）を出すか。読み込み中と失敗時は、逃げ道が
+  /// 要るので常に出す。
+  bool get _showChrome => !_ready || _failed || _controlsVisible;
 
   void _resetDrag() {
     setState(() {
@@ -164,7 +196,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     });
   }
 
-  /// 上下スワイプの移動量（px）。しきい値を超えて離すと閉じる。
+  /// 上下スワイプの移動量（px）。しきい値を超えて離すと確定する。
   double _dragDy = 0;
   bool _dragging = false;
 
@@ -178,61 +210,87 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     });
   }
 
+  /// **下＝小窓へ、上＝終了。** 指の向きと結果を合わせる（下へ払うと下へ縮む）。
+  /// ボタン（タップで出る▼と×）と同じことができる近道で、見ている流れを
+  /// 止めずに畳める。
   void _onDragEnd(DragEndDetails details) {
     final velocity = details.velocity.pixelsPerSecond.dy;
-    if (_dragDy.abs() > _dismissDistance || velocity.abs() > _dismissVelocity) {
-      _close();
+    final farEnough = _dragDy.abs() > _dismissDistance;
+    if (!farEnough && velocity.abs() <= _dismissVelocity) {
+      // 届かなかったぶんは元の位置へ戻す（アニメーションは AnimatedSlide 側）。
+      _resetDrag();
       return;
     }
-    // 届かなかったぶんは元の位置へ戻す（アニメーションは AnimatedSlide 側）。
+    final down = farEnough ? _dragDy > 0 : velocity > 0;
+    // 小窓は元の姿勢で出したいので、動かしたぶんは先に戻しておく
+    // （onClose の後は State ごと消えるので setState できない）。
     _resetDrag();
+    if (down) {
+      widget.onMinimize();
+    } else {
+      widget.onClose();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    // 小窓では中身に触らせない（窓の移動・全画面へ戻す・閉じるはホスト側が持つ）。
+    if (widget.mini) return Center(child: _content(compact: true));
+
     final height = MediaQuery.sizeOf(context).height;
-    return Scaffold(
-      backgroundColor: Colors.black,
-      // ヘッダーは置かない。閉じるのは上下スワイプ（＋停止中の×、Esc キー）。
-      body: CallbackShortcuts(
-        bindings: {const SingleActivator(LogicalKeyboardKey.escape): _close},
-        child: Focus(
-          autofocus: true,
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: (_ready && !_failed) ? _togglePlay : null,
-            onVerticalDragUpdate: _onDragUpdate,
-            onVerticalDragEnd: _onDragEnd,
-            child: AnimatedSlide(
-              offset: Offset(0, height == 0 ? 0 : _dragDy / height),
-              duration: _dragging
-                  ? Duration.zero
-                  : const Duration(milliseconds: 180),
-              curve: Curves.easeOut,
-              // 引っぱるほど薄くして「離すと閉じる」を予告する。閉じるボタンも
-              // 中に入れて、映像と一緒に動かす。
-              child: Opacity(
-                opacity: (1 - _dragDy.abs() / 320).clamp(0.5, 1.0),
-                child: Stack(
-                  children: [
-                    Positioned.fill(child: Center(child: _content())),
-                    if (_showClose)
-                      SafeArea(
-                        child: Align(
-                          alignment: Alignment.topLeft,
-                          child: Padding(
-                            padding: const EdgeInsets.all(4),
-                            child: IconButton(
-                              tooltip: '閉じる',
-                              color: Colors.white,
-                              onPressed: _close,
-                              icon: const Icon(Icons.close),
-                            ),
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.escape): widget.onClose,
+      },
+      child: Focus(
+        autofocus: true,
+        // ヘッダーは置かない。閉じるのは上スワイプ（＋タップで出る×、Esc キー）、
+        // 小窓へ落とすのは下スワイプ（＋タップで出る▼、戻るキー）。
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: _toggleControls,
+          onVerticalDragUpdate: _onDragUpdate,
+          onVerticalDragEnd: _onDragEnd,
+          child: AnimatedSlide(
+            offset: Offset(0, height == 0 ? 0 : _dragDy / height),
+            duration: _dragging
+                ? Duration.zero
+                : const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+            // 引っぱるほど薄くして「離すと決まる」を予告する。ボタンも中に
+            // 入れて、映像と一緒に動かす。
+            child: Opacity(
+              opacity: (1 - _dragDy.abs() / 320).clamp(0.5, 1.0),
+              child: Stack(
+                children: [
+                  Positioned.fill(child: Center(child: _content())),
+                  if (_showChrome)
+                    SafeArea(
+                      child: Align(
+                        alignment: Alignment.topLeft,
+                        child: Padding(
+                          padding: const EdgeInsets.all(4),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                tooltip: '閉じる',
+                                color: Colors.white,
+                                onPressed: widget.onClose,
+                                icon: const Icon(Icons.close),
+                              ),
+                              IconButton(
+                                tooltip: '小さくする',
+                                color: Colors.white,
+                                onPressed: widget.onMinimize,
+                                icon: const Icon(Icons.keyboard_arrow_down),
+                              ),
+                            ],
                           ),
                         ),
                       ),
-                  ],
-                ),
+                    ),
+                ],
               ),
             ),
           ),
@@ -241,12 +299,23 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     );
   }
 
-  Widget _content() {
-    if (_failed) return _Failed(onOpen: _openExternally);
-    if (!_ready) return const CircularProgressIndicator();
+  /// [compact] は小窓。操作は重ねず、下端の進捗線だけ残す（どこまで来たかは
+  /// 小さくても読めるし、面積も取らない）。
+  Widget _content({bool compact = false}) {
+    if (_failed) {
+      return compact
+          ? const Icon(Icons.videocam_off_outlined, color: Colors.white54)
+          : _Failed(onOpen: _openExternally);
+    }
+    if (!_ready) {
+      return const SizedBox.square(
+        dimension: 32,
+        child: CircularProgressIndicator(strokeWidth: 2),
+      );
+    }
 
     final value = _controller.value;
-    // タップ（再生/一時停止）とスワイプ（閉じる）は画面全体で受けるので、
+    // タップ（再生/一時停止）とスワイプ（閉じる・小窓へ）は画面全体で受けるので、
     // ここでは重ねるものだけを組み立てる。
     return Stack(
       alignment: Alignment.center,
@@ -256,14 +325,19 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
           child: VideoPlayer(_controller),
         ),
         // 読み込み待ちは操作の有無に関わらず出す（無反応に見せない）。
-        if (value.isBuffering) const CircularProgressIndicator(),
-        // 再生中は映像の前に何も置かず、下端の細い進捗線だけにする。止めると
-        // 操作一式（中央ボタン・シークバー・時間・ミュート等）を出す。
-        if (value.isPlaying)
+        if (value.isBuffering)
+          const SizedBox.square(
+            dimension: 32,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        // 操作を出していない間は映像の前に何も置かず、下端の細い進捗線だけ。
+        // タップで操作一式（中央ボタン・シークバー・時間・ミュート等）を出す。
+        if (compact || !_showChrome)
           _ProgressLine(value: value)
         else
           _Controls(
             value: value,
+            ended: _ended,
             dragValue: _dragValue,
             muted: _muted,
             looping: _looping,
@@ -271,10 +345,14 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
             onToggleMuted: _toggleMuted,
             onToggleLooping: _toggleLooping,
             onOpenExternally: _openExternally,
-            onDrag: (v) => setState(() => _dragValue = v),
+            onDrag: (v) {
+              _hideTimer?.cancel();
+              setState(() => _dragValue = v);
+            },
             onDragEnd: (v) async {
               await _controller.seekTo(Duration(milliseconds: v.round()));
               if (mounted) setState(() => _dragValue = null);
+              _scheduleAutoHide();
             },
           ),
       ],
@@ -319,12 +397,13 @@ class _Failed extends StatelessWidget {
   }
 }
 
-/// 止まっているときの操作一式（中央の大きな再生ボタン、シークバー、時間、
-/// ミュート・リピート・ブラウザ）。再生中はこれを出さず [_ProgressLine] だけに
-/// する。ヘッダーを持たないぶん、操作はすべてここに集める。
+/// タップで出る操作一式（中央の大きな再生/一時停止ボタン、シークバー、時間、
+/// ミュート・リピート・ブラウザ）。出していない間は [_ProgressLine] だけにする。
+/// ヘッダーを持たないぶん、操作はすべてここに集める。
 class _Controls extends StatelessWidget {
   const _Controls({
     required this.value,
+    required this.ended,
     required this.dragValue,
     required this.muted,
     required this.looping,
@@ -337,6 +416,10 @@ class _Controls extends StatelessWidget {
   });
 
   final VideoPlayerValue value;
+
+  /// 最後まで再生し終えて止まっている（中央ボタンを「もう一度」にする）。
+  final bool ended;
+
   final double? dragValue;
   final bool muted;
   final bool looping;
@@ -355,7 +438,6 @@ class _Controls extends StatelessWidget {
         .clamp(0, duration.inMilliseconds)
         .toDouble();
     final sliderValue = dragValue ?? posMs;
-    final ended = !value.isLooping && maxMs > 0 && posMs >= maxMs;
 
     return Stack(
       fit: StackFit.expand,
@@ -366,9 +448,11 @@ class _Controls extends StatelessWidget {
             iconSize: 64,
             color: Colors.white,
             onPressed: onTogglePlay,
-            icon: Icon(
-              ended ? Icons.replay_circle_filled : Icons.play_circle_fill,
-            ),
+            icon: Icon(switch ((value.isPlaying, ended)) {
+              (true, _) => Icons.pause_circle_filled,
+              (false, true) => Icons.replay_circle_filled,
+              (false, false) => Icons.play_circle_fill,
+            }),
           ),
         ),
         Positioned(
@@ -460,8 +544,8 @@ class _Controls extends StatelessWidget {
   }
 }
 
-/// 再生中に下端へ出す細い進捗線。映像を隠さず、どこまで来たかだけ分かればよい
-/// ので操作は受けない（タップは映像と同じく再生/一時停止に流す）。
+/// 再生中（と小窓）に下端へ出す細い進捗線。映像を隠さず、どこまで来たかだけ
+/// 分かればよいので操作は受けない。
 class _ProgressLine extends StatelessWidget {
   const _ProgressLine({required this.value});
 

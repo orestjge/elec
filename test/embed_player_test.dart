@@ -1,0 +1,110 @@
+import 'package:elec/src/ui/embed_player.dart';
+import 'package:elec/src/ui/embed_urls.dart';
+import 'package:elec/src/ui/mini_player.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+void main() {
+  tearDown(() => debugEmbedPlayerTargetPlatform = null);
+
+  testWidgets('macOS では WebView を開かずブラウザへ回す', (tester) async {
+    debugEmbedPlayerTargetPlatform = TargetPlatform.macOS;
+    final video = embedVideosIn('https://youtu.be/dQw4w9WgXcQ').single;
+    final opened = <Uri>[];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => TextButton(
+            onPressed: () =>
+                openEmbedPlayer(context, video, onOpenExternally: opened.add),
+            child: const Text('open'),
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+
+    expect(opened, [video.url]);
+    expect(find.byType(EmbedPlayerView), findsNothing);
+    // ミニプレーヤー側にも何も渡らない（小窓が空で残らないこと）。
+    expect(MiniPlayerController.shared.media, isNull);
+  });
+
+  testWidgets('YouTube の映像は縦画面いっぱいに広げず 16:9 に切って中央へ置く', (tester) async {
+    final youtube = embedVideosIn('https://youtu.be/dQw4w9WgXcQ').single;
+    final nico = embedVideosIn('https://www.nicovideo.jp/watch/sm9').single;
+    const surfaceKey = Key('surface');
+    const surface = ColoredBox(color: Colors.black, key: surfaceKey);
+
+    // 縦長の画面を渡す。埋め込みプレーヤーは渡した枠に映像を収めるので、枠が
+    // 縦長のままだと上下に大きな黒帯が出る。
+    await tester.pumpWidget(
+      Directionality(
+        textDirection: TextDirection.ltr,
+        child: Center(
+          child: SizedBox(
+            width: 360,
+            height: 500,
+            child: frameEmbedSurface(youtube, surface),
+          ),
+        ),
+      ),
+    );
+    expect(tester.getSize(find.byKey(surfaceKey)), const Size(360, 202.5));
+
+    // ニコニコは動画だけでなく watch ページ全体なので、枠は切らない。
+    await tester.pumpWidget(
+      Directionality(
+        textDirection: TextDirection.ltr,
+        child: Center(
+          child: SizedBox(
+            width: 360,
+            height: 500,
+            child: frameEmbedSurface(nico, surface),
+          ),
+        ),
+      ),
+    );
+    expect(tester.getSize(find.byKey(surfaceKey)), const Size(360, 500));
+  });
+
+  testWidgets('小窓（16:9）では枠いっぱいのまま', (tester) async {
+    final youtube = embedVideosIn('https://youtu.be/dQw4w9WgXcQ').single;
+    const surfaceKey = Key('surface');
+
+    await tester.pumpWidget(
+      Directionality(
+        textDirection: TextDirection.ltr,
+        child: Center(
+          child: SizedBox(
+            width: 200,
+            height: 112.5,
+            child: frameEmbedSurface(
+              youtube,
+              const ColoredBox(color: Colors.black, key: surfaceKey),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(tester.getSize(find.byKey(surfaceKey)), const Size(200, 112.5));
+  });
+
+  test('YouTube の WebView リクエストには Referer を付ける', () {
+    final video = embedVideosIn('https://youtu.be/dQw4w9WgXcQ').single;
+
+    expect(embedPlayerRequestHeaders(video), {
+      'Referer': 'https://io.github.orestjge.elec/',
+    });
+  });
+
+  test('ニコニコの WebView リクエストには追加ヘッダーを付けない', () {
+    final video = embedVideosIn('https://www.nicovideo.jp/watch/sm9').single;
+
+    expect(embedPlayerRequestHeaders(video), isEmpty);
+  });
+}
