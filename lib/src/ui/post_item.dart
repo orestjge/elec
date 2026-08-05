@@ -34,6 +34,7 @@ class PostItem extends StatelessWidget {
     this.onLongPress,
     this.bodySelectable = true,
     this.isOwn = false,
+    this.isThreadOwner = false,
     this.isReplyToOwn = false,
     this.showReplyToOwnAccent = true,
     this.blurImages = false,
@@ -86,6 +87,13 @@ class PostItem extends StatelessWidget {
 
   /// このアプリから投稿したレスか。
   final bool isOwn;
+
+  /// スレ主（`>>1` を書いた人）のレスか。
+  ///
+  /// スレ主はそのスレの言い出しっぺで、話の前提や進行を握っている。番号を出さない
+  /// ヘッダでは `>>1` すら他のレスと同じ見た目になってしまうので、印を付けて
+  /// 「これは立てた人の発言」と流し読みでも分かるようにする。
+  final bool isThreadOwner;
 
   /// 自分のレスへ `>>N` で返信しているレスか（自分宛のレス）。
   final bool isReplyToOwn;
@@ -183,6 +191,7 @@ class PostItem extends StatelessWidget {
             onTapId: onTapId,
             onReply: onReply,
             isOwn: isOwn,
+            isThreadOwner: isThreadOwner,
             isReplyToOwn: isReplyToOwn,
             replyCount: replyCount,
             onTapReplies: onTapReplies,
@@ -544,6 +553,7 @@ class _Header extends StatelessWidget {
     required this.onTapId,
     required this.onReply,
     required this.isOwn,
+    required this.isThreadOwner,
     required this.isReplyToOwn,
     this.replyCount = 0,
     this.onTapReplies,
@@ -561,6 +571,7 @@ class _Header extends StatelessWidget {
   final int replyCount;
   final ValueChanged<int>? onTapReplies;
   final bool isOwn;
+  final bool isThreadOwner;
   final bool isReplyToOwn;
   final String highlightQuery;
 
@@ -618,6 +629,16 @@ class _Header extends StatelessWidget {
                   // ID なしの板。アイコンごと省くと、名無し・返信なしのレスは
                   // ヘッダが時刻だけになってレスの切れ目が読めなくなる。
                   const _NoIdChip(),
+                // スレ主の印は ID アイコンのすぐ隣。「誰が」に掛かる情報なので
+                // 人物（アイコン）から離さない。長いコテハンの後ろに置くと、
+                // 折り返したときにアイコンと別の行へ飛んでしまう。★ はスレ主
+                // NG の `[xxxx★]` と同じ、このアプリでのスレ主の記号。
+                if (isThreadOwner)
+                  _OwnChip(
+                    color: scheme.tertiary,
+                    label: 'スレ主',
+                    icon: Icons.star_rounded,
+                  ),
                 // Wrap の子は Flexible にできないので、極端に長い名前だけは
                 // 行幅で頭打ちにして省略する（通常の名前はそのまま 1 チャンク）。
                 // 名無しは空文字で渡ってくるので、枠ごと出さない。

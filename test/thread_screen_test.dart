@@ -167,6 +167,17 @@ void main() {
     expect(find.text('ここから新着'), findsNothing);
   });
 
+  testWidgets('>>1 と同じ ID のレスにスレ主の印が付く', (tester) async {
+    final f = QueueFetcher([
+      ok([...res1, ...res2, ...res3]),
+    ]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    // >>1（ID:aaa）とその ID の 2 つ目にだけ付き、別 ID の >>3 には付かない。
+    expect(find.text('スレ主'), findsNWidgets(2));
+  });
+
   testWidgets('返信ボタンでコンポーザに >>N が入る', (tester) async {
     final f = QueueFetcher([
       ok([...res1, ...res2]),

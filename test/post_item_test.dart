@@ -96,6 +96,32 @@ void main() {
     handle.dispose();
   });
 
+  testWidgets('スレ主のレスにだけ印を付ける', (tester) async {
+    await tester.pumpWidget(
+      wrap(
+        Column(
+          children: [
+            PostItem(
+              res: post(1, 'aaa'),
+              idCount: 1,
+              idOrdinal: 1,
+              onTapId: (_) {},
+              isThreadOwner: true,
+            ),
+            PostItem(
+              res: post(2, 'bbb'),
+              idCount: 1,
+              idOrdinal: 1,
+              onTapId: (_) {},
+            ),
+          ],
+        ),
+      ),
+    );
+
+    expect(find.text('スレ主'), findsOneWidget);
+  });
+
   testWidgets('アイコンをタップすると ID が返る', (tester) async {
     final tapped = <String>[];
     await tester.pumpWidget(

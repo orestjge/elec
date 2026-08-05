@@ -736,6 +736,25 @@ class _ThreadScreenState extends State<ThreadScreen>
     return counts;
   }
 
+  /// スレ主（`>>1` を書いた人）の ID。ID の無い板や、`>>1` がまだ取れていない
+  /// ときは null。
+  ///
+  /// ID は日付で変わるので、日をまたいだスレの後半では同じ人でも別 ID になり、
+  /// 印が付かなくなる。それでも `>>1` 自身と、その日のスレ主の発言は拾えるので、
+  /// 「付いていれば確かにスレ主」を満たす側に倒す。
+  String? _threadOwnerId(List<Res> res) {
+    if (res.isEmpty) return null;
+    final first = res.first;
+    // 先頭が 1 でないのは差分取得の途中など。誰がスレ主か分からないので出さない。
+    return first.number == 1 ? first.id : null;
+  }
+
+  /// このレスをスレ主のものとして印を付けるか。
+  bool _isThreadOwnerPost(Res res, String? ownerId) {
+    if (res.number == 1) return true;
+    return ownerId != null && res.id == ownerId;
+  }
+
   Map<int, int> _idOrdinals(List<Res> res) {
     final seenById = <String, int>{};
     final ordinals = <int, int>{};
@@ -996,6 +1015,10 @@ class _ThreadScreenState extends State<ThreadScreen>
                     },
                     onTapUrl: _openUrl,
                     isOwn: _history.isOwnPost(widget.threadKey, res.number),
+                    isThreadOwner: _isThreadOwnerPost(
+                      res,
+                      _threadOwnerId(_state.res),
+                    ),
                     isReplyToOwn: _isReplyToOwnPost(res),
                     blurImages: guroMaskedResNumbers(
                       _state.res,
@@ -1129,6 +1152,7 @@ class _ThreadScreenState extends State<ThreadScreen>
     final idOrdinals = _idOrdinals(_state.res);
     final replyCountByNumber = replyCounts(_state.res);
     final guroMasked = guroMaskedResNumbers(_state.res);
+    final ownerId = _threadOwnerId(_state.res);
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -1240,6 +1264,7 @@ class _ThreadScreenState extends State<ThreadScreen>
                       onLongPress: () =>
                           _showResActions(post, onReply: replyAndClose),
                       isOwn: _history.isOwnPost(widget.threadKey, post.number),
+                      isThreadOwner: _isThreadOwnerPost(post, ownerId),
                       isReplyToOwn: _isReplyToOwnPost(post),
                       blurImages: guroMasked.contains(post.number),
                       defaultName: widget.defaultName,
@@ -1320,6 +1345,8 @@ class _ThreadScreenState extends State<ThreadScreen>
           onPickAndUploadFile: _pickAndUploadFile,
           onShowActions: _showResActions,
           isOwnPost: (n) => _history.isOwnPost(widget.threadKey, n),
+          isThreadOwner: (post) =>
+              _isThreadOwnerPost(post, _threadOwnerId(res)),
           isReplyToOwn: _isReplyToOwnPost,
           defaultName: widget.defaultName,
           ng: _ng,
@@ -1937,6 +1964,7 @@ class _ThreadScreenState extends State<ThreadScreen>
     final idOrdinals = _idOrdinals(res);
     final replies = replyCounts(res);
     final guroMasked = guroMaskedResNumbers(res);
+    final threadOwnerId = _threadOwnerId(res);
     // 「新着」の境界（前回位置）。0 か総数以上なら新着ライン無し。
     final hasNewArrival = _openCount > 0 && _openCount < res.length;
 
@@ -2032,6 +2060,7 @@ class _ThreadScreenState extends State<ThreadScreen>
                   onLongPress: () => _showResActions(item),
                   bodySelectable: false,
                   isOwn: _history.isOwnPost(widget.threadKey, item.number),
+                  isThreadOwner: _isThreadOwnerPost(item, threadOwnerId),
                   isReplyToOwn: _isReplyToOwnPost(item),
                   blurImages: guroMasked.contains(item.number),
                   highlightQuery: searchQuery,
@@ -2624,6 +2653,7 @@ class _ConversationSheet extends StatefulWidget {
     required this.onPickAndUploadFile,
     required this.onShowActions,
     required this.isOwnPost,
+    required this.isThreadOwner,
     required this.isReplyToOwn,
     required this.ng,
     required this.revealedNg,
@@ -2659,6 +2689,9 @@ class _ConversationSheet extends StatefulWidget {
   /// レス長押しでアクションメニューを出す。返信はシート内の入力欄へ渡す。
   final void Function(Res res, {void Function(int)? onReply}) onShowActions;
   final bool Function(int number) isOwnPost;
+
+  /// スレ主（`>>1` を書いた人）のレスか。
+  final bool Function(Res res) isThreadOwner;
 
   /// 自分のレスへ返信している（自分宛の）レスか。
   final bool Function(Res res) isReplyToOwn;
@@ -2807,6 +2840,7 @@ class _ConversationSheetState extends State<_ConversationSheet> {
                                   onReply: _replyLocal,
                                 ),
                                 isOwn: widget.isOwnPost(entry.res.number),
+                                isThreadOwner: widget.isThreadOwner(entry.res),
                                 isReplyToOwn: widget.isReplyToOwn(entry.res),
                                 showReplyToOwnAccent: false,
                                 blurImages: widget.guroMasked.contains(
