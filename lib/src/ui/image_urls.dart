@@ -24,7 +24,7 @@ final _twimgFormatRe = RegExp(r'^(jpe?g|png|gif|webp)$', caseSensitive: false);
 
 /// [text] 中の画像 URL を出現順・重複除去で返す。
 List<Uri> imageUrlsIn(String text) {
-  return _mediaUrlsIn(text, _isImageUri);
+  return _mediaUrlsIn(text, isImageUrl);
 }
 
 /// [text] 中の動画 URL を出現順・重複除去で返す。
@@ -37,10 +37,14 @@ bool isVideoUrl(Uri uri) => _videoExtRe.hasMatch(uri.path);
 
 /// [text] 中の音声 URL を出現順・重複除去で返す。
 List<Uri> audioUrlsIn(String text) {
-  return _mediaUrlsIn(text, (uri) => _audioExtRe.hasMatch(uri.path));
+  return _mediaUrlsIn(text, isAudioUrl);
 }
 
-bool _isImageUri(Uri uri) {
+/// [uri] が音声ファイルの直リンクか（インラインのプレーヤーで開く対象か）。
+bool isAudioUrl(Uri uri) => _audioExtRe.hasMatch(uri.path);
+
+/// [uri] が画像ファイルの直リンクか（サムネイルにする対象か）。
+bool isImageUrl(Uri uri) {
   // パス末尾（クエリ・フラグメントを除く）で拡張子判定。
   if (_imageExtRe.hasMatch(uri.path)) return true;
   return _isTwimgImageUri(uri);

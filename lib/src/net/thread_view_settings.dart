@@ -14,9 +14,9 @@ enum ThreadLayout {
   tree,
 }
 
-/// スレ画面の表示設定。今のところ並べ方だけ。
+/// スレ画面の表示設定。
 ///
-/// 既定は [ThreadLayout.number]。番号順は「新着が必ず一番下に来る」という
+/// 並べ方の既定は [ThreadLayout.number]。番号順は「新着が必ず一番下に来る」という
 /// 掲示板の素の読み方で、実況にも強い。ツリーは返信の筋を追いやすい代わりに
 /// レスが番号順に並ばないので、選んだ人にだけ出す。
 class ThreadViewSettings extends ChangeNotifier {
@@ -28,25 +28,53 @@ class ThreadViewSettings extends ChangeNotifier {
 
   final ThreadViewSettingsStorage _storage;
   ThreadLayout _layout = ThreadLayout.number;
+  bool _linkPreviews = true;
 
   ThreadLayout get layout => _layout;
 
+  /// 行を単独で占めるリンクの OGP を取りに行き、カードで見せるか。
+  ///
+  /// 既定は真。画像を自動で読み込むのと釣り合う扱いにしてある。ただし対象が
+  /// 「画像 URL」から**あらゆるリンク**に広がり、リンク先には読んだ人の IP が
+  /// 渡る。踏みたくないリンクにも当たるので、丸ごと切れるようにしてある。
+  bool get linkPreviews => _linkPreviews;
+
   Future<void> load() async {
-    _layout = _parse(await _storage.load()) ?? ThreadLayout.number;
+    final values = await _storage.load();
+    _layout = _parse(values['layout']) ?? ThreadLayout.number;
+    _linkPreviews = switch (values['linkPreviews']) {
+      final bool value => value,
+      // 古い設定ファイル（この項目が無い）は既定のまま。
+      _ => true,
+    };
   }
 
   Future<void> setLayout(ThreadLayout layout) async {
     if (_layout == layout) return;
     _layout = layout;
     notifyListeners();
-    // 覚え損ねても次に開いたとき既定に戻るだけなので、書けなくても投げない。
+    await _save();
+  }
+
+  Future<void> setLinkPreviews(bool enabled) async {
+    if (_linkPreviews == enabled) return;
+    _linkPreviews = enabled;
+    notifyListeners();
+    await _save();
+  }
+
+  /// 覚え損ねても次に開いたとき既定に戻るだけなので、書けなくても投げない。
+  Future<void> _save() async {
     try {
-      await _storage.save(layout.name);
+      await _storage.save({
+        'layout': _layout.name,
+        'linkPreviews': _linkPreviews,
+      });
     } catch (_) {}
   }
 
   /// 知らない名前（古い/新しい版が書いたもの）は未設定として扱う。
-  static ThreadLayout? _parse(String? name) {
+  static ThreadLayout? _parse(Object? name) {
     for (final layout in ThreadLayout.values) {
       if (layout.name == name) return layout;
     }
@@ -55,8 +83,8 @@ class ThreadViewSettings extends ChangeNotifier {
 }
 
 abstract interface class ThreadViewSettingsStorage {
-  Future<String?> load();
-  Future<void> save(String name);
+  Future<Map<String, Object?>> load();
+  Future<void> save(Map<String, Object?> values);
 }
 
 class FileThreadViewSettingsStorage implements ThreadViewSettingsStorage {
@@ -71,38 +99,36 @@ class FileThreadViewSettingsStorage implements ThreadViewSettingsStorage {
   }
 
   @override
-  Future<String?> load() async {
+  Future<Map<String, Object?>> load() async {
     try {
       final file = await _file();
-      if (!file.existsSync()) return null;
+      if (!file.existsSync()) return const {};
       final json = jsonDecode(await file.readAsString());
-      if (json is! Map) return null;
-      final name = json['layout'];
-      return name is String && name.isNotEmpty ? name : null;
+      return json is Map ? json.cast<String, Object?>() : const {};
     } catch (_) {
-      return null;
+      return const {};
     }
   }
 
   @override
-  Future<void> save(String name) async {
+  Future<void> save(Map<String, Object?> values) async {
     final file = await _file();
-    await file.writeAsString(jsonEncode({'layout': name}));
+    await file.writeAsString(jsonEncode(values));
   }
 }
 
 class MemoryThreadViewSettingsStorage implements ThreadViewSettingsStorage {
-  MemoryThreadViewSettingsStorage([this._name]);
+  MemoryThreadViewSettingsStorage([this._values = const {}]);
 
-  String? _name;
+  Map<String, Object?> _values;
 
-  String? get name => _name;
-
-  @override
-  Future<String?> load() async => _name;
+  Map<String, Object?> get values => _values;
 
   @override
-  Future<void> save(String name) async {
-    _name = name;
+  Future<Map<String, Object?>> load() async => _values;
+
+  @override
+  Future<void> save(Map<String, Object?> values) async {
+    _values = values;
   }
 }

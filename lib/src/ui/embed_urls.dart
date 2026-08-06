@@ -69,6 +69,10 @@ List<EmbedVideo> embedVideosIn(String text) {
   return result;
 }
 
+/// [uri] 単体が YouTube / ニコニコ動画のリンクなら、その動画を返す。
+/// どちらでもなければ null。本文を URL ごとに切り分けるときに使う。
+EmbedVideo? embedVideoOf(Uri uri) => _parse(uri);
+
 EmbedVideo? _parse(Uri uri) {
   final host = uri.host.toLowerCase();
   if (_youtubeHostRe.hasMatch(host)) {

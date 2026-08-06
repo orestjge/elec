@@ -111,6 +111,7 @@ Res parseDatLine(String line, int number) {
     body: body,
     kind: kind,
     threadTitle: title,
+    rawDateField: dateField,
   );
 }
 
@@ -145,6 +146,8 @@ Res parseShitarabaDatLine(String line, int fallbackNumber) {
     body: field(4),
     kind: ResKind.normal,
     threadTitle: title.isEmpty ? null : title,
+    // したらばの日付欄は ID を含まない（ID は最終フィールド）。
+    rawDateField: dateField,
   );
 }
 

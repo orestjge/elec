@@ -1,8 +1,23 @@
 import 'package:edge_core/edge_core.dart';
 import 'package:elec/src/ui/id_icon.dart';
+import 'package:elec/src/ui/post_images.dart';
 import 'package:elec/src/ui/post_item.dart';
+import 'package:elec/src/ui/res_body.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+Res postWithBody(String body) => Res(
+  number: 1,
+  name: '名無し',
+  mail: '',
+  dateText: '2025/11/03(月) 02:14:51.907',
+  dateTime: null,
+  id: 'aaa',
+  beId: null,
+  body: body,
+  kind: ResKind.normal,
+  threadTitle: null,
+);
 
 Res post(int number, String id) => Res(
   number: number,
@@ -32,8 +47,10 @@ void main() {
       ),
     );
 
-    expect(find.byWidgetPredicate((w) => w is IdIcon && w.id == 'aBc1De2f'),
-        findsOneWidget);
+    expect(
+      find.byWidgetPredicate((w) => w is IdIcon && w.id == 'aBc1De2f'),
+      findsOneWidget,
+    );
     expect(find.textContaining('ID:'), findsNothing);
   });
 
@@ -71,8 +88,18 @@ void main() {
       wrap(
         Column(
           children: [
-            PostItem(res: post(1, 'aaa'), idCount: 1, idOrdinal: 1, onTapId: (_) {}),
-            PostItem(res: post(2, 'bbb'), idCount: 3, idOrdinal: 2, onTapId: (_) {}),
+            PostItem(
+              res: post(1, 'aaa'),
+              idCount: 1,
+              idOrdinal: 1,
+              onTapId: (_) {},
+            ),
+            PostItem(
+              res: post(2, 'bbb'),
+              idCount: 3,
+              idOrdinal: 2,
+              onTapId: (_) {},
+            ),
           ],
         ),
       ),
@@ -87,7 +114,12 @@ void main() {
     final handle = tester.ensureSemantics();
     await tester.pumpWidget(
       wrap(
-        PostItem(res: post(1, 'aaa'), idCount: 2, idOrdinal: 1, onTapId: (_) {}),
+        PostItem(
+          res: post(1, 'aaa'),
+          idCount: 2,
+          idOrdinal: 1,
+          onTapId: (_) {},
+        ),
       ),
     );
 
@@ -120,6 +152,55 @@ void main() {
     );
 
     expect(find.text('スレ主'), findsOneWidget);
+  });
+
+  testWidgets('画像は貼られた位置に挟まり、URL の文字列は出さない', (tester) async {
+    await tester.pumpWidget(
+      wrap(
+        PostItem(
+          res: postWithBody('これ見て<br>https://example.com/a.jpg<br>どう？'),
+          idCount: 1,
+          idOrdinal: 1,
+          onTapId: (_) {},
+        ),
+      ),
+    );
+
+    // 本文は画像の前後で分かれ、サムネイルはその間に入る。
+    expect(find.byType(ResBody), findsNWidgets(2));
+    final images = tester.getRect(find.byType(PostImages));
+    expect(
+      tester.getRect(find.byType(ResBody).first).bottom,
+      lessThanOrEqualTo(images.top),
+    );
+    expect(
+      tester.getRect(find.byType(ResBody).last).top,
+      greaterThanOrEqualTo(images.bottom),
+    );
+
+    // サムネイルを置いた URL は本文から消える。
+    expect(find.textContaining('a.jpg', findRichText: true), findsNothing);
+    expect(find.textContaining('これ見て', findRichText: true), findsOneWidget);
+    expect(find.textContaining('どう？', findRichText: true), findsOneWidget);
+  });
+
+  testWidgets('サムネイルにできないリンクは本文に残す', (tester) async {
+    await tester.pumpWidget(
+      wrap(
+        PostItem(
+          res: postWithBody('ソース https://example.com/page.html'),
+          idCount: 1,
+          idOrdinal: 1,
+          onTapId: (_) {},
+        ),
+      ),
+    );
+
+    expect(find.byType(PostImages), findsNothing);
+    expect(
+      find.textContaining('https://example.com/page.html', findRichText: true),
+      findsOneWidget,
+    );
   });
 
   testWidgets('アイコンをタップすると ID が返る', (tester) async {

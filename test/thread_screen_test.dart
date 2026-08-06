@@ -4,6 +4,7 @@ import 'package:edge_core/edge_core.dart';
 import 'package:elec/src/net/ng_store.dart';
 import 'package:elec/src/net/read_history.dart';
 import 'package:elec/src/ui/id_icon.dart';
+import 'package:elec/src/ui/post_images.dart';
 import 'package:elec/src/ui/thread_map.dart';
 import 'package:elec/src/ui/thread_screen.dart';
 import 'package:flutter/gestures.dart';
@@ -100,13 +101,6 @@ void main() {
   );
   Finder inReplyTargetBar(String text) =>
       find.descendant(of: replyTargetBar(), matching: find.text(text));
-
-  TextSpan textSpanContaining(WidgetTester tester, String text) {
-    for (final rich in tester.widgetList<RichText>(find.byType(RichText))) {
-      if (rich.text.toPlainText().contains(text)) return rich.text as TextSpan;
-    }
-    throw StateError('TextSpan containing "$text" was not found');
-  }
 
   Iterable<TextSpan> textSpans(TextSpan span) sync* {
     yield span;
@@ -637,6 +631,63 @@ void main() {
     expect(copied.single, contains('最初のレス'));
   });
 
+  testWidgets('レス長押しに ID の操作は並べない（ID タップ側にある）', (tester) async {
+    final f = QueueFetcher([
+      ok([...res1, ...res2]),
+    ]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    await tester.longPress(find.text('1').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('レス全体をコピー'), findsOneWidget);
+    expect(find.text('ID:aaa をコピー'), findsNothing);
+    expect(find.text('ID:aaa をNGにする'), findsNothing);
+    expect(find.text('必死チェッカーで開く'), findsNothing);
+  });
+
+  testWidgets('レス長押しから、差し替えを挟まないクラシック表示を見られる', (tester) async {
+    // 画像 URL はサムネイルになって本文から消え、名前欄のワッチョイ
+    // （元データは `</b>…<b>` を含む）はヘッダで括弧の中だけになる。どちらも
+    // クラシック表示で確かめられることを見る。
+    final withImage = datLine(
+      'エッヂの名無し</b> (L20 5clL-4hXU)<b><>sage<>'
+      '2025/11/03(月) 02:14:51.907 ID:aaa<>'
+      'これ見て<br>https://example.com/a.jpg<>スレタイ',
+    );
+    final f = QueueFetcher([ok(withImage)]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    // 通常表示では URL の文字列は出ていない。
+    expect(
+      find.textContaining('https://example.com/a.jpg', findRichText: true),
+      findsNothing,
+    );
+
+    await tester.longPress(find.textContaining('これ見て', findRichText: true));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('クラシック表示で見る'));
+    await tester.pumpAndSettle();
+
+    // ヘッダと本文はひと続きの 1 つのテキスト。境目で選択が切れると、ヘッダごと
+    // なぞって持っていけないため。
+    final shown = tester.widget<SelectableText>(find.byType(SelectableText));
+    expect(
+      shown.textSpan!.toPlainText(),
+      // ヘッダは read.cgi が昔から出している 1 行。通常表示では省く名前欄も、
+      // 絵にしている ID も、日付と地続きの文字で並ぶ。
+      '1 名前:エッヂの名無し (L20 5clL-4hXU) Mail:sage '
+      '投稿日:2025/11/03(月) 02:14:51.907 ID:aaa\n'
+      '\n'
+      // 本文は URL の差し替えを挟まない。HTML は掲示板と同じく効かせるので、
+      // <br> は改行になり、タグ自体は文字として残らない。
+      'これ見て\n'
+      'https://example.com/a.jpg',
+    );
+  });
+
   testWidgets('レス長押しのアクションから返信すると入力欄に >>N が入る', (tester) async {
     final f = QueueFetcher([
       ok([...res1, ...res2]),
@@ -674,23 +725,26 @@ void main() {
     expect(find.byTooltip(longName), findsOneWidget);
   });
 
-  testWidgets('画像URLタップは同じレス内の画像ビューアを開く', (tester) async {
+  testWidgets('サムネイルタップは同じレス内の画像ビューアを開く', (tester) async {
     final f = QueueFetcher([
       ok([
         ...datLine(
           '名無し<><>2025/11/03(月) 02:14:51.907 ID:aaa<>'
-          'https://example.com/a.jpg https://example.com/b.png<>テストスレ',
+          '前置き<br>https://example.com/a.jpg<br>あいだ<br>'
+          'https://example.com/b.png<>テストスレ',
         ),
       ]),
     ]);
     await tester.pumpWidget(app(f));
     await tester.pumpAndSettle();
 
-    final body = textSpanContaining(tester, 'https://example.com/b.png');
-    final span = textSpans(
-      body,
-    ).firstWhere((span) => span.text == 'https://example.com/b.png');
-    (span.recognizer! as TapGestureRecognizer).onTap!();
+    // 本文の途中で区画が分かれても、どのサムネイルからでもレス内の全画像を送れる。
+    final thumbs = find.descendant(
+      of: find.byType(PostImages),
+      matching: find.byType(GestureDetector),
+    );
+    expect(thumbs, findsNWidgets(2));
+    await tester.tap(thumbs.last);
     await tester.pumpAndSettle();
 
     expect(find.text('2/2  b.png'), findsOneWidget);

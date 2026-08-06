@@ -44,11 +44,19 @@ class PostImages extends StatelessWidget {
     this.onOpenVideoExternally,
     this.onTapEmbed,
     this.onRemove,
+    this.viewerUrls,
     this.thumbSize = 160,
     this.blurImages = false,
   });
 
   final List<Uri> urls;
+
+  /// 全画面ビューアで巡回する画像の並び。未指定なら [urls] と同じ。
+  ///
+  /// 本文の途中にサムネイルを差し込むと [urls] はレスの一部だけになる。どの
+  /// サムネイルから開いてもレス内の全画像を送れるよう、ここへレス全体の並びを
+  /// 渡す。[urls] の URL がこの並びに無ければ、その 1 枚だけを開く。
+  final List<Uri>? viewerUrls;
 
   /// 本文中の動画 URL。タップでアプリ内の全画面プレーヤーを開く。
   final List<Uri> videoUrls;
@@ -104,12 +112,12 @@ class PostImages extends StatelessWidget {
               spacing: 8,
               runSpacing: 8,
               children: [
-                for (var i = 0; i < urls.length; i++)
+                for (final url in urls)
                   _removable(
-                    urls[i],
+                    url,
                     _Thumb(
-                      urls: urls,
-                      index: i,
+                      url: url,
+                      viewerUrls: viewerUrls ?? urls,
                       size: thumbSize,
                       blurred: blurImages,
                     ),
@@ -179,13 +187,15 @@ class _RemoveButton extends StatelessWidget {
 
 class _Thumb extends StatefulWidget {
   const _Thumb({
-    required this.urls,
-    required this.index,
+    required this.url,
+    required this.viewerUrls,
     this.size = 160,
     this.blurred = false,
   });
-  final List<Uri> urls;
-  final int index;
+  final Uri url;
+
+  /// タップで開く全画面ビューアの並び（[PostImages.viewerUrls] 参照）。
+  final List<Uri> viewerUrls;
   final double size;
 
   /// 「グロ」注意が付いた画像で、初期表示をモザイクにするか。
@@ -199,10 +209,17 @@ class _ThumbState extends State<_Thumb> {
   /// モザイクを一度タップで解除したか。解除後は通常どおりタップで全画面表示。
   bool _revealed = false;
 
-  Uri get _url => widget.urls[widget.index];
+  Uri get _url => widget.url;
 
-  void _openViewer() =>
-      openImageViewer(context, widget.urls, initialIndex: widget.index);
+  void _openViewer() {
+    final urls = widget.viewerUrls;
+    final index = urls.indexOf(_url);
+    if (index < 0) {
+      openImageViewer(context, [_url]);
+      return;
+    }
+    openImageViewer(context, urls, initialIndex: index);
+  }
 
   /// 「読み込む」を選んだ。以後この URL は上限を上げて読む。
   void _load() => setState(() => ImageLoadPolicy.allow(_url));

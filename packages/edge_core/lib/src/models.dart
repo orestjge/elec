@@ -29,6 +29,7 @@ class Res {
     required this.body,
     required this.kind,
     required this.threadTitle,
+    this.rawDateField = '',
   });
 
   /// レス番号（1 始まり）。dat 内の行位置で決まる。
@@ -63,6 +64,20 @@ class Res {
 
   /// スレッドタイトル。通常は 1 レス目にのみ入り、それ以外は null。
   final String? threadTitle;
+
+  /// 日付+ID 欄を切り分ける前の文字列。
+  /// 例: `2025/11/03(月) 02:14:51.907 ID:0.fNwf8r5 BE:123-abcd`
+  ///
+  /// [dateText] / [id] / [beId] はこれを分解した結果で、日付と `ID:` の間隔や
+  /// 並びは分解後の値からは戻せない。掲示板が昔から出している
+  /// `投稿日:2025/11/03(月) 02:14:51.907 ID:0.fNwf8r5` という 1 行は、この欄を
+  /// そのまま置けば再現できる（クラシック表示がそうしている）。
+  ///
+  /// 名前・メール・本文・スレタイは元から手を入れずに持っているので、生で要る
+  /// のはこの欄だけ。行全体を持つと本文をもう一度抱えることになって重い。
+  ///
+  /// パーサを通していない [Res]（テストの組み立てなど）では空。
+  final String rawDateField;
 
   bool get isAbone => kind == ResKind.abone;
 }

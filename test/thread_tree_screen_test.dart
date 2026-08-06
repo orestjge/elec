@@ -72,11 +72,10 @@ void main() {
   /// [ScrollablePositionedList] はウィジェット木の順が見た目の順とは限らない
   /// （着地位置より前は逆向きのリストに入る）ので、実際の縦位置で並べ直す。
   List<int> shownNumbers(WidgetTester tester) {
-    final placed =
-        [
-          for (final w in tester.widgetList<PostItem>(find.byType(PostItem)))
-            (top: tester.getTopLeft(find.byWidget(w)).dy, number: w.res.number),
-        ]..sort((a, b) => a.top.compareTo(b.top));
+    final placed = [
+      for (final w in tester.widgetList<PostItem>(find.byType(PostItem)))
+        (top: tester.getTopLeft(find.byWidget(w)).dy, number: w.res.number),
+    ]..sort((a, b) => a.top.compareTo(b.top));
     return [for (final p in placed) p.number];
   }
 
@@ -141,7 +140,10 @@ void main() {
     final f = QueueFetcher([
       ok(full),
       // 差分で 4（>>1 への返信）が届く（Range 取得なので直前の 1 バイトを重ねる）。
-      partial([full.last, ...resLine(4, const {4: '>>1 追いレス'})]),
+      partial([
+        full.last,
+        ...resLine(4, const {4: '>>1 追いレス'}),
+      ]),
     ]);
 
     await tester.pumpWidget(
@@ -155,7 +157,10 @@ void main() {
 
     // >>1 への返信でも 1 の下へは入らず、末尾に積む（見落とさないため）。
     expect(shownNumbers(tester), [1, 2, 3, 4]);
-    expect(tester.widget<QuotedResRow>(find.byType(QuotedResRow)).res.number, 1);
+    expect(
+      tester.widget<QuotedResRow>(find.byType(QuotedResRow)).res.number,
+      1,
+    );
   });
 
   testWidgets('新着どうしの返信はあとから来ても親の下でツリーになる', (tester) async {
@@ -225,7 +230,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(view.layout, ThreadLayout.tree);
-    expect(storage.name, 'tree');
+    expect(storage.values['layout'], 'tree');
     expect(find.textContaining('ツリー'), findsOneWidget);
   });
 }

@@ -6,11 +6,12 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'embed_urls.dart';
 import 'mini_player.dart';
 import 'id_color.dart';
 import 'id_icon.dart';
 import 'image_urls.dart';
+import 'link_card.dart';
+import 'post_body_segments.dart';
 import 'post_images.dart';
 import 'reply_tier.dart';
 import 'res_body.dart';
@@ -38,6 +39,7 @@ class PostItem extends StatelessWidget {
     this.isReplyToOwn = false,
     this.showReplyToOwnAccent = true,
     this.blurImages = false,
+    this.linkPreviews = false,
     this.highlightQuery = '',
     this.isCurrentMatch = false,
     this.defaultName,
@@ -104,6 +106,12 @@ class PostItem extends StatelessWidget {
   /// この画像に「グロ」注意が付いており、サムネイルへモザイクを掛けるか。
   final bool blurImages;
 
+  /// 行を単独で占めるリンクの OGP を取りに行き、カードで見せるか。
+  ///
+  /// リンク先へ端末から直接アクセスすることになるので、既定では取りに行かない。
+  /// 設定（[ThreadViewSettings.linkPreviews]）を持っている画面だけが真を渡す。
+  final bool linkPreviews;
+
   /// スレ内検索中の検索語。空でなければ名前・本文の一致箇所をハイライトする。
   final String highlightQuery;
 
@@ -143,15 +151,15 @@ class PostItem extends StatelessWidget {
     // AA はインデントや上下の余白が絵の一部になるのでそのまま残し、普通のレスは
     // 前後の空白・空行を落として詰める。
     final body = trimUnlessAsciiArt(htmlToText(res.body));
-    final images = imageUrlsIn(body);
-    final videos = videoUrlsIn(body);
-    final audios = audioUrlsIn(body);
-    final embeds = embedVideosIn(body);
+    final segments = splitPostBody(body, linkPreviews: linkPreviews);
+    // 全画面ビューアはレス内の全画像を送れるようにする。本文の途中で区画に
+    // 分かれても、どのサムネイルから開いても並びは同じ。
+    final allImages = imageUrlsIn(body);
 
     void openUrl(Uri url) {
-      final imageIndex = images.indexWhere((image) => image == url);
+      final imageIndex = allImages.indexWhere((image) => image == url);
       if (imageIndex >= 0) {
-        openImageViewer(context, images, initialIndex: imageIndex);
+        openImageViewer(context, allImages, initialIndex: imageIndex);
         return;
       }
       onTapUrl?.call(url);
@@ -197,37 +205,67 @@ class PostItem extends StatelessWidget {
             onTapReplies: onTapReplies,
             highlightQuery: highlightQuery,
           ),
-          if (body.isNotEmpty) ...[
-            const SizedBox(height: 3),
-            ResBody(
-              text: body,
-              // 本文は一覧のタイトル（14px）寄りに詰めつつ、読む主役テキスト
-              // なので 1px 大きい 15px・行高 1.4 に留めて読みやすさを確保する。
-              style: theme.textTheme.bodyLarge?.copyWith(
-                fontSize: 15,
-                height: 1.4,
+          // 本文は貼られた URL の位置でサムネイルを挟みながら、上から順に積む。
+          // メディアの区画（PostImages）は自前で上の余白を持つので、文章の
+          // 区画だけ手前に間を入れる。
+          for (var i = 0; i < segments.length; i++)
+            switch (segments[i]) {
+              PostBodyText(:final text) => Padding(
+                padding: EdgeInsets.only(top: i == 0 ? 3 : 8),
+                child: ResBody(
+                  text: text,
+                  // 本文は一覧のタイトル（14px）寄りに詰めつつ、読む主役テキスト
+                  // なので 1px 大きい 15px・行高 1.4 に留めて読みやすさを確保する。
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    fontSize: 15,
+                    height: 1.4,
+                  ),
+                  onTapRes: (n) => onTapRes?.call(n),
+                  onTapResRange: (numbers) => onTapResRange?.call(numbers),
+                  onTapUrl: openUrl,
+                  selectable: bodySelectable,
+                  onSelectionActiveChanged: onBodySelectionActiveChanged,
+                  highlightQuery: highlightQuery,
+                ),
               ),
-              onTapRes: (n) => onTapRes?.call(n),
-              onTapResRange: (numbers) => onTapResRange?.call(numbers),
-              onTapUrl: openUrl,
-              selectable: bodySelectable,
-              onSelectionActiveChanged: onBodySelectionActiveChanged,
-              highlightQuery: highlightQuery,
-            ),
-          ],
-          if (images.isNotEmpty ||
-              videos.isNotEmpty ||
-              audios.isNotEmpty ||
-              embeds.isNotEmpty)
-            PostImages(
-              urls: images,
-              videoUrls: videos,
-              audioUrls: audios,
-              embedVideos: embeds,
-              onTapEmbed: (video) =>
-                  openEmbedPlayer(context, video, onOpenExternally: onTapUrl),
-              blurImages: blurImages,
-            ),
+              PostBodyLink(:final url, :final raw) => Padding(
+                padding: EdgeInsets.only(top: i == 0 ? 3 : 8),
+                child: LinkCard(
+                  url: url,
+                  raw: raw,
+                  onTap: openUrl,
+                  // 「グロ」注意の付いたレスでは、リンク先の絵まで不意に
+                  // 出さない（見出しだけのカードになる）。
+                  showImage: !blurImages,
+                  linkStyle: theme.textTheme.bodyLarge?.copyWith(
+                    fontSize: 15,
+                    height: 1.4,
+                    color: scheme.primary,
+                    decoration: TextDecoration.underline,
+                    decorationColor: scheme.primary,
+                  ),
+                ),
+              ),
+              PostBodyMedia(
+                :final images,
+                :final videos,
+                :final audios,
+                :final embeds,
+              ) =>
+                PostImages(
+                  urls: images,
+                  videoUrls: videos,
+                  audioUrls: audios,
+                  embedVideos: embeds,
+                  viewerUrls: allImages,
+                  onTapEmbed: (video) => openEmbedPlayer(
+                    context,
+                    video,
+                    onOpenExternally: onTapUrl,
+                  ),
+                  blurImages: blurImages,
+                ),
+            },
         ],
       ),
     );
