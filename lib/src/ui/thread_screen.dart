@@ -26,6 +26,7 @@ import 'image_urls.dart';
 import 'ng_screen.dart';
 import 'post_images.dart';
 import 'post_item.dart';
+import 'dat_html.dart';
 import 'reply_tier.dart';
 import 'thread_map.dart';
 import 'thread_tree.dart';
@@ -260,7 +261,7 @@ class _ThreadScreenState extends State<ThreadScreen>
       fileUploadSettings: _fileUploadSettings,
     );
     _ng.addListener(_onNgChanged);
-    _view.addListener(_onLayoutChanged);
+    _view.addListener(_onViewSettingsChanged);
     _positions.itemPositions.addListener(_onPositions);
     WidgetsBinding.instance.addObserver(this);
     // 控えとして置かれただけ（まだ表に出ていない）なら、表に出るまで何もしない。
@@ -340,7 +341,7 @@ class _ThreadScreenState extends State<ThreadScreen>
       unawaited(_history.markRead(widget.threadKey, _furthestRead));
     }
     _ng.removeListener(_onNgChanged);
-    _view.removeListener(_onLayoutChanged);
+    _view.removeListener(_onViewSettingsChanged);
     _positions.itemPositions.removeListener(_onPositions);
     WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
@@ -909,12 +910,12 @@ class _ThreadScreenState extends State<ThreadScreen>
     setState(_revealedNg.clear);
   }
 
-  /// 並べ方（番号順 / ツリー）が変わったら組み直す。
+  /// 表示設定（並べ方、リンクのカード表示）が変わったら組み直す。
   ///
-  /// 行の並びが変わるので、今いちばん上に見えているレスを覚えておいて、組み
-  /// 直したあとで同じレスへ戻す。設定を切り替えただけで読んでいた場所を見失う
-  /// のを避ける。
-  void _onLayoutChanged() {
+  /// 行の並びや高さが変わるので、今いちばん上に見えているレスを覚えておいて、
+  /// 組み直したあとで同じレスへ戻す。設定を切り替えただけで読んでいた場所を
+  /// 見失うのを避ける。
+  void _onViewSettingsChanged() {
     if (!mounted) return;
     final anchor = _topVisibleResNumber();
     setState(() {});
@@ -977,12 +978,16 @@ class _ThreadScreenState extends State<ThreadScreen>
   }
 
   /// レスの長押しで出すアクション。対象レスの内容を上部に出し、その下に
-  /// 返信・全体コピー・本文コピー・ID コピー・必死の操作を並べる。
+  /// 返信・全体コピー・本文コピー・生表示・NGワードの操作を並べる。
+  ///
+  /// ID の操作（コピー・必死チェッカー・NG）はここには置かない。ID アイコンを
+  /// タップすれば同じ導線が同一 ID 一覧の頭に出るので、長押しメニューにも並べると
+  /// ただ長くなって、レスそのものへの操作が埋もれる。
+  ///
   /// [onReply] を渡すと返信の宛先をそちらの入力欄にできる（会話シートなど、
   /// main の入力欄がシートに隠れている場面用）。
   void _showResActions(Res res, {void Function(int)? onReply}) {
-    final id = res.id;
-    final idCount = _idCounts(_state.res)[id] ?? 1;
+    final idCount = _idCounts(_state.res)[res.id] ?? 1;
     final idOrdinal = _idOrdinals(_state.res)[res.number] ?? 1;
     final replyCount = replyCounts(_state.res)[res.number] ?? 0;
     showModalBottomSheet<void>(
@@ -1023,6 +1028,7 @@ class _ThreadScreenState extends State<ThreadScreen>
                     blurImages: guroMaskedResNumbers(
                       _state.res,
                     ).contains(res.number),
+                    linkPreviews: _view.linkPreviews,
                     defaultName: widget.defaultName,
                   ),
                 ),
@@ -1067,48 +1073,15 @@ class _ThreadScreenState extends State<ThreadScreen>
                   _copyText(htmlToText(res.body).trim(), '本文をコピーしました');
                 },
               ),
-              if (id != null) ...[
-                ListTile(
-                  leading: const Icon(Icons.badge_outlined),
-                  title: Text('ID:$id をコピー'),
-                  onTap: () {
-                    Navigator.pop(sheetContext);
-                    _copyText(id, 'IDをコピーしました');
-                  },
-                ),
-                // 必死チェッカーはエッヂ（kyodemo に対応板がある）だけ。
-                if (widget.endpoints.supportsHissi)
-                  ListTile(
-                    leading: const Icon(Icons.travel_explore),
-                    title: const Text('必死チェッカーで開く'),
-                    subtitle: const Text('kyodemo でこの ID の今日の他の書き込みを見る'),
-                    onTap: () {
-                      Navigator.pop(sheetContext);
-                      _openHissi(id);
-                    },
-                  ),
-                if (_ng.isNgId(id))
-                  ListTile(
-                    leading: const Icon(Icons.check_circle_outline),
-                    title: Text('ID:$id のNGを解除'),
-                    onTap: () {
-                      Navigator.pop(sheetContext);
-                      _ng.removeId(id);
-                      _showSnack('IDのNGを解除しました');
-                    },
-                  )
-                else
-                  ListTile(
-                    leading: const Icon(Icons.block),
-                    title: Text('ID:$id をNGにする'),
-                    subtitle: const Text('この ID の書き込みを非表示にする'),
-                    onTap: () {
-                      Navigator.pop(sheetContext);
-                      _ng.addId(id);
-                      _showSnack('IDをNGにしました');
-                    },
-                  ),
-              ],
+              ListTile(
+                leading: const Icon(Icons.article_outlined),
+                title: const Text('クラシック表示で見る'),
+                subtitle: const Text('サムネイルもカードも挟まない、昔ながらの1行ヘッダの表示'),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _showClassicRes(res);
+                },
+              ),
               ListTile(
                 leading: const Icon(Icons.playlist_add),
                 title: const Text('NGワードを追加…'),
@@ -1121,6 +1094,111 @@ class _ThreadScreenState extends State<ThreadScreen>
           ),
         ),
       ),
+    );
+  }
+
+  /// レスを昔ながらの掲示板の見た目で出す。
+  ///
+  /// 通常の表示はかなり手を入れている。画像や動画の URL はサムネイルへ、リンクは
+  /// OGP カードへ差し替えて URL の文字列自体を畳み、ヘッダは名前を省いて ID を
+  /// 絵にしている。ふだんはその方が読みやすいが、
+  ///  - サムネイルになった URL を実際に確かめたい／控えたい
+  ///  - 妙な表示になるレスが、元からそう書かれているのかこちらの整形のせいなのか
+  /// といったときに、差し替えを挟まない姿を見る手立てが要る。
+  ///
+  /// 出し方は read.cgi が昔から出しているものに合わせる。
+  ///
+  /// ```
+  /// 1 名前:エッヂの名無し (L20 xxxx) Mail:sage 投稿日:2026/08/06(木) 22:49:24.219 ID:xxxx
+  ///
+  /// 本文
+  /// ```
+  ///
+  /// 日付から後ろは [Res.rawDateField]（日付・ID・BE を切り分ける前の欄）をその
+  /// まま置くだけで、掲示板の表記と同じになる。
+  ///
+  /// HTML は効かせる（[datHtmlSpans]）。dat の各項目はブラウザに流し込めばそう
+  /// 見える HTML として書かれていて、`<br>` や `</b>`、`<a href=…>` が文字として
+  /// 並ぶのは元の姿ではない。**差し替えないのはアプリの整形の方**で、掲示板
+  /// そのものの見え方には合わせる。
+  void _showClassicRes(Res res) {
+    // 5ch / エッヂの日付欄は `日付 ID:xxx` がひと続き。したらばは ID が別項目
+    // なので、含まれていなければ後ろに足して同じ 1 行にする。
+    var posted = res.rawDateField.isNotEmpty ? res.rawDateField : res.dateText;
+    if (res.id case final id? when !posted.contains('ID:')) {
+      posted = posted.isEmpty ? 'ID:$id' : '$posted ID:$id';
+    }
+
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        final theme = Theme.of(sheetContext);
+        final scheme = theme.colorScheme;
+        final link = scheme.primary;
+        final header = <InlineSpan>[
+          TextSpan(text: '${res.number} 名前:'),
+          ...datHtmlSpans(res.name, linkColor: link),
+          const TextSpan(text: ' Mail:'),
+          ...datHtmlSpans(res.mail, linkColor: link),
+          TextSpan(text: ' 投稿日:$posted'),
+        ];
+        final whole = TextSpan(
+          style: theme.textTheme.bodyMedium?.copyWith(height: 1.5),
+          children: [
+            // ヘッダは 1 行に詰める。折り返しても本文と混ざらないよう、一段
+            // 小さく控えめな色で置く。
+            TextSpan(
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+              children: [
+                ...header,
+                const TextSpan(text: '\n'),
+              ],
+            ),
+            const TextSpan(text: '\n'),
+            ...datHtmlSpans(res.body, linkColor: link),
+          ],
+        );
+        return SafeArea(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.85,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+                  child: Text('クラシック表示', style: theme.textTheme.titleMedium),
+                ),
+                const Divider(height: 1),
+                Flexible(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+                    // ヘッダと本文をひと続きの 1 つのテキストにする。別々の
+                    // SelectableText に分けると選択が境目で切れて、ヘッダごと
+                    // なぞって持っていけない。
+                    child: SelectableText.rich(whole),
+                  ),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.copy_all),
+                  title: const Text('この形でコピー'),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _copyText(whole.toPlainText(), 'レスをコピーしました');
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -1267,6 +1345,7 @@ class _ThreadScreenState extends State<ThreadScreen>
                       isThreadOwner: _isThreadOwnerPost(post, ownerId),
                       isReplyToOwn: _isReplyToOwnPost(post),
                       blurImages: guroMasked.contains(post.number),
+                      linkPreviews: _view.linkPreviews,
                       defaultName: widget.defaultName,
                     );
                   },
@@ -1326,6 +1405,7 @@ class _ThreadScreenState extends State<ThreadScreen>
           idOrdinals: idOrdinals,
           replyCountByNumber: replyCountByNumber,
           guroMasked: guroMasked,
+          linkPreviews: _view.linkPreviews,
           onTapId: _showIdPosts,
           onTapRes: (_, target) {
             Navigator.pop(context);
@@ -2063,6 +2143,7 @@ class _ThreadScreenState extends State<ThreadScreen>
                   isThreadOwner: _isThreadOwnerPost(item, threadOwnerId),
                   isReplyToOwn: _isReplyToOwnPost(item),
                   blurImages: guroMasked.contains(item.number),
+                  linkPreviews: _view.linkPreviews,
                   highlightQuery: searchQuery,
                   isCurrentMatch: item.number == currentMatchNumber,
                   defaultName: widget.defaultName,
@@ -2643,6 +2724,7 @@ class _ConversationSheet extends StatefulWidget {
     required this.idOrdinals,
     required this.replyCountByNumber,
     required this.guroMasked,
+    required this.linkPreviews,
     required this.onTapId,
     required this.onTapRes,
     required this.onTapResRange,
@@ -2671,6 +2753,9 @@ class _ConversationSheet extends StatefulWidget {
 
   /// 「グロ」注意が付き、画像サムネイルへモザイクを掛けるレス番号の集合。
   final Set<int> guroMasked;
+
+  /// 行を単独で占めるリンクを OGP カードにするか（[PostItem.linkPreviews]）。
+  final bool linkPreviews;
   final ValueChanged<String> onTapId;
   final void Function(int source, int target) onTapRes;
   final void Function(int source, List<int> targets) onTapResRange;
@@ -2846,6 +2931,7 @@ class _ConversationSheetState extends State<_ConversationSheet> {
                                 blurImages: widget.guroMasked.contains(
                                   entry.res.number,
                                 ),
+                                linkPreviews: widget.linkPreviews,
                                 defaultName: widget.defaultName,
                               ),
                       ),

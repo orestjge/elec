@@ -27,6 +27,22 @@ void main() {
       expect(res.body, '本文だよ'); // 前後スペース除去
       expect(res.threadTitle, 'スレタイ');
       expect(res.kind, ResKind.normal);
+      // 分解する前の日付欄も残す。日付と ID の間隔は分解後の値から復元できず、
+      // 掲示板の `投稿日:…` 表記はこの欄をそのまま置いたものなので取っておく。
+      expect(res.rawDateField, '2025/11/03(月) 02:14:51.907 ID:abcXYZ');
+    });
+
+    test('BE 付きでも日付欄をひと続きのまま残す', () {
+      final res = parseDatLine(
+        '名無し<><>2025/11/03(月) 02:14:51.907 ID:abcXYZ BE:123-abcd<> 本文 <>',
+        1,
+      );
+      expect(res.id, 'abcXYZ');
+      expect(res.beId, '123-abcd');
+      expect(
+        res.rawDateField,
+        '2025/11/03(月) 02:14:51.907 ID:abcXYZ BE:123-abcd',
+      );
     });
 
     test('本文自身の前後空白は 1 文字だけ剥がす', () {

@@ -135,6 +135,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onTap: _pickThreadLayout,
           ),
           const Divider(height: 1),
+          SwitchListTile(
+            key: const ValueKey('settings-link-previews'),
+            secondary: const Icon(Icons.link),
+            title: const Text('リンクをカードで見せる'),
+            // 端末から直接リンク先を読みに行くことを隠さない。相手のサーバに
+            // アクセスが残る（＝IP が渡る）ので、承知のうえで選べるようにする。
+            subtitle: const Text('行に URL だけがあるとき、その場でリンク先を読んで見出しと絵を出す'),
+            value: _threadView.linkPreviews,
+            onChanged: (enabled) async {
+              await _threadView.setLinkPreviews(enabled);
+              if (mounted) setState(() {});
+            },
+          ),
+          const Divider(height: 1),
           ListTile(
             leading: const Icon(Icons.cloud_upload_outlined),
             title: const Text('画像アップロード設定'),

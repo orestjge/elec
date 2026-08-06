@@ -76,12 +76,14 @@ dependencies:
   # 純 Dart なので Android/iOS/macOS で同じ結果になり、アイソレートでも動く。
   image: ^4.5.4
 
+  # リンク先の OGP を読むときの EUC-JP デコード（日本語サイトにはまだ多い）。
+  # 掲示板側の Windows-31J は edge_sjis 越しに使う。テストで SJIS/EUC-JP の
+  # フィクスチャを組み立てるのにも使う。
+  jis0208: ^1.0.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
-
-  # テストで SJIS フィクスチャを生成するため。
-  jis0208: ^1.0.1
 
   # 動画プレーヤーのテストで、ネイティブ実装をフェイクに差し替えるため。
   video_player_platform_interface: ^6.7.0
