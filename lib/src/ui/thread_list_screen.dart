@@ -72,6 +72,7 @@ class ThreadListScreen extends StatefulWidget {
     this.readHistory,
     this.authStore,
     this.sortSettings,
+    this.ngStore,
   });
 
   /// 表示中の板。タイトル・機能ゲート・ドロワーの現在選択に使う。
@@ -89,6 +90,10 @@ class ThreadListScreen extends StatefulWidget {
 
   /// 覚えておく並べ替え。既定はアプリ共有インスタンス（テストで差し替え可能）。
   final ThreadSortSettings? sortSettings;
+
+  /// NG 設定（スレ主 NG の絞り込みに使う）。既定はアプリ共有インスタンス
+  /// （テストで差し替え可能）。
+  final NgStore? ngStore;
 
   /// 自動更新の間隔（フォアグラウンド時）。
   ///
@@ -110,7 +115,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   late final bool _ownsFetcher;
   late final SubjectFetcher _subject;
   late final ReadHistory _history;
-  final NgStore _ng = NgStore.shared;
+  late final NgStore _ng = widget.ngStore ?? NgStore.shared;
 
   SubjectState? _state; // 初回成功まで null
   Object? _error; // 初回失敗時のみ全画面エラーに使う
@@ -844,6 +849,11 @@ class _ThreadListScreenState extends State<ThreadListScreen>
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('スレ主 [$metadent★] を NG にしました'),
+          // 操作の付いた通知は既定で出しっぱなしになる（[SnackBar.persist] は
+          // action があると true）。取り消しは「今すぐ気が変わったら」のための
+          // もので、押さなかった人の画面に居座らせる意味は無い。他の通知と同じ
+          // ように時間で消す。
+          persist: false,
           action: SnackBarAction(
             label: '取り消す',
             onPressed: () => _ng.removeCreator(metadent),
