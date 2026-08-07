@@ -169,7 +169,12 @@ class PostItem extends StatelessWidget {
     void openUrl(Uri url) {
       final imageIndex = allImages.indexWhere((image) => image == url);
       if (imageIndex >= 0) {
-        openImageViewer(context, allImages, initialIndex: imageIndex);
+        openImageViewer(
+          context,
+          allImages,
+          initialIndex: imageIndex,
+          onOpenExternally: onTapUrl,
+        );
         return;
       }
       onTapUrl?.call(url);
@@ -272,6 +277,7 @@ class PostItem extends StatelessWidget {
                   audioUrls: audios,
                   embedVideos: embeds,
                   viewerUrls: allImages,
+                  onOpenImageExternally: onTapUrl,
                   onTapEmbed: (video) => openEmbedPlayer(
                     context,
                     video,

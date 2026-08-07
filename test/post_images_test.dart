@@ -99,6 +99,36 @@ void main() {
     expect(find.text('1/3  a.jpg'), findsOneWidget);
   });
 
+  testWidgets('画像ビューアの「ブラウザで開く」は表示中の画像を渡す', (tester) async {
+    final urls = [
+      Uri.parse('https://example.com/a.jpg'),
+      Uri.parse('https://example.com/b.png'),
+    ];
+    final opened = <Uri>[];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: PostImages(urls: urls, onOpenImageExternally: opened.add),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byType(GestureDetector).first);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.open_in_browser));
+    await tester.pump();
+    expect(opened, [urls.first]);
+
+    // ページを送ったら、その先の画像を渡す。
+    await tester.tap(find.byIcon(Icons.chevron_right));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.open_in_browser));
+    await tester.pump();
+    expect(opened, [urls.first, urls.last]);
+  });
+
   testWidgets('画像ビューアは上下スワイプで閉じられる', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
