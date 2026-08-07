@@ -227,6 +227,24 @@ class _MiniPlayerHostState extends State<MiniPlayerHost> {
   /// 全画面⇔小窓の移動時間。[Material] の角丸・影もこれに合わせる。
   static const _moveDuration = Duration(milliseconds: 240);
 
+  /// 下端よりこれだけ下へ引いて離したら、小窓を閉じる。
+  ///
+  /// 窓の高さ（最大でも 124dp ほど）より小さく取る。窓の高さぶん引かせると、
+  /// 画面の下端が近いときに指が画面外へ出てしまい、届かない操作になる。
+  static const _dismissDistance = 72.0;
+
+  /// 距離が足りなくても、これ以上の速さで下へ振れば閉じる（px／秒）。
+  ///
+  /// 戻るスワイプ（`back_swipe.dart` の 250）よりかなり高くしてある。あちらは前の画面
+  /// へ戻るだけだが、こちらは**再生を終わらせる**ので、やり直しの重さが違う。
+  static const _dismissMinFlingVelocity = 600.0;
+
+  /// 引いている間、いちばん薄くなったときの濃さ。
+  ///
+  /// 透かすのは「離せば消える」ことを見せるため。完全には消さない——指の下から
+  /// 見えなくなると、引き戻して取り消せることが分からなくなる。
+  static const _dismissMinOpacity = 0.4;
+
   /// 全画面用の操作（閉じる・小さくする・シークバー等）を出す下限の幅。
   ///
   /// 全画面と小窓を行き来する間、枠の大きさはアニメーションで連続的に変わる。
@@ -246,11 +264,17 @@ class _MiniPlayerHostState extends State<MiniPlayerHost> {
   late final OverlayEntry _entry = OverlayEntry(builder: _buildLayer);
 
   final _dragging = ValueNotifier(false);
+
+  /// 下端から下へはみ出させたぶん（px, 0 以上）。指を離すまでの一時的な値で、
+  /// 閉じるか元へ戻すかが決まった時点で 0 に戻す。
+  final _dismissDrag = ValueNotifier(0.0);
+
   Offset _dragTopLeft = Offset.zero;
 
   @override
   void dispose() {
     _dragging.dispose();
+    _dismissDrag.dispose();
     super.dispose();
   }
 
@@ -301,7 +325,7 @@ class _MiniPlayerHostState extends State<MiniPlayerHost> {
   /// プレーヤーの層。何も再生していないときは空の [Stack] で、当たり判定を
   /// 持たない＝下のアプリがそのまま触れる。
   Widget _buildLayer(BuildContext context) => ListenableBuilder(
-    listenable: Listenable.merge([_controller, _dragging]),
+    listenable: Listenable.merge([_controller, _dragging, _dismissDrag]),
     builder: (context, _) {
       final media = _controller.media;
       return Stack(
@@ -325,34 +349,44 @@ class _MiniPlayerHostState extends State<MiniPlayerHost> {
       mini,
     );
 
+    // 下へ引いて消しかけている量。指を離すと 0 に戻り、位置も濃さも
+    // [_moveDuration] で元へ戻る（そのまま消すときは窓ごと消える）。
+    final dismissDrag = fullscreen ? 0.0 : _dismissDrag.value;
+    final dismissProgress = (dismissDrag / _dismissDistance).clamp(0.0, 1.0);
+
     return AnimatedPositioned(
       left: fullscreen ? 0 : topLeft.dx,
-      top: fullscreen ? 0 : topLeft.dy,
+      top: fullscreen ? 0 : topLeft.dy + dismissDrag,
       width: fullscreen ? screen.width : mini.width,
       height: fullscreen ? screen.height : mini.height,
       duration: _dragging.value ? Duration.zero : _moveDuration,
       curve: Curves.easeOutCubic,
-      child: Material(
-        color: Colors.black,
-        elevation: fullscreen ? 0 : 8,
-        borderRadius: BorderRadius.circular(fullscreen ? 0 : 12),
-        clipBehavior: Clip.antiAlias,
-        animationDuration: _moveDuration,
-        child: LayoutBuilder(
-          builder: (context, constraints) => Stack(
-            fit: StackFit.expand,
-            children: [
-              // 映像は必ず children[0]。session が変わったときだけ作り直す。
-              KeyedSubtree(
-                key: ValueKey(_controller.session),
-                child: _view(
-                  media,
-                  mini: constraints.maxWidth < _chromeMinWidth,
+      child: AnimatedOpacity(
+        opacity: 1 - (1 - _dismissMinOpacity) * dismissProgress,
+        duration: _dragging.value ? Duration.zero : _moveDuration,
+        curve: Curves.easeOutCubic,
+        child: Material(
+          color: Colors.black,
+          elevation: fullscreen ? 0 : 8,
+          borderRadius: BorderRadius.circular(fullscreen ? 0 : 12),
+          clipBehavior: Clip.antiAlias,
+          animationDuration: _moveDuration,
+          child: LayoutBuilder(
+            builder: (context, constraints) => Stack(
+              fit: StackFit.expand,
+              children: [
+                // 映像は必ず children[0]。session が変わったときだけ作り直す。
+                KeyedSubtree(
+                  key: ValueKey(_controller.session),
+                  child: _view(
+                    media,
+                    mini: constraints.maxWidth < _chromeMinWidth,
+                  ),
                 ),
-              ),
-              if (!fullscreen)
-                ..._miniChrome(topLeft, screen, padding, insets, mini),
-            ],
+                if (!fullscreen)
+                  ..._miniChrome(topLeft, screen, padding, insets, mini),
+              ],
+            ),
           ),
         ),
       ),
@@ -379,6 +413,11 @@ class _MiniPlayerHostState extends State<MiniPlayerHost> {
   /// 小窓の操作は**すべてこちら側が持つ**。中身（WebView）に指を取られると窓を
   /// 動かせなくなるので、映像の上に透明な層を敷いて触らせない。閉じるボタンは
   /// その層より後ろに並べて、当たり判定で勝つようにする。
+  ///
+  /// **下端より下へ引くと閉じられる。** 左右と上は今までどおり画面内へ丸めるが、
+  /// 下だけは指に付いてはみ出させ、そのぶん透かして「離せば消える」と見せる。
+  /// ×は 18dp の的で、動画を見ながら片手で狙うには小さい——窓ごと下へ払うほうが
+  /// 雑に扱える。×を残してあるのは、この操作が指で覚えるまで見えないため。
   List<Widget> _miniChrome(
     Offset topLeft,
     Size screen,
@@ -392,20 +431,35 @@ class _MiniPlayerHostState extends State<MiniPlayerHost> {
         onTap: _controller.expand,
         onPanStart: (_) {
           _dragTopLeft = topLeft;
+          _dismissDrag.value = 0;
           _dragging.value = true;
         },
         onPanUpdate: (details) {
-          _dragTopLeft = _clamp(
-            _dragTopLeft + details.delta,
-            screen,
-            padding,
-            insets,
-            mini,
-          );
-          _controller.moveMini(_dragTopLeft);
+          final next = _dragTopLeft + details.delta;
+          final clamped = _clamp(next, screen, padding, insets, mini);
+          // 下へのはみ出しだけ持ち越す。左右と上をその場で丸めるのは今までどおり
+          // ——丸めずに溜めると、行き過ぎたぶん戻さないと窓が動き出さなくなる。
+          final overshoot = (next.dy - clamped.dy).clamp(0.0, double.infinity);
+          _dragTopLeft = Offset(clamped.dx, clamped.dy + overshoot);
+          _dismissDrag.value = overshoot;
+          _controller.moveMini(clamped);
         },
-        onPanEnd: (_) => _dragging.value = false,
-        onPanCancel: () => _dragging.value = false,
+        onPanEnd: (details) {
+          // 距離が足りていれば閉じる。足りなくても、下端まで持ってきたうえで
+          // 下へ振り切ったなら閉じる（払う操作で終われるようにする）。
+          final flung =
+              details.velocity.pixelsPerSecond.dy >= _dismissMinFlingVelocity;
+          final dismiss =
+              _dismissDrag.value >= _dismissDistance ||
+              (flung && _dismissDrag.value > 0);
+          _dragging.value = false;
+          _dismissDrag.value = 0;
+          if (dismiss) _controller.close();
+        },
+        onPanCancel: () {
+          _dragging.value = false;
+          _dismissDrag.value = 0;
+        },
       ),
     ),
     Positioned(
