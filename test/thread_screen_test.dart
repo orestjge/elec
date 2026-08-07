@@ -1,8 +1,10 @@
 import 'dart:async';
 
 import 'package:edge_core/edge_core.dart';
+import 'package:elec/src/net/board.dart';
 import 'package:elec/src/net/ng_store.dart';
 import 'package:elec/src/net/read_history.dart';
+import 'package:elec/src/net/thread_link.dart';
 import 'package:elec/src/ui/id_icon.dart';
 import 'package:elec/src/ui/post_images.dart';
 import 'package:elec/src/ui/thread_map.dart';
@@ -30,6 +32,20 @@ class QueueFetcher implements HttpFetcher {
     calls++;
     return _responses[i];
   }
+}
+
+/// URL ごとに決められた応答を返すフェイク（貼られたスレの dat 用）。
+class MapFetcher implements HttpFetcher {
+  MapFetcher(this._byUrl);
+  final Map<String, FetchResponse> _byUrl;
+
+  @override
+  Future<FetchResponse> get(
+    Uri url, {
+    Map<String, String> headers = const {},
+  }) async =>
+      _byUrl[url.toString()] ??
+      const FetchResponse(statusCode: 404, bodyBytes: []);
 }
 
 class PendingFetcher implements HttpFetcher {
@@ -1570,5 +1586,63 @@ void main() {
     expect(mapMarkers(tester), const [
       ThreadMapMarker(6, ThreadMapMarkerKind.searchMatch),
     ]);
+  });
+
+  group('貼られたスレのカード', () {
+    const other = Board(
+      host: 'mi.5ch.io',
+      boardKey: 'news4vip',
+      title: 'ニュー速VIP',
+    );
+    const url = 'https://mi.5ch.io/news4vip/1700000000';
+
+    setUp(() {
+      ThreadLinks.clearCache();
+      ThreadLinks.boards = () => const [Board.eddibb, other];
+      ThreadLinks.debugFetcher = MapFetcher({
+        'https://mi.5ch.io/news4vip/dat/1700000000.dat': ok(
+          datLine('名無し<><>2025/11/03(月) 02:14:51.907 ID:x<> 本文 <>VIPのスレタイ'),
+        ),
+      });
+    });
+    tearDown(() {
+      ThreadLinks.debugFetcher = null;
+      ThreadLinks.boards = () => const [];
+      ThreadLinks.clearCache();
+    });
+
+    testWidgets('別板のスレ URL でも板名とスレタイを出す', (tester) async {
+      final f = QueueFetcher([
+        ok(datLine('名無し<><>2025/11/03(月) 02:14:51.907 ID:aaa<> 次スレ<br>$url <>スレタイ')),
+      ]);
+      await tester.pumpWidget(app(f));
+      await tester.pumpAndSettle();
+
+      expect(find.text('ニュー速VIP'), findsOneWidget);
+      expect(find.text('VIPのスレタイ'), findsOneWidget);
+    });
+
+    testWidgets('カードをタップすると別板のスレをアプリ内で開く', (tester) async {
+      final f = QueueFetcher([
+        ok(datLine('名無し<><>2025/11/03(月) 02:14:51.907 ID:aaa<> 次スレ<br>$url <>スレタイ')),
+      ]);
+      // その板の既読履歴を先に用意しておく（読み込みはファイル越しで、pump では
+      // 進まないため）。アプリでも 2 回目以降はこの状態から開く。
+      await tester.runAsync(() => ReadHistory.forBoard(other));
+
+      await tester.pumpWidget(app(f));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('VIPのスレタイ'));
+      await tester.pump(); // タップの処理
+      await tester.pump(const Duration(milliseconds: 400)); // 画面の遷移
+
+      // その板のエンドポイントで開き、取れているスレタイをそのまま見出しに使う。
+      final opened = tester.widgetList<ThreadScreen>(find.byType(ThreadScreen));
+      expect(opened.last.endpoints.host, 'mi.5ch.io');
+      expect(opened.last.endpoints.boardKey, 'news4vip');
+      expect(opened.last.threadKey, '1700000000');
+      expect(opened.last.threadTitle, 'VIPのスレタイ');
+    });
   });
 }

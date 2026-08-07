@@ -76,7 +76,16 @@ class PostBodyMedia extends PostBodySegment {
 /// [linkPreviews] が true なら、サムネイルにできないリンクのうち**行を単独で
 /// 占めるもの**を [PostBodyLink] として切り出す（OGP カードの置き場）。false の
 /// ときは、これまでどおり本文中のリンクのままにする。
-List<PostBodySegment> splitPostBody(String text, {bool linkPreviews = false}) {
+///
+/// [isThreadLink] が真を返すリンク（＝知っている板のスレ URL）は、
+/// [linkPreviews] が false でも切り出す。スレカードの中身は貼られたリンク先
+/// ではなく元から読みに行っている掲示板サーバから取るので、OGP を切っている
+/// 理由（知らないホストへ通信が広がる）に当たらないため。
+List<PostBodySegment> splitPostBody(
+  String text, {
+  bool linkPreviews = false,
+  bool Function(Uri url)? isThreadLink,
+}) {
   final segments = <PostBodySegment>[];
   // まだ区画にしていない本文の先頭。
   var cursor = 0;
@@ -123,7 +132,8 @@ List<PostBodySegment> splitPostBody(String text, {bool linkPreviews = false}) {
     if (embed == null && !isImage && !isVideo && !isAudio) {
       // サムネイルにできないリンク。行を単独で占めているものだけカードの区画に
       // し、それ以外（文の途中に埋まった URL）は本文へ残す。
-      if (!linkPreviews || !_ownsLine(text, match.start, match.end)) continue;
+      final cardable = linkPreviews || (isThreadLink?.call(uri) ?? false);
+      if (!cardable || !_ownsLine(text, match.start, match.end)) continue;
       flushRun();
       addText(text.substring(cursor, match.start));
       segments.add(PostBodyLink(url: uri, raw: match.group(0)!));

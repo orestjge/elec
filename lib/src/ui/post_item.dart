@@ -6,6 +6,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../net/thread_link.dart';
 import 'mini_player.dart';
 import 'id_color.dart';
 import 'id_icon.dart';
@@ -110,6 +111,8 @@ class PostItem extends StatelessWidget {
   ///
   /// リンク先へ端末から直接アクセスすることになるので、既定では取りに行かない。
   /// 設定（[ThreadViewSettings.linkPreviews]）を持っている画面だけが真を渡す。
+  ///
+  /// 知っている板のスレ URL のカードはこの値に関わらず出る（[ThreadLinks]）。
   final bool linkPreviews;
 
   /// スレ内検索中の検索語。空でなければ名前・本文の一致箇所をハイライトする。
@@ -151,7 +154,13 @@ class PostItem extends StatelessWidget {
     // AA はインデントや上下の余白が絵の一部になるのでそのまま残し、普通のレスは
     // 前後の空白・空行を落として詰める。
     final body = trimUnlessAsciiArt(htmlToText(res.body));
-    final segments = splitPostBody(body, linkPreviews: linkPreviews);
+    // スレ URL は OGP の設定に関わらずカードにする（中身は掲示板サーバから
+    // 取るので、リンク先へ通信が広がらない。詳しくは [ThreadLinks]）。
+    final segments = splitPostBody(
+      body,
+      linkPreviews: linkPreviews,
+      isThreadLink: (url) => ThreadLinks.targetOf(url) != null,
+    );
     // 全画面ビューアはレス内の全画像を送れるようにする。本文の途中で区画に
     // 分かれても、どのサムネイルから開いても並びは同じ。
     final allImages = imageUrlsIn(body);
@@ -234,6 +243,9 @@ class PostItem extends StatelessWidget {
                   url: url,
                   raw: raw,
                   onTap: openUrl,
+                  // OGP を取りに行くかは設定次第。スレカードはこの値に関わらず
+                  // [LinkCard] 側で出す。
+                  enabled: linkPreviews,
                   // 「グロ」注意の付いたレスでは、リンク先の絵まで不意に
                   // 出さない（見出しだけのカードになる）。
                   showImage: !blurImages,

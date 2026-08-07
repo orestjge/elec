@@ -3,11 +3,14 @@ import 'dart:convert';
 import 'dart:io' as io;
 
 import 'package:edge_core/edge_core.dart';
+import 'package:elec/src/net/board.dart';
 import 'package:elec/src/net/link_preview.dart';
+import 'package:elec/src/net/thread_link.dart';
 import 'package:elec/src/ui/link_card.dart';
 import 'package:elec/src/ui/post_item.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:jis0208/jis0208.dart';
 
 /// OGP を返すだけのフェイク。中身は 1 種類でよい。
 class _FakeResponse extends Stream<List<int>> implements io.HttpClientResponse {
@@ -85,6 +88,29 @@ class _FakeClient implements io.HttpClient {
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
+
+/// スレの dat を返すフェイク。1 レス目だけあれば足りる。
+class _FakeDatFetcher implements HttpFetcher {
+  _FakeDatFetcher(this._byUrl);
+  final Map<String, FetchResponse> _byUrl;
+
+  @override
+  Future<FetchResponse> get(
+    Uri url, {
+    Map<String, String> headers = const {},
+  }) async =>
+      _byUrl[url.toString()] ??
+      const FetchResponse(statusCode: 404, bodyBytes: []);
+}
+
+FetchResponse _datResp(String line) => FetchResponse(
+  statusCode: 200,
+  bodyBytes: [...Windows31JCodec().encode('$line\n')],
+);
+
+const _opLine =
+    '名無し<><>2025/11/03(月) 02:14:51.907 ID:abc<> 1 レス目の本文 <>'
+    '貼られたスレのタイトル';
 
 Res post(String body) => Res(
   number: 1,
@@ -234,5 +260,94 @@ void main() {
       find.textContaining('https://example.com/a.html', findRichText: true),
       findsOneWidget,
     );
+  });
+
+  group('スレのカード', () {
+    const url = 'https://bbs.eddibb.cc/liveedge/1700000000';
+    const dat = 'https://bbs.eddibb.cc/liveedge/dat/1700000000.dat';
+    const kako =
+        'https://bbs.eddibb.cc/liveedge/kako/1700/17000/1700000000.dat';
+
+    void install(Map<String, FetchResponse> byUrl) {
+      ThreadLinks.debugFetcher = _FakeDatFetcher(byUrl);
+      ThreadLinks.boards = () => const [Board.eddibb];
+    }
+
+    setUp(() {
+      ThreadLinks.clearCache();
+      install({dat: _datResp(_opLine)});
+    });
+    tearDown(() {
+      ThreadLinks.debugFetcher = null;
+      ThreadLinks.boards = () => const [];
+      ThreadLinks.clearCache();
+    });
+
+    testWidgets('スレ URL は板名とスレタイのカードになる', (tester) async {
+      await tester.pumpWidget(
+        wrap(LinkCard(url: Uri.parse(url), raw: url, onTap: (_) {})),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('エッヂ'), findsOneWidget);
+      expect(find.text('貼られたスレのタイトル'), findsOneWidget);
+      expect(find.text('1 レス目の本文'), findsOneWidget);
+      expect(find.text(url), findsNothing);
+      // スレタイは dat から取るので、リンク先の HTML は読まない。
+      expect(client.requests, 0);
+    });
+
+    testWidgets('dat落ちなら札を添える', (tester) async {
+      install({kako: _datResp(_opLine)});
+
+      await tester.pumpWidget(
+        wrap(LinkCard(url: Uri.parse(url), raw: url, onTap: (_) {})),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('貼られたスレのタイトル'), findsOneWidget);
+      expect(find.text('dat落ち'), findsOneWidget);
+    });
+
+    testWidgets('スレが見つからなければ URL のまま', (tester) async {
+      install(const {});
+
+      await tester.pumpWidget(
+        wrap(LinkCard(url: Uri.parse(url), raw: url, onTap: (_) {})),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text(url), findsOneWidget);
+    });
+
+    testWidgets('OGP を切っていてもスレのカードは出る', (tester) async {
+      await tester.pumpWidget(
+        wrap(
+          PostItem(
+            res: post('このスレ見て<br>$url'),
+            idCount: 1,
+            idOrdinal: 1,
+            onTapId: (_) {},
+            // 設定で OGP を切っている状態。
+            linkPreviews: false,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('貼られたスレのタイトル'), findsOneWidget);
+      expect(client.requests, 0);
+    });
+
+    testWidgets('カードをタップするとその URL が返る', (tester) async {
+      final tapped = <Uri>[];
+      await tester.pumpWidget(
+        wrap(LinkCard(url: Uri.parse(url), raw: url, onTap: tapped.add)),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('貼られたスレのタイトル'));
+      expect(tapped, [Uri.parse(url)]);
+    });
   });
 }
