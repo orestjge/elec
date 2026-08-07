@@ -189,13 +189,16 @@ void main() {
     await _settleMove(tester);
 
     final before = tester.getTopLeft(find.byType(VideoPlayerView));
-    // 左下へ大きく引く。行き過ぎたぶんは画面内に丸められる。
+    // 左下へ大きく引く。行き過ぎた左右と上は画面内に丸められる。下方向は
+    // はみ出せる（引き切ると閉じる）ので、閉じない範囲に留めて丸めだけを見る。
     await tester.drag(
       find.byType(VideoPlayerView),
-      const Offset(-400, 900),
+      const Offset(-400, 430),
       warnIfMissed: false,
     );
     await _settleMove(tester);
+
+    expect(MiniPlayerController.shared.media, isNotNull);
 
     final after = tester.getRect(find.byType(VideoPlayerView));
     expect(after.left, lessThan(before.dx));
@@ -204,6 +207,84 @@ void main() {
       after.bottom,
       lessThanOrEqualTo(tester.getSize(find.byType(MiniPlayerHost)).height),
     );
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
+
+  /// 小窓にして、そこから下へ [down] だけ引いて離す。
+  Future<void> dragMiniDown(WidgetTester tester, double down) async {
+    await tester.tap(find.byIcon(Icons.play_arrow_rounded));
+    await _settleMove(tester);
+    await tester.drag(_surface, const Offset(0, 160), warnIfMissed: false);
+    await _settleMove(tester);
+    await tester.drag(
+      find.byType(VideoPlayerView),
+      Offset(0, down),
+      warnIfMissed: false,
+    );
+    await _settleMove(tester);
+  }
+
+  testWidgets('小窓を下へ引き切ると再生が終わる', (tester) async {
+    await tester.pumpWidget(_app([]));
+    // 下端を越えて _dismissDistance（72）より深く引く。
+    await dragMiniDown(tester, 600);
+
+    expect(find.byType(VideoPlayerView), findsNothing);
+    expect(MiniPlayerController.shared.media, isNull);
+  });
+
+  testWidgets('下端から少しはみ出しただけなら消えず、元の位置へ戻る', (tester) async {
+    await tester.pumpWidget(_app([]));
+    await dragMiniDown(tester, 430);
+
+    expect(MiniPlayerController.shared.media, isNotNull);
+
+    // 離したあとは下端の内側へ戻っている（はみ出したままにしない）。
+    final host = tester.getSize(find.byType(MiniPlayerHost));
+    expect(
+      tester.getRect(find.byType(VideoPlayerView)).bottom,
+      lessThanOrEqualTo(host.height),
+    );
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
+
+  testWidgets('下へ振り切れば、引いた距離が足りなくても終わる', (tester) async {
+    await tester.pumpWidget(_app([]));
+
+    await tester.tap(find.byIcon(Icons.play_arrow_rounded));
+    await _settleMove(tester);
+    await tester.drag(_surface, const Offset(0, 160), warnIfMissed: false);
+    await _settleMove(tester);
+
+    // 430 は「元の位置へ戻る」テストと同じ＝距離だけでは閉じない量。速さで閉じる。
+    await tester.fling(
+      find.byType(VideoPlayerView),
+      const Offset(0, 430),
+      1000,
+      warnIfMissed: false,
+    );
+    await _settleMove(tester);
+
+    expect(find.byType(VideoPlayerView), findsNothing);
+    expect(MiniPlayerController.shared.media, isNull);
+  });
+
+  testWidgets('全画面では下へ引いても終わらない', (tester) async {
+    await tester.pumpWidget(_app([]));
+
+    await tester.tap(find.byIcon(Icons.play_arrow_rounded));
+    await _settleMove(tester);
+
+    // 全画面の下向きドラッグは小窓へ落とす操作（既存）。閉じてはいけない。
+    await tester.drag(_surface, const Offset(0, 600), warnIfMissed: false);
+    await _settleMove(tester);
+
+    expect(MiniPlayerController.shared.media, isNotNull);
+    expect(MiniPlayerController.shared.mode, MiniPlayerMode.mini);
 
     await tester.pumpWidget(const SizedBox());
     await tester.pump();
