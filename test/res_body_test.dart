@@ -1,3 +1,4 @@
+import 'package:elec/src/ui/id_icon.dart';
 import 'package:elec/src/ui/res_body.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -96,5 +97,66 @@ void main() {
     expect(find.byType(SingleChildScrollView), findsNothing);
     final text = tester.widget<SelectableText>(find.byType(SelectableText));
     expect(text.textSpan?.style?.fontFamily, isNull);
+  });
+
+  testWidgets('貼られたレスの ID に identicon を添えてタップ可能にする', (tester) async {
+    final tapped = <String>[];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ResBody(
+            text:
+                '24 エッヂの名無し 2026/08/08(土) 00:00:00.000 ID:X9Jh576dp\n'
+                'ゆめちゃんきたよぉ',
+            onTapRes: (_) {},
+            onTapUrl: (_) {},
+            onTapId: tapped.add,
+          ),
+        ),
+      ),
+    );
+
+    final icon = tester.widget<IdIcon>(find.byType(IdIcon));
+    expect(icon.id, 'X9Jh576dp');
+
+    await tester.tap(find.byType(IdIcon));
+    expect(tapped, ['X9Jh576dp']);
+  });
+
+  testWidgets('ID を押せない場所でも identicon は出す', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ResBody(
+            text: 'ID:X9Jh576dp',
+            onTapRes: (_) {},
+            onTapUrl: (_) {},
+          ),
+        ),
+      ),
+    );
+
+    expect(find.byType(IdIcon), findsOneWidget);
+  });
+
+  testWidgets('ID らしくない ID: 表記は加工しない', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ResBody(
+            // 短すぎるもの、英数字に続くもの、URL の一部。
+            text:
+                'ID:me と GRID:X9Jh576dp と\n'
+                'https://example.com/x?ID=X9Jh576dp',
+            onTapRes: (_) {},
+            onTapUrl: (_) {},
+            onTapId: (_) {},
+          ),
+        ),
+      ),
+    );
+
+    expect(find.byType(IdIcon), findsNothing);
   });
 }
