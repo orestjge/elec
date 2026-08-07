@@ -31,7 +31,6 @@ class PostItem extends StatelessWidget {
     this.onTapUrl,
     this.replyCount = 0,
     this.onTapReplies,
-    this.onReply,
     this.onBodySelectionActiveChanged,
     this.onLongPress,
     this.bodySelectable = true,
@@ -72,9 +71,6 @@ class PostItem extends StatelessWidget {
 
   /// 返信数タップ時。このレスへの返信一覧を出す。
   final ValueChanged<int>? onTapReplies;
-
-  /// 「このレスに返信」タップ時。コンポーザに `>>N` を入れる。
-  final ValueChanged<int>? onReply;
 
   /// 本文の文字選択状態が変わったとき。
   final ValueChanged<bool>? onBodySelectionActiveChanged;
@@ -212,7 +208,6 @@ class PostItem extends StatelessWidget {
             idCount: idCount,
             idOrdinal: idOrdinal,
             onTapId: onTapId,
-            onReply: onReply,
             isOwn: isOwn,
             isThreadOwner: isThreadOwner,
             isReplyToOwn: isReplyToOwn,
@@ -290,6 +285,8 @@ class PostItem extends StatelessWidget {
       ),
     );
 
+    // 返信の左スワイプ（`SwipeToReply`）はここでは掛けない。字下げ帯や会話の枠
+    // ごと動かしたいので、行を組み立てる側が外から包む。
     if (onLongPress == null) return content;
     return _PressableRes(onLongPress: onLongPress!, child: content);
   }
@@ -533,9 +530,11 @@ class _PressSpread extends CustomPainter {
 final _nameSuffixRe = RegExp(r'^(.*?)[\s　]*([(（][^()（）]*[)）])$');
 
 /// 返信件数を押せるときの当たり判定の高さ。文字の高さ（16px）のままだと指には
-/// 狭いので、ヘッダ行が右端の返信ボタン（17px + 余白 4px×2 = 25px）のために元から
-/// 持っている高さに合わせる。行全体はここまで既に伸びているため、広げてもレスの
-/// 高さはほとんど増えない。
+/// 狭いので広げる。
+///
+/// ヘッダの他の要素（ID アイコン 20px・名前と時刻 20px）より数 px 高いので、返信の
+/// 付いたレスだけヘッダがわずかに伸びる。返信の付いたレスは元から目立たせている
+/// （件数が左へ張り出す）ので、そこだけ息継ぎが入るのは筋が通る。
 const double _replyCountTapHeight = 26;
 
 /// 受けた返信の件数。**0 件のレスには出さない。**
@@ -576,8 +575,9 @@ class _ReplyCount extends StatelessWidget {
     final label = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        // 受けた返信の数は吹き出し。返信する操作（ヘッダ右端）は矢印で、
-        // 「付いたもの」と「これからする操作」を形で分ける。
+        // 受けた返信の数は吹き出し。返信する操作は左スワイプ中に出る矢印
+        // （`SwipeToReply`）で、「付いたもの」と「これからする操作」を形で
+        // 分ける。
         Icon(Icons.chat_bubble_outline, size: 13, color: color),
         const SizedBox(width: 2),
         Text('$replyCount', style: style),
@@ -609,7 +609,6 @@ class _Header extends StatelessWidget {
     required this.idCount,
     required this.idOrdinal,
     required this.onTapId,
-    required this.onReply,
     required this.isOwn,
     required this.isThreadOwner,
     required this.isReplyToOwn,
@@ -625,7 +624,6 @@ class _Header extends StatelessWidget {
   final int idCount;
   final int idOrdinal;
   final ValueChanged<String>? onTapId;
-  final ValueChanged<int>? onReply;
   final int replyCount;
   final ValueChanged<int>? onTapReplies;
   final bool isOwn;
@@ -662,8 +660,8 @@ class _Header extends StatelessWidget {
                 // ヘッダは「どれだけ反応され・誰が・何者で・いつ」の順に読ませる。
                 //
                 // **レス番号は出さない。** 番号は `>>N` から辿るための参照値で、
-                // 読むときには要らない。レスを指定する操作は右端の返信ボタンと
-                // 長押しメニューが受け持つ。
+                // 読むときには要らない。レスを指定する操作は左スワイプ（返信・
+                // `SwipeToReply`）と長押しメニューが受け持つ。
                 if (replyCount > 0)
                   _HeaderSlot(
                     height: replyCountSlotHeight,
@@ -731,27 +729,6 @@ class _Header extends StatelessWidget {
           height: lineHeight,
           child: _TimeLabel(res: res),
         ),
-        if (onReply != null) ...[
-          const SizedBox(width: 4),
-          // 押せるものなので説明を付ける（左端の吹き出し＝受けた返信の件数と
-          // 役割が違うことも、これで確かめられる）。
-          Tooltip(
-            message: 'このレスに返信',
-            child: InkResponse(
-              onTap: () => onReply!(res.number),
-              radius: 18,
-              // 余白は左右対称にして、ハイライト円の中心とアイコン中心を合わせる。
-              child: Padding(
-                padding: const EdgeInsets.all(4),
-                child: Icon(
-                  Icons.reply,
-                  size: 17,
-                  color: scheme.onSurfaceVariant,
-                ),
-              ),
-            ),
-          ),
-        ],
       ],
     );
   }
