@@ -141,7 +141,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: const Text('リンクをカードで見せる'),
             // 端末から直接リンク先を読みに行くことを隠さない。相手のサーバに
             // アクセスが残る（＝IP が渡る）ので、承知のうえで選べるようにする。
-            subtitle: const Text('行に URL だけがあるとき、その場でリンク先を読んで見出しと絵を出す'),
+            // 貼られたスレのカードは切っても出る（読みに行くのは元から見ている
+            // 掲示板サーバなので、この設定の理由に当たらない）ことも書いておく。
+            subtitle: const Text(
+              '行に URL だけがあるとき、その場でリンク先を読んで見出しと絵を出す。'
+              '知っている板のスレは、切っていてもスレタイを出す',
+            ),
             value: _threadView.linkPreviews,
             onChanged: (enabled) async {
               await _threadView.setLinkPreviews(enabled);

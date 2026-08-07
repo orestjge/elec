@@ -16,6 +16,7 @@ import '../net/http_fetcher.dart';
 import '../net/imgur_uploader.dart';
 import '../net/ng_store.dart';
 import '../net/read_history.dart';
+import '../net/thread_link.dart';
 import '../net/thread_view_settings.dart';
 import 'attachment_uploader.dart';
 import 'compose_style.dart';
@@ -1733,39 +1734,83 @@ class _ThreadScreenState extends State<ThreadScreen>
     if (!ok && mounted) _showSnack('リンクを開けませんでした');
   }
 
-  /// [url] が自ホスト・自板のスレリンクなら、そのスレをアプリ内で開いて true。
+  /// [url] が知っている板のスレリンクなら、そのスレをアプリ内で開いて true。
   /// 対象外なら false（呼び出し側でブラウザへ回す）。
+  ///
+  /// 自板のスレはそのまま重ねて開く。別板のスレ（[ThreadLinks] が板一覧から
+  /// 見つけたもの）は、その板の既読履歴を読み込んでから開く。
   bool _openThreadLink(Uri url) {
-    if (url.host != widget.endpoints.host) return false;
-    final ref = parseThreadUrl(url);
-    if (ref == null || ref.board != widget.endpoints.boardKey) return false;
-    if (ref.threadKey == widget.threadKey) {
-      // 今開いているスレ自身へのリンク。開き直さず、あれば先頭へ戻す程度に留める。
-      _showSnack('このスレです');
-      return true;
+    if (url.host == widget.endpoints.host) {
+      final ref = parseThreadUrl(url);
+      if (ref != null && ref.board == widget.endpoints.boardKey) {
+        if (ref.threadKey == widget.threadKey) {
+          // 今開いているスレ自身へのリンク。開き直さず、あれば先頭へ戻す程度に
+          // 留める。
+          _showSnack('このスレです');
+          return true;
+        }
+        Navigator.of(context).push(
+          _threadLinkRoute(
+            threadKey: ref.threadKey,
+            endpoints: widget.endpoints,
+            history: _history,
+            defaultName: widget.defaultName,
+          ),
+        );
+        return true;
+      }
     }
-    Navigator.of(context).push(_threadLinkRoute(ref.threadKey));
+
+    final target = ThreadLinks.targetOf(url);
+    if (target == null) return false;
+    unawaited(_openBoardThread(target));
     return true;
   }
 
-  PageRoute<void> _threadLinkRoute(String threadKey) {
+  /// 別板のスレを開く。既読履歴は板ごとに分かれているので、その板のぶんを
+  /// 読み込んでから重ねる（初めて開く板だけ待ちが入る）。
+  Future<void> _openBoardThread(ThreadLinkTarget target) async {
+    final board = target.board;
+    final history =
+        ReadHistory.cachedFor(board) ?? await ReadHistory.forBoard(board);
+    if (!mounted) return;
+    Navigator.of(context).push(
+      _threadLinkRoute(
+        threadKey: target.threadKey,
+        endpoints: EdgeEndpoints.forBoard(board),
+        history: history,
+        defaultName: board.defaultName,
+        // カードで既にスレタイが取れていれば、開いた瞬間から出せる。まだなら
+        // 空のまま開いて dat の 1 レス目から埋める。
+        title: ThreadLinks.cachedTitle(target) ?? '',
+      ),
+    );
+  }
+
+  PageRoute<void> _threadLinkRoute({
+    required String threadKey,
+    required EdgeEndpoints endpoints,
+    required ReadHistory history,
+    String? defaultName,
+    String title = '',
+  }) {
     return SwipeBackPageRoute<void>(
       pageBuilder: (context, animation, secondaryAnimation) => ThreadScreen(
         threadKey: threadKey,
-        // タイトルは開くまで不明。dat の 1 レス目から補完する。
-        threadTitle: '',
+        // タイトルは開くまで不明なことが多い。dat の 1 レス目から補完する。
+        threadTitle: title,
         fetcher: _fetcher,
-        endpoints: widget.endpoints,
+        endpoints: endpoints,
         pollInterval: widget.pollInterval,
         authStore: _authStore,
         authLauncher: widget.authLauncher,
-        readHistory: _history,
+        readHistory: history,
         ngStore: _ng,
         imagePicker: _imagePicker,
         imgurUploader: _imgurUploader,
         imageUploadSettings: _imageUploadSettings,
         pickAndUploadImages: widget.pickAndUploadImages,
-        defaultName: widget.defaultName,
+        defaultName: defaultName,
       ),
     );
   }

@@ -135,6 +135,35 @@ void main() {
     });
   });
 
+  group('スレのリンク', () {
+    const thread = 'https://bbs.example.com/liveedge/1700000000';
+
+    /// スレ URL かどうかの判定を差し込む（実体は板一覧を見る [ThreadLinks]）。
+    List<String> linked(String body) => [
+      for (final segment in splitPostBody(
+        body,
+        isThreadLink: (url) => url.toString() == thread,
+      ))
+        switch (segment) {
+          PostBodyText() => 't',
+          PostBodyLink() => 'l',
+          PostBodyMedia() => 'm',
+        },
+    ];
+
+    test('OGP を切っていてもスレ URL はカードの区画にする', () {
+      expect(linked('このスレ見て\n$thread'), ['t', 'l']);
+    });
+
+    test('スレ以外のリンクは今までどおり本文に残す', () {
+      expect(linked('これ読んで\nhttps://example.com/page.html'), ['t']);
+    });
+
+    test('文の途中に埋まったスレ URL は本文に残す', () {
+      expect(linked('前スレ $thread の続き'), ['t']);
+    });
+  });
+
   test('AA の区画はインデントを削らない', () {
     const aa =
         '　　＿＿＿\n'
