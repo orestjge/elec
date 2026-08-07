@@ -1,6 +1,7 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
+import 'id_icon.dart';
 import 'link_urls.dart';
 
 /// 表示用に本文の前後空白を整える。AA はインデントや上下の余白が絵の一部に
@@ -208,10 +209,23 @@ void appendHighlighted(
 TextStyle searchHighlightStyle(ColorScheme scheme) =>
     TextStyle(backgroundColor: scheme.tertiary.withValues(alpha: 0.32));
 
-/// レス本文。`>>123` / `>>3-5` のレス参照と URL をタップ可能にして表示する。
+/// 本文中に書かれた ID を拾う。
+///
+/// 他のレスを丸ごと貼るとヘッダ行がそのまま本文に入り（`24 名無し 2026/08/08(土)
+/// 00:00:00.000 ID:X9Jh576dp`）、ID が地の文に埋もれる。ヘッダの ID 欄と同じ
+/// identicon を添えれば、貼られた先でも「誰か」が同じ絵で分かる。
+///
+/// 誤爆を避けるため、直前が英数字のもの（`GRID:...`）は外し、英数字で始まって
+/// 英数字で終わる 5 文字以上だけを ID とみなす。掲示板が振る ID は 8〜9 文字
+/// なので、これで普通の文中の `ID:` 表記まで拾うことはまず無い。
+const _idPattern =
+    r'(?<![0-9A-Za-z])ID:([0-9A-Za-z][0-9A-Za-z+/.-]{2,}[0-9A-Za-z])';
+
+/// レス本文。`>>123` / `>>3-5` のレス参照・URL・`ID:xxx` をタップ可能にして表示する。
 ///
 /// - `>>N` タップ → [onTapRes]（該当レスへスクロール）
 /// - URL タップ → [onTapUrl]（ブラウザで開く）
+/// - `ID:xxx` タップ → [onTapId]（同じ ID のレス一覧）
 ///
 /// TapGestureRecognizer を持つので Stateful にして破棄を管理する。
 class ResBody extends StatefulWidget {
@@ -221,6 +235,7 @@ class ResBody extends StatefulWidget {
     required this.onTapRes,
     required this.onTapUrl,
     this.onTapResRange,
+    this.onTapId,
     this.onSelectionActiveChanged,
     this.selectable = true,
     this.style,
@@ -231,6 +246,11 @@ class ResBody extends StatefulWidget {
   final ValueChanged<int> onTapRes;
   final ValueChanged<List<int>>? onTapResRange;
   final ValueChanged<Uri> onTapUrl;
+
+  /// 本文中の `ID:xxx` を押したとき。null なら identicon は出すがタップは効かない
+  /// （ID の一覧を出せない場所でも「誰か」は絵で分かるようにする）。
+  final ValueChanged<String>? onTapId;
+
   final ValueChanged<bool>? onSelectionActiveChanged;
 
   /// 本文を範囲選択できるようにするか。false でもリンク・レス参照タップは有効。
@@ -251,9 +271,10 @@ class _ResBodyState extends State<ResBody> {
   final _focusNode = FocusNode();
   bool _selectionActive = false;
 
-  // URL か >>数字 を拾う。URL を先に（貪欲に）判定する。
+  // URL か >>数字 か ID:xxx を拾う。URL を先に（貪欲に）判定する。URL の中の
+  // `ID:` を ID として切り出さないため、この順でなければならない。
   static final _pattern = RegExp(
-    '($linkUrlPattern)|(&gt;&gt;|>>)(\\d+)(?:-(\\d+))?',
+    '($linkUrlPattern)|(&gt;&gt;|>>)(\\d+)(?:-(\\d+))?|$_idPattern',
   );
 
   @override
@@ -307,6 +328,12 @@ class _ResBodyState extends State<ResBody> {
     final effectiveStyle = isAsciiArt
         ? _asciiArtStyle(context, widget.style)
         : widget.style;
+    // identicon は本文の文字と並ぶので、大文字の高さに収まる程度に留める。
+    final idIconSize =
+        (effectiveStyle?.fontSize ??
+            theme.textTheme.bodyLarge?.fontSize ??
+            15) *
+        0.9;
     final queryLower = widget.highlightQuery.trim().toLowerCase();
     final highlightStyle = searchHighlightStyle(theme.colorScheme);
     void addPlain(String part) =>
@@ -326,6 +353,25 @@ class _ResBodyState extends State<ResBody> {
         _recognizers.add(recognizer);
         spans.add(
           TextSpan(text: url, style: linkStyle, recognizer: recognizer),
+        );
+      } else if (m.group(5) case final id?) {
+        // 絵と文字はひとかたまりの WidgetSpan にする。別々の span にすると
+        // 行末で絵だけが前の行に取り残され（word joiner でも止まらない）、
+        // どの ID の絵なのか読めなくなる。
+        spans.add(
+          WidgetSpan(
+            alignment: PlaceholderAlignment.middle,
+            child: _InlineId(
+              id: id,
+              label: m.group(0)!,
+              iconSize: idIconSize,
+              style: (effectiveStyle ?? const TextStyle()).copyWith(
+                // 行の高さ（1.4）を持ち込むと箱が字より高くなり、行間が広がる。
+                height: 1,
+              ),
+              onTap: widget.onTapId,
+            ),
+          ),
         );
       } else {
         // >>N / >>N-M
@@ -387,6 +433,60 @@ class _ResBodyState extends State<ResBody> {
       fontSize: baseSize,
       height: 1.15,
       letterSpacing: 0,
+    );
+  }
+}
+
+/// 本文の文字列に混ぜる ID。ヘッダの ID チップと同じ絵に `ID:xxx` の文字を
+/// 添えたもので、絵と文字で 1 つの塊として置く。
+///
+/// ヘッダのチップにあるレス数のリング（`idColorForCount`）は付けない。本文に
+/// 貼られた ID は別スレのものかもしれず、このスレでの連投数を語れないため。
+class _InlineId extends StatelessWidget {
+  const _InlineId({
+    required this.id,
+    required this.label,
+    required this.iconSize,
+    required this.style,
+    this.onTap,
+  });
+
+  final String id;
+
+  /// 本文に書かれていた表記（`ID:xxx`）。ID そのものは [id] に入っている。
+  final String label;
+
+  final double iconSize;
+  final TextStyle style;
+  final ValueChanged<String>? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Semantics(
+      label: 'ID:$id',
+      button: onTap != null,
+      excludeSemantics: true,
+      child: GestureDetector(
+        onTap: onTap == null ? null : () => onTap!(id),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IdIcon(id: id, size: iconSize),
+            const SizedBox(width: 2),
+            Text(
+              label,
+              style: onTap == null
+                  ? style
+                  : style.copyWith(
+                      color: scheme.primary,
+                      decoration: TextDecoration.underline,
+                      decorationColor: scheme.primary,
+                    ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

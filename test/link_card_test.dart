@@ -6,6 +6,7 @@ import 'package:edge_core/edge_core.dart';
 import 'package:elec/src/net/board.dart';
 import 'package:elec/src/net/link_preview.dart';
 import 'package:elec/src/net/thread_link.dart';
+import 'package:elec/src/ui/format.dart';
 import 'package:elec/src/ui/link_card.dart';
 import 'package:elec/src/ui/post_item.dart';
 import 'package:flutter/material.dart';
@@ -293,6 +294,12 @@ void main() {
       expect(find.text('貼られたスレのタイトル'), findsOneWidget);
       expect(find.text('1 レス目の本文'), findsOneWidget);
       expect(find.text(url), findsNothing);
+      // スレ立てからの経過も出す。1 レス目の日付（2025/11/03 02:14 JST）から
+      // 起こすので、スレキー（1700000000＝2023 年）とは別の値になる。
+      expect(
+        find.text(formatAge(DateTime.utc(2025, 11, 2, 17, 14, 51, 907))),
+        findsOneWidget,
+      );
       // スレタイは dat から取るので、リンク先の HTML は読まない。
       expect(client.requests, 0);
     });

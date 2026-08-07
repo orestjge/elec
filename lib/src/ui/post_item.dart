@@ -54,7 +54,8 @@ class PostItem extends StatelessWidget {
   /// このレスが同一 ID 内で何番目か（1 始まり）。
   final int idOrdinal;
 
-  /// ID タップ時。同一 ID のレス一覧を出す。
+  /// ID タップ時。同一 ID のレス一覧を出す。ヘッダの ID チップと、本文に貼られた
+  /// `ID:xxx`（他のレスの引用）の両方から呼ぶ。
   final ValueChanged<String>? onTapId;
 
   /// `>>N` タップ時。該当レスへスクロールする。
@@ -232,6 +233,7 @@ class PostItem extends StatelessWidget {
                   onTapRes: (n) => onTapRes?.call(n),
                   onTapResRange: (numbers) => onTapResRange?.call(numbers),
                   onTapUrl: openUrl,
+                  onTapId: onTapId,
                   selectable: bodySelectable,
                   onSelectionActiveChanged: onBodySelectionActiveChanged,
                   highlightQuery: highlightQuery,
