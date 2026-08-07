@@ -7,6 +7,7 @@ import 'package:elec/src/net/read_history.dart';
 import 'package:elec/src/net/thread_link.dart';
 import 'package:elec/src/ui/id_icon.dart';
 import 'package:elec/src/ui/post_images.dart';
+import 'package:elec/src/ui/post_item.dart';
 import 'package:elec/src/ui/thread_map.dart';
 import 'package:elec/src/ui/thread_screen.dart';
 import 'package:flutter/gestures.dart';
@@ -111,6 +112,18 @@ void main() {
       find.byWidgetPredicate((w) => w.runtimeType.toString() == '_ReplyCount');
   Finder replyCount(int nth) => replyCounts().at(nth);
 
+  /// 番号 [n] のレス。シートを開いている間は本体とシートの両方に出るので、
+  /// 必要なら `.last` でシート側を選ぶ。
+  Finder posts(int n) =>
+      find.byWidgetPredicate((w) => w is PostItem && w.res.number == n);
+
+  /// レスを左へ引いて返信する。返信の入り口はこのスワイプだけで、ヘッダに常時
+  /// ボタンは置いていない。しきい値（56px）を確実に越える距離を引く。
+  Future<void> swipeToReply(WidgetTester tester, Finder post) async {
+    await tester.drag(post, const Offset(-120, 0));
+    await tester.pumpAndSettle();
+  }
+
   /// 入力欄の上に出る返信先の帯。
   Finder replyTargetBar() => find.byWidgetPredicate(
     (w) => w.runtimeType.toString() == '_ReplyTargetBar',
@@ -188,17 +201,14 @@ void main() {
     expect(find.text('スレ主'), findsNWidgets(2));
   });
 
-  testWidgets('返信ボタンでコンポーザに >>N が入る', (tester) async {
+  testWidgets('左スワイプでコンポーザに >>N が入る', (tester) async {
     final f = QueueFetcher([
       ok([...res1, ...res2]),
     ]);
     await tester.pumpWidget(app(f));
     await tester.pumpAndSettle();
 
-    // 1 レス目の返信ボタン（ヘッダ右端）をタップ。ヘッダ左の返信数マークと
-    // アイコンが同じなので tooltip で選ぶ。
-    await tester.tap(find.byTooltip('このレスに返信').first);
-    await tester.pump();
+    await swipeToReply(tester, posts(1));
 
     expect(find.text('>>1\n'), findsOneWidget); // 入力欄に反映
     // 誰への返信を書いているかが入力欄の上に出る（番号＋本文の頭）。
@@ -1042,7 +1052,65 @@ void main() {
     expect(find.text('会話 #1  3件'), findsOneWidget);
   });
 
-  testWidgets('会話シートは返信アイコンを押したときだけ入力欄を出す', (tester) async {
+  testWidgets('しきい値まで引かなければ返信にならない', (tester) async {
+    final f = QueueFetcher([
+      ok([...res1, ...res2]),
+    ]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    // 縦スクロールのついでに少し横へ動いた程度では成立しない。
+    await tester.drag(posts(1), const Offset(-30, 0));
+    await tester.pumpAndSettle();
+
+    expect(find.text('>>1\n'), findsNothing);
+    expect(replyTargetBar(), findsNothing);
+  });
+
+  testWidgets('返信の矢印は引いている間しか出ない', (tester) async {
+    final f = QueueFetcher([
+      ok([...res1, ...res2]),
+    ]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    Finder arrow() => find.byWidgetPredicate(
+      (w) => w.runtimeType.toString() == '_ReplySwipeArrow',
+    );
+
+    // 静止した一覧には何も置かない。これが常時ボタンを畳んだ狙い。
+    expect(arrow(), findsNothing);
+
+    // ドラッグが成立するまでの分は捨てられるので、2 回に分けて引く。
+    final gesture = await tester.startGesture(tester.getCenter(posts(1)));
+    await gesture.moveBy(const Offset(-20, 0));
+    await gesture.moveBy(const Offset(-40, 0));
+    await tester.pump();
+    expect(arrow(), findsOneWidget);
+
+    // しきい値（56px）には届いていないので、離しても返信にはならない。
+    await gesture.up();
+    await tester.pumpAndSettle();
+    expect(arrow(), findsNothing);
+    expect(replyTargetBar(), findsNothing);
+  });
+
+  testWidgets('右スワイプは返信にならない（戻る操作を取らない）', (tester) async {
+    final f = QueueFetcher([
+      ok([...res1, ...res2]),
+    ]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    // 右へのスワイプは外側の「一覧へ戻る」のもの。レス側は降りる。
+    await tester.drag(posts(1), const Offset(120, 0));
+    await tester.pumpAndSettle();
+
+    expect(find.text('>>1\n'), findsNothing);
+    expect(replyTargetBar(), findsNothing);
+  });
+
+  testWidgets('会話シートは左スワイプで返信したときだけ入力欄を出す', (tester) async {
     final f = QueueFetcher([
       ok([...res1, ...res2, ...res3]),
     ]);
@@ -1057,9 +1125,8 @@ void main() {
     // 開いただけでは入力欄は出ない（本体の 1 つだけ＝会話全体への返信と誤解しない）。
     expect(find.widgetWithText(TextField, 'レスを書く'), findsOneWidget);
 
-    // シート内の返信ボタンを押すと入力欄が出る（本体＋シートで 2 つ）。
-    await tester.tap(find.byTooltip('このレスに返信').last);
-    await tester.pumpAndSettle();
+    // シート内のレスを左へ引くと入力欄が出る（本体＋シートで 2 つ）。
+    await swipeToReply(tester, posts(3).last);
     final composers = find.widgetWithText(TextField, 'レスを書く');
     expect(composers, findsNWidgets(2));
     // シート側の入力欄には対象の >>N が入っている。
@@ -1613,7 +1680,11 @@ void main() {
 
     testWidgets('別板のスレ URL でも板名とスレタイを出す', (tester) async {
       final f = QueueFetcher([
-        ok(datLine('名無し<><>2025/11/03(月) 02:14:51.907 ID:aaa<> 次スレ<br>$url <>スレタイ')),
+        ok(
+          datLine(
+            '名無し<><>2025/11/03(月) 02:14:51.907 ID:aaa<> 次スレ<br>$url <>スレタイ',
+          ),
+        ),
       ]);
       await tester.pumpWidget(app(f));
       await tester.pumpAndSettle();
@@ -1624,7 +1695,11 @@ void main() {
 
     testWidgets('カードをタップすると別板のスレをアプリ内で開く', (tester) async {
       final f = QueueFetcher([
-        ok(datLine('名無し<><>2025/11/03(月) 02:14:51.907 ID:aaa<> 次スレ<br>$url <>スレタイ')),
+        ok(
+          datLine(
+            '名無し<><>2025/11/03(月) 02:14:51.907 ID:aaa<> 次スレ<br>$url <>スレタイ',
+          ),
+        ),
       ]);
       // その板の既読履歴を先に用意しておく（読み込みはファイル越しで、pump では
       // 進まないため）。アプリでも 2 回目以降はこの状態から開く。

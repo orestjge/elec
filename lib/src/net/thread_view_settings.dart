@@ -29,6 +29,8 @@ class ThreadViewSettings extends ChangeNotifier {
   final ThreadViewSettingsStorage _storage;
   ThreadLayout _layout = ThreadLayout.number;
   bool _linkPreviews = true;
+  bool _loaded = false;
+  bool _replySwipeHintSeen = false;
 
   ThreadLayout get layout => _layout;
 
@@ -39,6 +41,15 @@ class ThreadViewSettings extends ChangeNotifier {
   /// 渡る。踏みたくないリンクにも当たるので、丸ごと切れるようにしてある。
   bool get linkPreviews => _linkPreviews;
 
+  /// 「レスを左へスワイプすると返信」のヒントを一度でも出したか。
+  ///
+  /// スワイプは画面に何も置かない操作なので、初めてスレを開いたときだけ一度
+  /// 知らせる（`PostItem.onReply`）。
+  ///
+  /// **設定をまだ読めていないうちは「出した」扱いにする。** 出したことを覚えて
+  /// おけない状態でヒントを出すと、一度きりのつもりが毎回出るものになるため。
+  bool get replySwipeHintSeen => !_loaded || _replySwipeHintSeen;
+
   Future<void> load() async {
     final values = await _storage.load();
     _layout = _parse(values['layout']) ?? ThreadLayout.number;
@@ -47,6 +58,8 @@ class ThreadViewSettings extends ChangeNotifier {
       // 古い設定ファイル（この項目が無い）は既定のまま。
       _ => true,
     };
+    _replySwipeHintSeen = values['replySwipeHintSeen'] == true;
+    _loaded = true;
   }
 
   Future<void> setLayout(ThreadLayout layout) async {
@@ -63,12 +76,20 @@ class ThreadViewSettings extends ChangeNotifier {
     await _save();
   }
 
+  /// ヒントを出したことを覚える。表示に関わる設定ではないので通知はしない。
+  Future<void> markReplySwipeHintSeen() async {
+    if (_replySwipeHintSeen) return;
+    _replySwipeHintSeen = true;
+    await _save();
+  }
+
   /// 覚え損ねても次に開いたとき既定に戻るだけなので、書けなくても投げない。
   Future<void> _save() async {
     try {
       await _storage.save({
         'layout': _layout.name,
         'linkPreviews': _linkPreviews,
+        'replySwipeHintSeen': _replySwipeHintSeen,
       });
     } catch (_) {}
   }
