@@ -1,0 +1,105 @@
+{
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  extends: ['config:recommended'],
+
+  timezone: 'Asia/Tokyo',
+
+  // **main へのマージ＝リリース**（release.yml が push のたびにパッチ版を採番して
+  // APK と IPA を公開する）。ただし増えるのは**マージした本数のぶんだけ**で、PR が
+  // 立つこと自体はリリースを増やさない。効くのはグループ化の方なので、そちらで
+  // 抑える:
+  //
+  //  - automerge はどこにも入れない（人が見てからマージする）
+  //  - 同じ性質の更新はグループにまとめて 1 PR にする＝マージも 1 回で済む
+  //
+  // 週 1 回、月曜の早朝にまとめて出す。平日の作業中に PR が湧かないようにする。
+  schedule: ['before 6am on monday'],
+
+  // 溢れたぶんは黙ってキューで待つ＝気づけなくなるので、実際に立ちうる本数
+  // （グループ 4 つ＋major が単発で数本）より余裕を持たせる。
+  prConcurrentLimit: 10,
+  prHourlyLimit: 0,
+
+  labels: ['dependencies'],
+
+  // このリポジトリはコミットメッセージが命令形の英文で、Conventional Commits で
+  // はない（`Show what a linked thread is` など）。接頭辞を付けさせない。
+  semanticCommits: 'disabled',
+
+  // 出力物とツールの作業場所は見ない。
+  ignorePaths: ['build/**', '.dart_tool/**'],
+
+  // 追従が必要になった依存を取りこぼさないよう、ダッシュボードは常に出す。
+  dependencyDashboard: true,
+  dependencyDashboardTitle: 'Dependency Dashboard',
+
+  // ワークフローに直書きしてある Flutter SDK の版（`flutter-version: 3.44.9`）を
+  // 追う。GitHub Actions マネージャは `subosito/flutter-action@v2` の方しか見ない
+  // ので、SDK 本体はこちらで拾う必要がある。
+  customManagers: [
+    {
+      customType: 'regex',
+      managerFilePatterns: ['/^\\.github/workflows/.+\\.ya?ml$/'],
+      matchStrings: ['flutter-version:\\s*(?<currentValue>\\S+)'],
+      depNameTemplate: 'flutter',
+      datasourceTemplate: 'flutter-version',
+      versioningTemplate: 'semver',
+    },
+  ],
+
+  packageRules: [
+    // pub の依存はまとめて 1 PR。個別に出すとリリースが依存の数だけ増える。
+    {
+      matchManagers: ['pub'],
+      matchUpdateTypes: ['minor', 'patch'],
+      groupName: 'dart packages',
+    },
+
+    // Actions のピン（checkout / setup-java / flutter-action / upload-artifact）も
+    // まとめる。ビルドの中身に影響しないので、まとめて上げて困ることが少ない。
+    {
+      matchManagers: ['github-actions'],
+      groupName: 'github actions',
+    },
+
+    // AGP・Kotlin・Gradle wrapper は Flutter 側が対応版を縛るので、Renovate の
+    // 言うとおりに上げると Flutter とずれてビルドが落ちる。PR は出すが、
+    // **中身は疑ってかかる**もの（CI が通っても Flutter との相性までは見ていない）。
+    {
+      matchManagers: ['gradle', 'gradle-wrapper'],
+      groupName: 'android build',
+    },
+
+    // Flutter SDK 自体。この PR はワークフローのピンを書き換えるだけで、それ単体
+    // では**不完全**。マージ前に手元で `flutter upgrade` して `pubspec.lock` を
+    // 撮り直し、`flutter test` を通すところまでが要る。PR は「そろそろ上げどきだ」
+    // の合図として受け取る。
+    {
+      matchDepNames: ['flutter'],
+      groupName: 'flutter sdk',
+    },
+
+    // major は上のグループに混ぜず、1 件ずつ別の PR にする（Renovate の既定＝
+    // separateMajorMinor）。破壊的変更を他の更新と一緒にマージしないため。
+
+    // 自作パッケージ（packages/edge_core・packages/edge_sjis）は path 依存なので
+    // 更新対象にならないが、名前で拾われる事故を避けて明示的に外す。
+    {
+      matchPackageNames: ['edge_core', 'edge_sjis'],
+      enabled: false,
+    },
+  ],
+
+  // Podfile.lock は Flutter がプラグインから生成するもので、手で上げる対象では
+  // ない。CocoaPods マネージャごと止める。
+  cocoapods: {
+    enabled: false,
+  },
+
+  // pubspec.lock の推移的依存を月 1 で洗い替える。ピンした版が古いまま固まるのを
+  // 防ぐ（直接依存のレンジは動かさない）。
+  lockFileMaintenance: {
+    enabled: true,
+    schedule: ['before 6am on the first day of the month'],
+  },
+}
