@@ -43,11 +43,7 @@ const opLine =
     '名無し<><>2025/11/03(月) 02:14:51.907 ID:abc<> 本文の<br>一行目 <>'
     'テスト用のスレタイ';
 
-const fivech = Board(
-  host: 'mi.5ch.io',
-  boardKey: 'news4vip',
-  title: 'ニュー速VIP',
-);
+const fivech = Board(host: 'mi.5ch.io', boardKey: 'news4vip', title: 'ニュー速VIP');
 
 const shitaraba = Board(
   host: 'jbbs.shitaraba.net',
@@ -132,6 +128,24 @@ void main() {
       expect(info?.excerpt, '本文の 一行目');
       expect(info?.pastLog, isFalse);
       expect(info?.board, Board.eddibb);
+      // 1 レス目の日付欄（JST）から。スレキー（1700000000）ではない。
+      expect(info?.createdAt, DateTime.utc(2025, 11, 2, 17, 14, 51, 907));
+    });
+
+    test('1 レス目の日付が読めなければスレキーからスレ立て時刻を起こす', () async {
+      install({
+        'https://bbs.eddibb.cc/liveedge/dat/1700000000.dat': datResp(
+          '名無し<><>日付になっていない<> 本文 <>テスト用のスレタイ',
+        ),
+      });
+      final info = await ThreadLinks.resolve(
+        target('https://bbs.eddibb.cc/liveedge/1700000000')!,
+      );
+
+      expect(
+        info?.createdAt,
+        DateTime.fromMillisecondsSinceEpoch(1700000000 * 1000, isUtc: true),
+      );
     });
 
     test('先頭だけを Range で読む', () async {
@@ -190,16 +204,19 @@ void main() {
     });
 
     test('したらばは rawmode で 1 レス目だけを名指しする', () async {
-      install({
-        'https://jbbs.shitaraba.net/bbs/rawmode.cgi/game/12345/1700000000/1':
-            FetchResponse(
-              statusCode: 200,
-              bodyBytes: eucDat(
-                '1<>名無し<><>2025/11/03(月) 02:14:51<>したらばの本文<>'
-                'したらばのスレタイ<>ID:abc',
+      install(
+        {
+          'https://jbbs.shitaraba.net/bbs/rawmode.cgi/game/12345/1700000000/1':
+              FetchResponse(
+                statusCode: 200,
+                bodyBytes: eucDat(
+                  '1<>名無し<><>2025/11/03(月) 02:14:51<>したらばの本文<>'
+                  'したらばのスレタイ<>ID:abc',
+                ),
               ),
-            ),
-      }, boards: const [shitaraba]);
+        },
+        boards: const [shitaraba],
+      );
 
       final info = await ThreadLinks.resolve(
         target(

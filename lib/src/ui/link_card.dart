@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../net/link_preview.dart';
 import '../net/thread_link.dart';
+import 'format.dart';
 import 'remote_image.dart';
 
 /// 本文に貼られたリンク 1 本ぶんの表示。
@@ -241,6 +242,13 @@ class _ThreadCard extends StatelessWidget {
                 if (resSpec != null) ...[
                   const SizedBox(width: 6),
                   Text(resSpec, style: labelStyle),
+                ],
+                // スレ立てからの経過。実況スレも何年も前の過去ログもスレタイ
+                // だけでは同じ顔で並ぶので、開く前に古さが分かるようにする。
+                // 表記は一覧（`ThreadTile`）と同じ相対表記で揃える。
+                if (info.createdAt case final createdAt?) ...[
+                  const SizedBox(width: 6),
+                  Text(formatAge(createdAt), style: labelStyle),
                 ],
                 // dat落ちは「開いても続きは書けない」ことなので、スレタイと同じ
                 // 高さで見えるところに置く。

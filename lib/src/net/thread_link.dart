@@ -62,6 +62,7 @@ class ThreadLinkInfo {
     required this.target,
     required this.title,
     this.excerpt,
+    this.createdAt,
     this.pastLog = false,
   });
 
@@ -72,6 +73,13 @@ class ThreadLinkInfo {
 
   /// 1 レス目の冒頭。無ければ null。
   final String? excerpt;
+
+  /// スレが立った時刻（UTC）。1 レス目の日付欄から取り、読めなければスレキー
+  /// （＝スレ立て時の UNIX 秒）から起こす。どちらも駄目なら null。
+  ///
+  /// 貼られたスレが今の話なのか何年も前のものなのかは、開く前に知りたい。
+  /// スレタイだけでは実況スレも過去ログも同じ顔で並ぶ。
+  final DateTime? createdAt;
 
   /// 過去ログ（dat落ち）から取れたか。
   final bool pastLog;
@@ -268,8 +276,19 @@ class ThreadLinks {
       target: target,
       title: title,
       excerpt: _excerpt(first.body),
+      createdAt: first.dateTime ?? _keyTime(target.threadKey),
       pastLog: pastLog,
     );
+  }
+
+  /// スレキーから起こしたスレ立て時刻。5ch 系もしたらばもキーは UNIX 秒。
+  ///
+  /// 1 レス目の日付欄が読めない板・形式（したらばの `rawmode` は日付欄の形が
+  /// 違う）でも、キーからなら必ず出せる。
+  static DateTime? _keyTime(String threadKey) {
+    final seconds = int.tryParse(threadKey);
+    if (seconds == null || seconds <= 0) return null;
+    return DateTime.fromMillisecondsSinceEpoch(seconds * 1000, isUtc: true);
   }
 
   /// 1 レス目の冒頭。カードは 1〜2 行しか出せないので改行や連続空白は潰す
