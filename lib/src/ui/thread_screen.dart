@@ -27,6 +27,7 @@ import 'image_urls.dart';
 import 'ng_screen.dart';
 import 'post_images.dart';
 import 'post_item.dart';
+import 'reply_swipe.dart';
 import 'dat_html.dart';
 import 'reply_tier.dart';
 import 'thread_map.dart';
@@ -1338,34 +1339,39 @@ class _ThreadScreenState extends State<ThreadScreen>
                             _showResActions(post, onReply: replyAndClose),
                       );
                     }
-                    return PostItem(
-                      res: post,
-                      idCount: idCounts[post.id] ?? 1,
-                      idOrdinal: idOrdinals[post.number] ?? 1,
-                      onTapId: null,
-                      onTapRes: (n) {
-                        Navigator.pop(context);
-                        _showConversation(n);
-                      },
-                      onTapResRange: (numbers) {
-                        Navigator.pop(context);
-                        _showConversationRange(numbers);
-                      },
-                      onTapUrl: _openUrl,
-                      replyCount: replyCountByNumber[post.number] ?? 0,
-                      onTapReplies: (n) {
-                        Navigator.pop(context);
-                        _showConversation(n);
-                      },
-                      onReply: replyAndClose,
-                      onLongPress: () =>
-                          _showResActions(post, onReply: replyAndClose),
-                      isOwn: _history.isOwnPost(widget.threadKey, post.number),
-                      isThreadOwner: _isThreadOwnerPost(post, ownerId),
-                      isReplyToOwn: _isReplyToOwnPost(post),
-                      blurImages: guroMasked.contains(post.number),
-                      linkPreviews: _view.linkPreviews,
-                      defaultName: widget.defaultName,
+                    return SwipeToReply(
+                      onReply: () => replyAndClose(post.number),
+                      child: PostItem(
+                        res: post,
+                        idCount: idCounts[post.id] ?? 1,
+                        idOrdinal: idOrdinals[post.number] ?? 1,
+                        onTapId: null,
+                        onTapRes: (n) {
+                          Navigator.pop(context);
+                          _showConversation(n);
+                        },
+                        onTapResRange: (numbers) {
+                          Navigator.pop(context);
+                          _showConversationRange(numbers);
+                        },
+                        onTapUrl: _openUrl,
+                        replyCount: replyCountByNumber[post.number] ?? 0,
+                        onTapReplies: (n) {
+                          Navigator.pop(context);
+                          _showConversation(n);
+                        },
+                        onLongPress: () =>
+                            _showResActions(post, onReply: replyAndClose),
+                        isOwn: _history.isOwnPost(
+                          widget.threadKey,
+                          post.number,
+                        ),
+                        isThreadOwner: _isThreadOwnerPost(post, ownerId),
+                        isReplyToOwn: _isReplyToOwnPost(post),
+                        blurImages: guroMasked.contains(post.number),
+                        linkPreviews: _view.linkPreviews,
+                        defaultName: widget.defaultName,
+                      ),
                     );
                   },
                 ),
@@ -2185,31 +2191,35 @@ class _ThreadScreenState extends State<ThreadScreen>
                   ),
                 );
               }
-              return ThreadTreeTier(
-                depth: row.depth,
-                child: PostItem(
-                  res: item,
-                  idCount: idCounts[item.id] ?? 1,
-                  idOrdinal: idOrdinals[item.number] ?? 1,
-                  onTapId: _showIdPosts,
-                  onTapRes: _showResPopup,
-                  onTapResRange: _showConversationRange,
-                  onTapUrl: _openUrl,
-                  replyCount: replies[item.number] ?? 0,
-                  onTapReplies: _showReplies,
-                  onReply: _reply,
-                  onBodySelectionActiveChanged: (active) =>
-                      _handleBodySelectionActiveChanged(item.number, active),
-                  onLongPress: () => _showResActions(item),
-                  bodySelectable: false,
-                  isOwn: _history.isOwnPost(widget.threadKey, item.number),
-                  isThreadOwner: _isThreadOwnerPost(item, threadOwnerId),
-                  isReplyToOwn: _isReplyToOwnPost(item),
-                  blurImages: guroMasked.contains(item.number),
-                  linkPreviews: _view.linkPreviews,
-                  highlightQuery: searchQuery,
-                  isCurrentMatch: item.number == currentMatchNumber,
-                  defaultName: widget.defaultName,
+              // 字下げ帯は行の持ち物なので、スワイプはツリーの外側から掛ける。
+              // PostItem だけを包むと本文が自分の帯の下から抜け出す。
+              return SwipeToReply(
+                onReply: () => _reply(item.number),
+                child: ThreadTreeTier(
+                  depth: row.depth,
+                  child: PostItem(
+                    res: item,
+                    idCount: idCounts[item.id] ?? 1,
+                    idOrdinal: idOrdinals[item.number] ?? 1,
+                    onTapId: _showIdPosts,
+                    onTapRes: _showResPopup,
+                    onTapResRange: _showConversationRange,
+                    onTapUrl: _openUrl,
+                    replyCount: replies[item.number] ?? 0,
+                    onTapReplies: _showReplies,
+                    onBodySelectionActiveChanged: (active) =>
+                        _handleBodySelectionActiveChanged(item.number, active),
+                    onLongPress: () => _showResActions(item),
+                    bodySelectable: false,
+                    isOwn: _history.isOwnPost(widget.threadKey, item.number),
+                    isThreadOwner: _isThreadOwnerPost(item, threadOwnerId),
+                    isReplyToOwn: _isReplyToOwnPost(item),
+                    blurImages: guroMasked.contains(item.number),
+                    linkPreviews: _view.linkPreviews,
+                    highlightQuery: searchQuery,
+                    isCurrentMatch: item.number == currentMatchNumber,
+                    defaultName: widget.defaultName,
+                  ),
                 ),
               );
             },
@@ -2945,59 +2955,67 @@ class _ConversationSheetState extends State<_ConversationSheet> {
                     final ngHidden =
                         widget.ng.matches(entry.res) &&
                         !widget.revealedNg.contains(entry.res.number);
+                    final post = _ConversationPost(
+                      highlighted: entry.highlighted,
+                      isReplyToOwn:
+                          widget.isReplyToOwn(entry.res) &&
+                          !widget.isOwnPost(entry.res.number),
+                      depth: entry.depth,
+                      refs: entry.refs,
+                      child: ngHidden
+                          ? _NgPlaceholder(
+                              number: entry.res.number,
+                              onReveal: () => setState(
+                                () => widget.revealedNg.add(entry.res.number),
+                              ),
+                              onLongPress: () => widget.onShowActions(
+                                entry.res,
+                                onReply: _replyLocal,
+                              ),
+                            )
+                          : PostItem(
+                              res: entry.res,
+                              idCount: widget.idCounts[entry.res.id] ?? 1,
+                              idOrdinal:
+                                  widget.idOrdinals[entry.res.number] ?? 1,
+                              onTapId: widget.onTapId,
+                              onTapRes: (n) =>
+                                  widget.onTapRes(entry.res.number, n),
+                              onTapResRange: (numbers) => widget.onTapResRange(
+                                entry.res.number,
+                                numbers,
+                              ),
+                              onTapUrl: widget.onTapUrl,
+                              replyCount:
+                                  widget.replyCountByNumber[entry.res.number] ??
+                                  0,
+                              onTapReplies: widget.onTapReplies,
+                              onLongPress: () => widget.onShowActions(
+                                entry.res,
+                                onReply: _replyLocal,
+                              ),
+                              isOwn: widget.isOwnPost(entry.res.number),
+                              isThreadOwner: widget.isThreadOwner(entry.res),
+                              isReplyToOwn: widget.isReplyToOwn(entry.res),
+                              showReplyToOwnAccent: false,
+                              blurImages: widget.guroMasked.contains(
+                                entry.res.number,
+                              ),
+                              linkPreviews: widget.linkPreviews,
+                              defaultName: widget.defaultName,
+                            ),
+                    );
                     return KeyedSubtree(
                       key: _keys[entry.res.number],
-                      child: _ConversationPost(
-                        highlighted: entry.highlighted,
-                        isReplyToOwn:
-                            widget.isReplyToOwn(entry.res) &&
-                            !widget.isOwnPost(entry.res.number),
-                        depth: entry.depth,
-                        refs: entry.refs,
-                        child: ngHidden
-                            ? _NgPlaceholder(
-                                number: entry.res.number,
-                                onReveal: () => setState(
-                                  () => widget.revealedNg.add(entry.res.number),
-                                ),
-                                onLongPress: () => widget.onShowActions(
-                                  entry.res,
-                                  onReply: _replyLocal,
-                                ),
-                              )
-                            : PostItem(
-                                res: entry.res,
-                                idCount: widget.idCounts[entry.res.id] ?? 1,
-                                idOrdinal:
-                                    widget.idOrdinals[entry.res.number] ?? 1,
-                                onTapId: widget.onTapId,
-                                onTapRes: (n) =>
-                                    widget.onTapRes(entry.res.number, n),
-                                onTapResRange: (numbers) => widget
-                                    .onTapResRange(entry.res.number, numbers),
-                                onTapUrl: widget.onTapUrl,
-                                replyCount:
-                                    widget.replyCountByNumber[entry
-                                        .res
-                                        .number] ??
-                                    0,
-                                onTapReplies: widget.onTapReplies,
-                                onReply: _replyLocal,
-                                onLongPress: () => widget.onShowActions(
-                                  entry.res,
-                                  onReply: _replyLocal,
-                                ),
-                                isOwn: widget.isOwnPost(entry.res.number),
-                                isThreadOwner: widget.isThreadOwner(entry.res),
-                                isReplyToOwn: widget.isReplyToOwn(entry.res),
-                                showReplyToOwnAccent: false,
-                                blurImages: widget.guroMasked.contains(
-                                  entry.res.number,
-                                ),
-                                linkPreviews: widget.linkPreviews,
-                                defaultName: widget.defaultName,
-                              ),
-                      ),
+                      // 字下げ・返信先の見出し・強調の帯まで含めて 1 行なので、
+                      // スワイプは枠の外側から掛ける。畳んだ NG は中身が無いので
+                      // 包まない。
+                      child: ngHidden
+                          ? post
+                          : SwipeToReply(
+                              onReply: () => _replyLocal(entry.res.number),
+                              child: post,
+                            ),
                     );
                   },
                 ),
