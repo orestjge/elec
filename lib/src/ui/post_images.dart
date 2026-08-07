@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
+import '../net/auth_launcher.dart';
 import 'audio_player_widget.dart';
 import 'embed_urls.dart';
 import 'format.dart';
@@ -15,18 +16,25 @@ import 'remote_image.dart';
 import 'video_thumbnail.dart';
 
 /// 画像URL群を全画面ビューアで開く。
+///
+/// [onOpenExternally] を渡すと「ブラウザで開く」をそのハンドラに委ねる。
+/// 未指定ならシステムブラウザで開く。
 void openImageViewer(
   BuildContext context,
   List<Uri> urls, {
   int initialIndex = 0,
+  ValueChanged<Uri>? onOpenExternally,
 }) {
   if (urls.isEmpty) return;
   Navigator.of(context).push(
     PageRouteBuilder<void>(
       transitionDuration: const Duration(milliseconds: 180),
       reverseTransitionDuration: const Duration(milliseconds: 180),
-      pageBuilder: (_, _, _) =>
-          _ImageViewer(urls: urls, initialIndex: initialIndex),
+      pageBuilder: (_, _, _) => _ImageViewer(
+        urls: urls,
+        initialIndex: initialIndex,
+        onOpenExternally: onOpenExternally,
+      ),
       transitionsBuilder: (_, animation, _, child) =>
           FadeTransition(opacity: animation, child: child),
     ),
@@ -42,6 +50,7 @@ class PostImages extends StatelessWidget {
     this.audioUrls = const [],
     this.embedVideos = const [],
     this.onOpenVideoExternally,
+    this.onOpenImageExternally,
     this.onTapEmbed,
     this.onRemove,
     this.viewerUrls,
@@ -70,6 +79,9 @@ class PostImages extends StatelessWidget {
   /// アプリ内で再生できなかった動画をブラウザへ回すための逃げ道。
   /// 未指定ならプレーヤーに「ブラウザで開く」を出さない。
   final ValueChanged<Uri>? onOpenVideoExternally;
+
+  /// 全画面ビューアの「ブラウザで開く」の実処理。未指定ならシステムブラウザで開く。
+  final ValueChanged<Uri>? onOpenImageExternally;
 
   final ValueChanged<EmbedVideo>? onTapEmbed;
 
@@ -120,6 +132,7 @@ class PostImages extends StatelessWidget {
                       viewerUrls: viewerUrls ?? urls,
                       size: thumbSize,
                       blurred: blurImages,
+                      onOpenExternally: onOpenImageExternally,
                     ),
                   ),
                 for (final url in videoUrls)
@@ -191,6 +204,7 @@ class _Thumb extends StatefulWidget {
     required this.viewerUrls,
     this.size = 160,
     this.blurred = false,
+    this.onOpenExternally,
   });
   final Uri url;
 
@@ -200,6 +214,9 @@ class _Thumb extends StatefulWidget {
 
   /// 「グロ」注意が付いた画像で、初期表示をモザイクにするか。
   final bool blurred;
+
+  /// 全画面ビューアの「ブラウザで開く」の実処理（[PostImages.onOpenImageExternally]）。
+  final ValueChanged<Uri>? onOpenExternally;
 
   @override
   State<_Thumb> createState() => _ThumbState();
@@ -215,10 +232,19 @@ class _ThumbState extends State<_Thumb> {
     final urls = widget.viewerUrls;
     final index = urls.indexOf(_url);
     if (index < 0) {
-      openImageViewer(context, [_url]);
+      openImageViewer(
+        context,
+        [_url],
+        onOpenExternally: widget.onOpenExternally,
+      );
       return;
     }
-    openImageViewer(context, urls, initialIndex: index);
+    openImageViewer(
+      context,
+      urls,
+      initialIndex: index,
+      onOpenExternally: widget.onOpenExternally,
+    );
   }
 
   /// 「読み込む」を選んだ。以後この URL は上限を上げて読む。
@@ -685,9 +711,16 @@ class _Placeholder extends StatelessWidget {
 
 /// 全画面の画像ビューア。ピンチズーム・パン可能。
 class _ImageViewer extends StatefulWidget {
-  const _ImageViewer({required this.urls, required this.initialIndex});
+  const _ImageViewer({
+    required this.urls,
+    required this.initialIndex,
+    this.onOpenExternally,
+  });
   final List<Uri> urls;
   final int initialIndex;
+
+  /// 「ブラウザで開く」の実処理。未指定ならシステムブラウザで開く。
+  final ValueChanged<Uri>? onOpenExternally;
 
   @override
   State<_ImageViewer> createState() => _ImageViewerState();
@@ -779,6 +812,17 @@ class _ImageViewerState extends State<_ImageViewer> {
       _view.value = Matrix4.identity();
       _index = page;
     });
+  }
+
+  /// 表示中の画像をブラウザへ回す。アプリ内で読めない（大きすぎる・壊れている・
+  /// 対応していない形式）ときの逃げ道であり、保存や共有もブラウザ側に任せられる。
+  void _openExternally() {
+    final handler = widget.onOpenExternally;
+    if (handler != null) {
+      handler(_url);
+      return;
+    }
+    const SystemBrowserLauncher().open(_url);
   }
 
   Future<void> _close() async {
@@ -950,6 +994,13 @@ class _ImageViewerState extends State<_ImageViewer> {
               : _fileName(_url),
           style: const TextStyle(fontSize: 14),
         ),
+        actions: [
+          IconButton(
+            tooltip: 'ブラウザで開く',
+            onPressed: _openExternally,
+            icon: const Icon(Icons.open_in_browser),
+          ),
+        ],
       ),
       body: LayoutBuilder(
         builder: (context, constraints) {
