@@ -18,6 +18,7 @@ import 'package:video_player/video_player.dart';
 import '../net/auth_launcher.dart';
 import 'audio_player_widget.dart';
 import 'media_scrim.dart';
+import 'media_url_panel.dart';
 
 /// 動画 URL を再生する部品。
 ///
@@ -88,6 +89,9 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
   /// 再生中に出した操作を自動で引っ込めるためのタイマー。
   Timer? _hideTimer;
 
+  /// 題名をタップして URL 全体を開いているか（`media_url_panel.dart`）。
+  bool _urlOpen = false;
+
   /// シークバーをドラッグ中はつまみが再生位置で飛ばないよう固定する。
   double? _dragValue;
 
@@ -154,15 +158,26 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
   /// 止めるのは操作の中央ボタン。
   void _toggleControls() {
     if (!_ready || _failed) return;
-    setState(() => _controlsVisible = !_controlsVisible);
+    setState(() {
+      _controlsVisible = !_controlsVisible;
+      // 引っ込めたら URL も畳む。次に出したときは題名だけの姿から始める。
+      if (!_controlsVisible) _urlOpen = false;
+    });
+    _scheduleAutoHide();
+  }
+
+  /// 題名をタップした。URL 全体を出し入れする。
+  void _toggleUrl() {
+    setState(() => _urlOpen = !_urlOpen);
     _scheduleAutoHide();
   }
 
   /// 再生中に出した操作は数秒で引っ込める（映像を隠し続けない）。止めていると
-  /// きは触りたいはずなので消さない。
+  /// きは触りたいはずなので消さない。**URL を開けている間も消さない**——読んで
+  /// いる・写している最中に消えられると困る。
   void _scheduleAutoHide() {
     _hideTimer?.cancel();
-    if (!_controlsVisible || !_controller.value.isPlaying) return;
+    if (!_controlsVisible || _urlOpen || !_controller.value.isPlaying) return;
     _hideTimer = Timer(const Duration(seconds: 3), () {
       if (mounted) setState(() => _controlsVisible = false);
     });
@@ -243,7 +258,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
   }
 
   /// **下＝小窓へ、上＝終了。** 指の向きと結果を合わせる（下へ払うと下へ縮む）。
-  /// ボタン（タップで出る▼と×）と同じことができる近道で、見ている流れを
+  /// ボタン（タップで出る小窓ボタンと×）と同じことができる近道で、見ている流れを
   /// 止めずに畳める。
   void _onDragEnd(DragEndDetails details) {
     final velocity = details.velocity.pixelsPerSecond.dy;
@@ -314,33 +329,40 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
                               4,
                               TopScrim.fadeTail,
                             ),
-                            child: Row(
+                            child: Column(
                               mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                IconButton(
-                                  tooltip: '閉じる',
-                                  color: Colors.white,
-                                  onPressed: widget.onClose,
-                                  icon: const Icon(Icons.close),
-                                ),
-                                IconButton(
-                                  tooltip: '小さくする',
-                                  color: Colors.white,
-                                  onPressed: widget.onMinimize,
-                                  icon: const Icon(Icons.keyboard_arrow_down),
-                                ),
-                                if (widget.title case final title?)
-                                  Flexible(
-                                    child: Text(
-                                      title,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 14,
-                                      ),
+                                Row(
+                                  children: [
+                                    IconButton(
+                                      tooltip: '閉じる',
+                                      color: Colors.white,
+                                      onPressed: widget.onClose,
+                                      icon: const Icon(Icons.close),
                                     ),
-                                  ),
+                                    // 題名はタップの的。ファイル名だけでは元が
+                                    // 分からないので、押すと URL 全体が開く
+                                    // （画像のページと同じ規則）。
+                                    if (widget.title case final title?) ...[
+                                      Expanded(
+                                        child: Center(
+                                          child: MediaTitleButton(
+                                            title: title,
+                                            open: _urlOpen,
+                                            onTap: _toggleUrl,
+                                          ),
+                                        ),
+                                      ),
+                                      // ×と釣り合わせる余白。これが無いと
+                                      // ×のぶんだけ題名が右へずれる。
+                                      const SizedBox(
+                                        width: kMinInteractiveDimension,
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                                if (_urlOpen) MediaUrlPanel(url: widget.url),
                               ],
                             ),
                           ),
@@ -402,6 +424,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
             onToggleMuted: _toggleMuted,
             onToggleLooping: _toggleLooping,
             onOpenExternally: _openExternally,
+            onMinimize: widget.onMinimize,
             onDrag: (v) {
               _hideTimer?.cancel();
               setState(() => _dragValue = v);
@@ -468,6 +491,7 @@ class _Controls extends StatelessWidget {
     required this.onToggleMuted,
     required this.onToggleLooping,
     required this.onOpenExternally,
+    required this.onMinimize,
     required this.onDrag,
     required this.onDragEnd,
   });
@@ -484,6 +508,10 @@ class _Controls extends StatelessWidget {
   final VoidCallback onToggleMuted;
   final VoidCallback onToggleLooping;
   final VoidCallback onOpenExternally;
+
+  /// 小窓へ落とす（再生は続く）。
+  final VoidCallback onMinimize;
+
   final ValueChanged<double> onDrag;
   final ValueChanged<double> onDragEnd;
 
@@ -589,6 +617,16 @@ class _Controls extends StatelessWidget {
                       color: Colors.white,
                       onPressed: onOpenExternally,
                       icon: const Icon(Icons.open_in_browser),
+                    ),
+                    // 小窓へ落とすのは**この列の右端**。×と並べていた頃は上端に
+                    // あったが、他の操作（音・リピート・ブラウザ）と役割が同じ
+                    // ＝「見ている最中に触るもの」なので、手の行き先を 1 か所に
+                    // まとめる。×だけは行き先が違う（終わり）ので上に残す。
+                    IconButton(
+                      tooltip: '小さくする',
+                      color: Colors.white,
+                      onPressed: onMinimize,
+                      icon: const Icon(Icons.picture_in_picture_alt),
                     ),
                   ],
                 ),

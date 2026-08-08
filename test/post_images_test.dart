@@ -3,12 +3,14 @@ import 'dart:convert';
 import 'package:edge_core/edge_core.dart';
 import 'package:flutter/gestures.dart';
 import 'package:elec/src/ui/embed_urls.dart';
+import 'package:elec/src/ui/media_url_panel.dart';
 import 'package:elec/src/ui/mini_player.dart';
 import 'package:elec/src/ui/nico_thumbnail.dart';
 import 'package:elec/src/ui/post_images.dart';
 import 'package:elec/src/ui/video_player_view.dart';
 import 'package:elec/src/ui/video_thumbnail.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:video_player_platform_interface/video_player_platform_interface.dart';
 
@@ -192,6 +194,87 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byIcon(Icons.chevron_left), findsNothing);
     expect(MiniPlayerController.shared.media, isNotNull);
+  });
+
+  testWidgets('題名をタップすると URL の全体が出て、写せる', (tester) async {
+    // 題名に出るのはファイル名だけ。どこから来た画像かは URL を出さないと読めない。
+    final urls = [
+      Uri.parse('https://img.example.com/2026/08/a.jpg?size=large'),
+      Uri.parse('https://example.com/b.png'),
+    ];
+    final copied = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied.add((call.arguments as Map)['text'] as String);
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: _host,
+        home: Scaffold(body: PostImages(urls: urls)),
+      ),
+    );
+
+    await _openViewer(tester);
+    expect(find.text(urls.first.toString()), findsNothing);
+
+    await tester.tap(find.text('1/2  a.jpg'));
+    await tester.pumpAndSettle();
+    expect(find.text(urls.first.toString()), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.copy));
+    await tester.pumpAndSettle();
+    expect(copied, [urls.first.toString()]);
+    // 知らせは押した場所で返す（SnackBar はアプリ側へ出るので、この黒い画面
+    // には届かない）。
+    expect(find.byIcon(Icons.check), findsOneWidget);
+
+    // 送ると、開けたまま次の URL に入れ替わる。写した印は前の URL のものなので
+    // 残さない。
+    await tester.tap(find.byIcon(Icons.chevron_right));
+    await tester.pumpAndSettle();
+    expect(find.text(urls.last.toString()), findsOneWidget);
+    expect(find.byIcon(Icons.check), findsNothing);
+
+    // もう一度タップで畳む。
+    await tester.tap(find.text('2/2  b.png'));
+    await tester.pumpAndSettle();
+    expect(find.text(urls.last.toString()), findsNothing);
+  });
+
+  testWidgets('操作一式を引っ込めると URL も畳む', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: _host,
+        home: Scaffold(
+          body: PostImages(urls: [Uri.parse('https://example.com/a.jpg')]),
+        ),
+      ),
+    );
+
+    await _openViewer(tester);
+    await tester.tap(find.text('a.jpg'));
+    await tester.pumpAndSettle();
+    expect(find.text('https://example.com/a.jpg'), findsOneWidget);
+
+    // 絵をタップして一式を引っ込め、また出す。題名だけの姿から始まる。
+    await tester.tap(find.byType(PageView));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(PageView));
+    await tester.pumpAndSettle();
+    expect(find.text('a.jpg'), findsOneWidget);
+    expect(find.text('https://example.com/a.jpg'), findsNothing);
   });
 
   testWidgets('画像ビューアは上下スワイプで閉じられる', (tester) async {
@@ -511,6 +594,73 @@ void main() {
     await settle(tester);
     expect(find.byType(VideoPlayerView), findsNothing);
     expect(find.text('1/2  a.jpg'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
+
+  testWidgets('動画のページでも題名から URL の全体が出る', (tester) async {
+    useFakeVideo();
+    final video = Uri.parse('https://example.com/movie.mp4');
+    final copied = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied.add((call.arguments as Map)['text'] as String);
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: _host,
+        home: Scaffold(body: PostImages(urls: const [], videoUrls: [video])),
+      ),
+    );
+
+    await tester.tap(find.byType(GestureDetector).first);
+    await settle(tester);
+    // 流している間は見出しも隠れている。タップで操作一式を出す。
+    await tester.tap(find.byType(AspectRatio), warnIfMissed: false);
+    await settle(tester);
+    expect(find.text('movie.mp4'), findsOneWidget);
+
+    // 題名は真ん中に置く（×のぶんだけ右へずれない）。画像のページの AppBar も
+    // `centerTitle` にしてあり、送っても題名の位置は動かない。
+    expect(
+      tester.getCenter(find.byType(MediaTitleButton)).dx,
+      closeTo(tester.getSize(find.byType(PageView)).width / 2, 1),
+    );
+
+    // 題名のタップは操作一式を引っ込めず、URL を開く（映像のタップとは別）。
+    await tester.tap(find.text('movie.mp4'));
+    await tester.pump();
+    expect(find.text(video.toString()), findsOneWidget);
+
+    // 開けている間は自動で引っ込めない（読んでいる最中に消えると困る）。
+    await settle(tester);
+    await tester.pump(const Duration(seconds: 5));
+    expect(find.text(video.toString()), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.copy));
+    await tester.pump();
+    expect(copied, [video.toString()]);
+    expect(find.byIcon(Icons.check), findsOneWidget);
+
+    // 映像をタップして一式を引っ込めると URL も畳む（中央は再生ボタンが乗って
+    // いるので、そこは外して押す）。
+    await tester.tapAt(const Offset(600, 420));
+    await settle(tester);
+    expect(find.text(video.toString()), findsNothing);
+    expect(find.text('movie.mp4'), findsNothing);
 
     await tester.pumpWidget(const SizedBox());
     await tester.pump();
