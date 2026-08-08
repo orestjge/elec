@@ -634,7 +634,8 @@ class _ThreadScreenState extends State<ThreadScreen>
   /// ぶんは読み飛ばしたものとして扱う）。ツリー表示では並びが番号順でないので、
   /// 見えた番号を覚えておき **1 から続いているところまで** を既読位置にする。
   /// ツリーの上の方に出てきた新しい番号のレスで既読位置が飛ぶと、その手前の
-  /// 未読を読まずに読了扱いにしてしまうため。
+  /// 未読を読まずに読了扱いにしてしまうため。ただし**末尾に着いたときは
+  /// 最新レスまで**進める（どちらの表示でも）。
   void _onPositions() {
     final positions = _positions.itemPositions.value;
     if (positions.isEmpty || _items.isEmpty) return;
@@ -663,6 +664,15 @@ class _ThreadScreenState extends State<ThreadScreen>
         next++;
       }
       maxRes = next - 1;
+    }
+    // 末尾まで来ていれば、その上は全部通り過ぎている。「見えた番号が続いて
+    // いるところまで」では拾いきれない（勢いよく送ると行がフレームを跨いで
+    // 飛ぶし、つまみで一気に運べば間の行はそもそも組まれない）ので、末尾に
+    // 着いたときだけ最新レスまで進める。ここを進めないと、下まで読んだのに
+    // 次に開いたとき古い位置と新着ラインへ戻されてしまう。
+    if (atBottom && _state.res.isNotEmpty) {
+      final newest = _state.res.last.number;
+      if (newest > maxRes) maxRes = newest;
     }
     final readAdvanced = maxRes > _furthestRead;
     // どちらも表示には出ない（既読の保存と新着追従の判定にだけ使う）ので、

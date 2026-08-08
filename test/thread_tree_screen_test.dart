@@ -235,6 +235,43 @@ void main() {
     expect(find.byType(QuotedResRow), findsOneWidget);
   });
 
+  testWidgets('末尾まで送れば、開き直しても末尾から続く', (tester) async {
+    // ツリーは並びが番号順でないので、既読位置は「見えた番号が 1 から続いて
+    // いるところまで」で進める。勢いよく送ると行はフレームを跨いで飛ぶので、
+    // これだけだと下まで読んでも既読位置が途中で止まり、次に開いたとき古い
+    // 位置と新着ラインへ戻される。
+    final history = ReadHistory(MemoryReadHistoryStorage());
+    await history.markRead(threadKey, 3);
+    final view = await treeSettings();
+    final f = QueueFetcher([ok(dat(60))]);
+
+    await tester.pumpWidget(app(f, history: history, view: view));
+    await tester.pumpAndSettle();
+    expect(find.text('ここから新着'), findsOneWidget);
+
+    // 末尾まで一気に送る。
+    for (var i = 0; i < 6; i++) {
+      await tester.fling(
+        find.byType(PostItem).first,
+        const Offset(0, -600),
+        6000,
+      );
+      await tester.pumpAndSettle();
+    }
+    expect(shownNumbers(tester).last, 60);
+    expect(history.lastSeen(threadKey), 60);
+
+    // 別のスレを開いて戻ってきた（＝この画面は作り直される）。
+    await tester.pumpWidget(const MaterialApp(home: SizedBox()));
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(app(f, history: history, view: view));
+    await tester.pumpAndSettle();
+
+    // 続きから＝末尾。古い新着ラインも残らない。
+    expect(shownNumbers(tester).last, 60);
+    expect(find.text('ここから新着'), findsNothing);
+  });
+
   testWidgets('設定で並べ方を切り替えると保存され、その場で効く', (tester) async {
     final storage = MemoryThreadViewSettingsStorage();
     final view = ThreadViewSettings(storage);
