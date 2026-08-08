@@ -56,7 +56,7 @@ void main() {
     expect(find.byType(LinearProgressIndicator), findsNothing);
     // ここが肝——**流したまま**閉じる・小さくするに手が届く。
     expect(find.byIcon(Icons.close), findsOneWidget);
-    expect(find.byIcon(Icons.keyboard_arrow_down), findsOneWidget);
+    expect(find.byIcon(Icons.picture_in_picture_alt), findsOneWidget);
     expect(find.byIcon(Icons.volume_up), findsOneWidget);
     expect(find.byIcon(Icons.repeat), findsOneWidget);
 

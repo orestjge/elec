@@ -1,10 +1,10 @@
 import 'dart:async';
 import 'dart:math' as math;
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../net/auth_launcher.dart';
 import '../net/image_fingerprint.dart';
@@ -14,6 +14,7 @@ import 'embed_urls.dart';
 import 'format.dart';
 import 'image_urls.dart';
 import 'media_scrim.dart';
+import 'media_url_panel.dart';
 import 'mini_player.dart';
 import 'nico_thumbnail.dart';
 import 'remote_image.dart';
@@ -1083,6 +1084,9 @@ class _MediaViewerViewState extends State<MediaViewerView> {
   /// 知らせてもらう）。◀▶ は種別によらず操作一式と一緒に出す。
   bool _videoChrome = false;
 
+  /// 題名をタップして URL 全体を開いているか（`media_url_panel.dart`）。
+  bool _urlOpen = false;
+
   bool get _chromeVisible => _onVideo ? _videoChrome : _imageChrome;
 
   /// マウス（トラックパッド）を止めてから引っ込めるまでのタイマー。
@@ -1111,7 +1115,19 @@ class _MediaViewerViewState extends State<MediaViewerView> {
   /// ここへは来ない）。
   void _toggleChrome() {
     _hoverTimer?.cancel();
-    setState(() => _imageChrome = !_imageChrome);
+    setState(() {
+      _imageChrome = !_imageChrome;
+      // 引っ込めたら URL も畳む。次に出したときは題名だけの姿から始める。
+      if (!_imageChrome) _urlOpen = false;
+    });
+  }
+
+  /// 題名をタップした。URL 全体を出し入れする。
+  void _toggleUrl() {
+    // マウスで見ているときは、手を止めると操作一式ごと消える。URL を読んでいる
+    // 最中に消えないよう、開けている間は引っ込め待ちを止めておく。
+    _hoverTimer?.cancel();
+    setState(() => _urlOpen = !_urlOpen);
   }
 
   /// ポインタが動いた。マウスで見ているなら送るボタンが要るので出し、手を止めた
@@ -1120,6 +1136,8 @@ class _MediaViewerViewState extends State<MediaViewerView> {
     if (widget.mini || _onVideo) return;
     if (!_imageChrome) setState(() => _imageChrome = true);
     _hoverTimer?.cancel();
+    // URL を開けている間は引っ込めない。読んでいる最中に消えられると困る。
+    if (_urlOpen) return;
     _hoverTimer = Timer(_hoverLinger, () {
       if (mounted) setState(() => _imageChrome = false);
     });
@@ -1439,9 +1457,16 @@ class _MediaViewerViewState extends State<MediaViewerView> {
                             onPressed: _close,
                             icon: const Icon(Icons.close),
                           ),
-                          title: Text(
-                            _title,
-                            style: const TextStyle(fontSize: 14),
+                          // 題名は真ん中。動画のページ（`VideoPlayerView` が
+                          // 自前で組む行）と揃える——同じ並びを送っている最中に
+                          // 題名の位置が変わると、送るたびに目が泳ぐ。
+                          centerTitle: true,
+                          // 題名はタップの的。ファイル名だけでは元が分からない
+                          // ので、押すと URL 全体が下に開く。
+                          title: MediaTitleButton(
+                            title: _title,
+                            open: _urlOpen,
+                            onTap: _toggleUrl,
                           ),
                           actions: [
                             IconButton(
@@ -1456,6 +1481,7 @@ class _MediaViewerViewState extends State<MediaViewerView> {
                             ),
                           ],
                         ),
+                        if (_urlOpen) MediaUrlPanel(url: _url),
                         // 溶けきるための余地。ここまで暗幕は伸びるが、絵の上に
                         // 乗るものは無い（指も素通りする）。
                         const SizedBox(height: TopScrim.fadeTail),

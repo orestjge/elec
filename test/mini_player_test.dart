@@ -148,7 +148,7 @@ void main() {
     await tester.pump();
     expect(find.byIcon(Icons.pause_circle_filled), findsOneWidget);
 
-    await tester.tap(find.byIcon(Icons.keyboard_arrow_down));
+    await tester.tap(find.byIcon(Icons.picture_in_picture_alt));
     await _settleMove(tester);
 
     expect(MiniPlayerController.shared.mode, MiniPlayerMode.mini);

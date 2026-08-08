@@ -155,7 +155,7 @@ class _EmbedPlayerViewState extends State<EmbedPlayerView> {
                         // 落とす操作はボタンで出す。
                         _chromeButton(
                           tooltip: '小さくする',
-                          icon: Icons.keyboard_arrow_down,
+                          icon: Icons.picture_in_picture_alt,
                           onPressed: widget.onMinimize,
                         ),
                       ],
