@@ -29,10 +29,16 @@ class VideoPlayerView extends StatefulWidget {
     required this.onClose,
     required this.onMinimize,
     this.mini = false,
+    this.title,
     this.onOpenExternally,
   });
 
   final Uri url;
+
+  /// 操作一式と一緒に出す見出し（`2/5  clip.mp4`）。ビューアの並びの中で
+  /// いま何本目を見ているかを示す。**ヘッダーとして常に出しはしない**——
+  /// 映像を隠さないために、他の操作と同じくタップで出し入れする。
+  final String? title;
 
   /// 再生をやめる。
   final VoidCallback onClose;
@@ -285,6 +291,18 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
                                 onPressed: widget.onMinimize,
                                 icon: const Icon(Icons.keyboard_arrow_down),
                               ),
+                              if (widget.title case final title?)
+                                Flexible(
+                                  child: Text(
+                                    title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                ),
                             ],
                           ),
                         ),

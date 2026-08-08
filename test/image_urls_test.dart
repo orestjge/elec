@@ -2,6 +2,20 @@ import 'package:elec/src/ui/image_urls.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('画像と動画は種別を混ぜたまま本文の出現順で拾う', () {
+    // 全画面ビューアはこの並びのまま送るので、種別ごとの塊にしてはいけない。
+    const text =
+        'https://example.com/a.jpg '
+        'https://example.com/clip.mp4 '
+        'https://example.com/b.png '
+        'https://example.com/a.jpg';
+    expect(mediaUrlsIn(text).map((u) => u.path).toList(), [
+      '/a.jpg',
+      '/clip.mp4',
+      '/b.png',
+    ]);
+  });
+
   List<String> urls(String s) =>
       imageUrlsIn(s).map((u) => u.toString()).toList();
   List<String> videos(String s) =>

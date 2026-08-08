@@ -12,7 +12,6 @@ import 'format.dart';
 import 'id_color.dart';
 import 'now_ticker.dart';
 import 'id_icon.dart';
-import 'image_urls.dart';
 import 'link_card.dart';
 import 'post_body_segments.dart';
 import 'post_images.dart';
@@ -160,18 +159,19 @@ class PostItem extends StatelessWidget {
       linkPreviews: linkPreviews,
       isThreadLink: (url) => ThreadLinks.targetOf(url) != null,
     );
-    // 全画面ビューアはレス内の全画像を送れるようにする。本文の途中で区画に
-    // 分かれても、どのサムネイルから開いても並びは同じ。
-    final allImages = imageUrlsIn(body);
+    // 全画面ビューアはレス内の全画像・全動画をひと続きに送れるようにする。
+    // 本文の途中で区画に分かれても、どのサムネイルから開いても並びは同じ。
+    final allMedia = viewerMediaIn(body);
 
     void openUrl(Uri url) {
-      final imageIndex = allImages.indexWhere((image) => image == url);
-      if (imageIndex >= 0) {
-        openImageViewer(
+      if (allMedia.any((item) => item.url == url)) {
+        openViewerAt(
           context,
-          allImages,
-          initialIndex: imageIndex,
-          onOpenExternally: onTapUrl,
+          allMedia,
+          url,
+          // 動画はシステムブラウザへ回す。[onTapUrl] は動画 URL を見ると
+          // アプリ内プレーヤーへ送り返すので、ビューアへ戻ってしまう。
+          onOpenExternally: viewerBrowserHandoff(onTapUrl, null),
         );
         return;
       }
@@ -273,7 +273,7 @@ class PostItem extends StatelessWidget {
                   videoUrls: videos,
                   audioUrls: audios,
                   embedVideos: embeds,
-                  viewerUrls: allImages,
+                  viewerMedia: allMedia,
                   onOpenImageExternally: onTapUrl,
                   onTapEmbed: (video) => openEmbedPlayer(
                     context,

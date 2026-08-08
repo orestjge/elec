@@ -29,6 +29,18 @@ Widget _app(List<String> taps) => MaterialApp(
   ),
 );
 
+/// 画像と動画が混ざったレスを 1 つ置く（並びは 画像 → 動画）。
+Widget _mixedApp() => MaterialApp(
+  builder: (context, child) =>
+      MiniPlayerHost(child: child ?? const SizedBox.shrink()),
+  home: Scaffold(
+    body: PostImages(
+      urls: [Uri.parse('https://example.com/a.jpg')],
+      videoUrls: [Uri.parse('https://example.com/movie.mp4')],
+    ),
+  ),
+);
+
 /// 映像そのもの（プレーヤーの中の再生面）。小窓化しても同じものが残る。
 final _surface = find.descendant(
   of: find.byType(VideoPlayerView),
@@ -288,6 +300,58 @@ void main() {
 
     await tester.pumpWidget(const SizedBox());
     await tester.pump();
+  });
+
+  testWidgets('画像と並んだ動画でも、小窓へ落として作り直されない', (tester) async {
+    await tester.pumpWidget(_mixedApp());
+
+    // 画像から開いて、隣の動画まで送る。
+    await tester.tap(find.byIcon(Icons.play_arrow_rounded));
+    await _settleMove(tester);
+    final playing = tester.element(find.byType(VideoPlayerView));
+
+    await tester.drag(_surface, const Offset(0, 160), warnIfMissed: false);
+    await _settleMove(tester);
+
+    expect(MiniPlayerController.shared.mode, MiniPlayerMode.mini);
+    // 並びに載せても、全画面⇔小窓では同じ Element ＝同じ再生器のまま。
+    expect(tester.element(find.byType(VideoPlayerView)), same(playing));
+    // 小窓では隣へ送らせない（窓の中の操作はホスト側が全部引き取る）。
+    expect(find.byIcon(Icons.chevron_left), findsNothing);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
+
+  testWidgets('画像のページは小窓に残さず、そのまま終わる', (tester) async {
+    await tester.pumpWidget(_mixedApp());
+
+    // 画像のサムネから開く。
+    await tester.tap(find.byType(GestureDetector).first);
+    await _settleMove(tester);
+    expect(MiniPlayerController.shared.media, isNotNull);
+
+    // 下スワイプは画像では「閉じる」。静止画を小窓に残しても読む邪魔になるだけ。
+    await tester.drag(
+      find.byType(PageView),
+      const Offset(0, 160),
+      warnIfMissed: false,
+    );
+    await _settleMove(tester);
+
+    expect(MiniPlayerController.shared.media, isNull);
+  });
+
+  testWidgets('画像のページで戻ると小窓ではなく終わる', (tester) async {
+    await tester.pumpWidget(_mixedApp());
+
+    await tester.tap(find.byType(GestureDetector).first);
+    await _settleMove(tester);
+
+    await tester.binding.handlePopRoute();
+    await _settleMove(tester);
+
+    expect(MiniPlayerController.shared.media, isNull);
   });
 
   testWidgets('別の動画を開くと差し替わり、全画面から始まる', (tester) async {

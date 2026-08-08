@@ -3,11 +3,21 @@ import 'dart:convert';
 import 'package:edge_core/edge_core.dart';
 import 'package:flutter/gestures.dart';
 import 'package:elec/src/ui/embed_urls.dart';
+import 'package:elec/src/ui/mini_player.dart';
 import 'package:elec/src/ui/nico_thumbnail.dart';
 import 'package:elec/src/ui/post_images.dart';
+import 'package:elec/src/ui/video_player_view.dart';
 import 'package:elec/src/ui/video_thumbnail.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:video_player_platform_interface/video_player_platform_interface.dart';
+
+import 'support/fake_video_player.dart';
+
+/// 全画面ビューアは Navigator の外（`MaterialApp.builder` の層）に載るので、
+/// 実アプリと同じくホストを噛ませる（`mini_player.dart` 参照）。
+Widget _host(BuildContext context, Widget? child) =>
+    MiniPlayerHost(child: child ?? const SizedBox.shrink());
 
 /// 1x1 の透過 PNG。Image.memory がデコードできる最小の有効画像。
 final _tinyPng = base64Decode(
@@ -73,6 +83,10 @@ Future<void> _scroll(
 void main() {
   final originalVideoGenerator = VideoThumbnails.generator;
 
+  // ビューアは 1 つしかない（[MiniPlayerController.shared]）ので、テストごとに
+  // 開きっぱなしを持ち越さない。
+  tearDown(MiniPlayerController.shared.debugReset);
+
   testWidgets('同一レス内の複数画像をビューアで巡回できる', (tester) async {
     final urls = [
       Uri.parse('https://example.com/a.jpg'),
@@ -82,6 +96,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        builder: _host,
         home: Scaffold(body: PostImages(urls: urls)),
       ),
     );
@@ -108,6 +123,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        builder: _host,
         home: Scaffold(
           body: PostImages(urls: urls, onOpenImageExternally: opened.add),
         ),
@@ -132,6 +148,7 @@ void main() {
   testWidgets('画像ビューアは上下スワイプで閉じられる', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
+        builder: _host,
         home: Scaffold(
           body: PostImages(urls: [Uri.parse('https://example.com/a.jpg')]),
         ),
@@ -148,9 +165,39 @@ void main() {
     expect(find.text('a.jpg'), findsNothing);
   });
 
+  testWidgets('画像ビューアは×でも閉じられる', (tester) async {
+    // ビューアはルートではなくなった（Navigator の外に載る）ので、AppBar の
+    // 自動の戻る矢印は付かない。代わりに×を自前で置いてある。
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: _host,
+        home: Scaffold(
+          body: PostImages(urls: [Uri.parse('https://example.com/a.jpg')]),
+        ),
+      ),
+    );
+
+    // ステータスバーのぶんは自前で避ける（Scaffold が面倒を見てくれる位置に
+    // 居ないので、AppBar 自身の primary 扱いに任せている）。
+    tester.view.padding = const FakeViewPadding(top: 132);
+    addTearDown(tester.view.reset);
+
+    await tester.tap(find.byType(GestureDetector).first);
+    await tester.pumpAndSettle();
+    expect(find.text('a.jpg'), findsOneWidget);
+    expect(tester.getTopLeft(find.text('a.jpg')).dy, greaterThan(44));
+
+    await tester.tap(find.byIcon(Icons.close));
+    await tester.pumpAndSettle();
+
+    expect(find.text('a.jpg'), findsNothing);
+    expect(MiniPlayerController.shared.media, isNull);
+  });
+
   testWidgets('拡大中の上下ドラッグは閉じずに画像のパンへ回す', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
+        builder: _host,
         home: Scaffold(
           body: PostImages(urls: [Uri.parse('https://example.com/a.jpg')]),
         ),
@@ -187,6 +234,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        builder: _host,
         home: Scaffold(body: PostImages(urls: urls)),
       ),
     );
@@ -226,6 +274,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        builder: _host,
         home: Scaffold(body: PostImages(urls: urls)),
       ),
     );
@@ -242,6 +291,7 @@ void main() {
   testWidgets('等倍のトラックパッド縦スクロールで閉じる', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
+        builder: _host,
         home: Scaffold(
           body: PostImages(urls: [Uri.parse('https://example.com/a.jpg')]),
         ),
@@ -259,6 +309,7 @@ void main() {
   testWidgets('拡大中の縦スクロールとホイールでは閉じない', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
+        builder: _host,
         home: Scaffold(
           body: PostImages(urls: [Uri.parse('https://example.com/a.jpg')]),
         ),
@@ -291,6 +342,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        builder: _host,
         home: Scaffold(body: PostImages(urls: urls)),
       ),
     );
@@ -316,6 +368,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        builder: _host,
         home: Scaffold(body: PostImages(urls: urls)),
       ),
     );
@@ -341,6 +394,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        builder: _host,
         home: Scaffold(body: PostImages(urls: urls)),
       ),
     );
@@ -354,11 +408,143 @@ void main() {
     expect(_viewerScale(tester), greaterThan(1));
   });
 
+  /// 画像と動画が混ざったレスを開けるようにして、動画の再生をテスト内で完結させる。
+  void useFakeVideo() {
+    final originalPlatform = VideoPlayerPlatform.instance;
+    VideoPlayerPlatform.instance = FakeVideoPlayerPlatform();
+    // サムネイル生成を挟まない（非対応プラットフォーム）。
+    VideoThumbnails.debugTargetPlatform = TargetPlatform.linux;
+    addTearDown(() {
+      VideoPlayerPlatform.instance = originalPlatform;
+      VideoThumbnails.debugTargetPlatform = null;
+      VideoPlayerView.debugResetMuted();
+    });
+  }
+
+  /// 再生中は `video_player` が位置ポーリングのタイマーを回し続けて
+  /// `pumpAndSettle` が落ち着かないので、送りきる（＋プレーヤーが初期化を
+  /// 終える）ぶんだけ進める。
+  Future<void> settle(WidgetTester tester) async {
+    for (var i = 0; i < 3; i++) {
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+    }
+  }
+
+  testWidgets('画像と動画をひと続きに送れる', (tester) async {
+    useFakeVideo();
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: _host,
+        home: Scaffold(
+          body: PostImages(
+            urls: [Uri.parse('https://example.com/a.jpg')],
+            videoUrls: [Uri.parse('https://example.com/movie.mp4')],
+          ),
+        ),
+      ),
+    );
+
+    // 画像のサムネから開くと、動画も同じ並びに入っている。
+    await tester.tap(find.byType(GestureDetector).first);
+    await settle(tester);
+    expect(find.text('1/2  a.jpg'), findsOneWidget);
+
+    // 隣へ送ると動画のページ。そこで初めてプレーヤーが立ち上がる。
+    await tester.tap(find.byIcon(Icons.chevron_right));
+    await settle(tester);
+    expect(find.byType(VideoPlayerView), findsOneWidget);
+    // 動画では見出しも操作の一部なので、流している間は隠れている。
+    expect(find.text('2/2  movie.mp4'), findsNothing);
+    await tester.tap(find.byType(AspectRatio), warnIfMissed: false);
+    await tester.pump();
+    expect(find.text('2/2  movie.mp4'), findsOneWidget);
+
+    // 画像へ戻れば、プレーヤーは畳まれて元の見出しに戻る。
+    await tester.tap(find.byIcon(Icons.chevron_left));
+    await settle(tester);
+    expect(find.byType(VideoPlayerView), findsNothing);
+    expect(find.text('1/2  a.jpg'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
+
+  testWidgets('ビューアの「ブラウザで開く」は画像と動画で行き先を分ける', (tester) async {
+    useFakeVideo();
+    final images = <Uri>[];
+    final videos = <Uri>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: _host,
+        home: Scaffold(
+          body: PostImages(
+            urls: [Uri.parse('https://example.com/a.jpg')],
+            videoUrls: [Uri.parse('https://example.com/movie.mp4')],
+            onOpenImageExternally: images.add,
+            onOpenVideoExternally: videos.add,
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byType(GestureDetector).first);
+    await settle(tester);
+    await tester.tap(find.byIcon(Icons.open_in_browser));
+    await tester.pump();
+    expect(images, [Uri.parse('https://example.com/a.jpg')]);
+
+    // 動画は動画側のハンドラへ。**画像側（アプリ内の URL 振り分け）へ渡すと、
+    // 動画 URL はまたビューアへ送り返されて堂々巡りになる。**
+    await tester.tap(find.byIcon(Icons.chevron_right));
+    await settle(tester);
+    await tester.tap(find.byType(AspectRatio), warnIfMissed: false);
+    await tester.pump();
+    await tester.tap(find.byIcon(Icons.open_in_browser));
+    await tester.pump();
+    expect(videos, [Uri.parse('https://example.com/movie.mp4')]);
+    expect(images, hasLength(1));
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
+
+  testWidgets('動画のサムネから開いても並びの中の位置から始まる', (tester) async {
+    useFakeVideo();
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: _host,
+        home: Scaffold(
+          body: PostImages(
+            urls: [
+              Uri.parse('https://example.com/a.jpg'),
+              Uri.parse('https://example.com/b.png'),
+            ],
+            videoUrls: [Uri.parse('https://example.com/movie.mp4')],
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byIcon(Icons.play_arrow_rounded));
+    await settle(tester);
+    expect(find.byType(VideoPlayerView), findsOneWidget);
+
+    // 3件目として開いているので、左へ送ると 2 枚目の画像に着く。
+    await tester.tap(find.byIcon(Icons.chevron_left));
+    await settle(tester);
+    expect(find.text('2/3  b.png'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump();
+  });
+
   testWidgets('動画URLは非対応プラットフォームでは再生カードにする', (tester) async {
     addTearDown(() => VideoThumbnails.debugTargetPlatform = null);
     VideoThumbnails.debugTargetPlatform = TargetPlatform.linux;
     await tester.pumpWidget(
       MaterialApp(
+        builder: _host,
         home: Scaffold(
           body: PostImages(
             urls: const [],
@@ -385,6 +571,7 @@ void main() {
     VideoThumbnails.generator = (url) async => _tinyPng;
     await tester.pumpWidget(
       MaterialApp(
+        builder: _host,
         home: Scaffold(
           body: PostImages(
             urls: const [],
@@ -407,6 +594,7 @@ void main() {
     final tapped = <EmbedVideo>[];
     await tester.pumpWidget(
       MaterialApp(
+        builder: _host,
         home: Scaffold(
           body: PostImages(
             urls: const [],
@@ -441,6 +629,7 @@ void main() {
     // 入らない。高さを固定したままだと横長の動画が縦長のカードになる。
     await tester.pumpWidget(
       MaterialApp(
+        builder: _host,
         home: Scaffold(
           body: Align(
             alignment: Alignment.topLeft,

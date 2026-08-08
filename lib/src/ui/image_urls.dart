@@ -32,6 +32,15 @@ List<Uri> videoUrlsIn(String text) {
   return _mediaUrlsIn(text, isVideoUrl);
 }
 
+/// [text] 中の画像・動画 URL を、**種別を混ぜたまま**出現順・重複除去で返す。
+///
+/// 全画面ビューアは画像と動画をひと続きの並びとして送るので、抽出の時点で
+/// 本文に出てきた順を保つ必要がある（[imageUrlsIn] と [videoUrlsIn] を
+/// 別々に取って繋ぐと、貼られた順ではなく種別ごとの塊になってしまう）。
+List<Uri> mediaUrlsIn(String text) {
+  return _mediaUrlsIn(text, (uri) => isImageUrl(uri) || isVideoUrl(uri));
+}
+
 /// [uri] が動画ファイルの直リンクか（アプリ内プレーヤーで開く対象か）。
 bool isVideoUrl(Uri uri) => _videoExtRe.hasMatch(uri.path);
 

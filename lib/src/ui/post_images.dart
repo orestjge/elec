@@ -16,31 +16,102 @@ import 'image_urls.dart';
 import 'mini_player.dart';
 import 'nico_thumbnail.dart';
 import 'remote_image.dart';
+import 'video_player_view.dart';
 import 'video_thumbnail.dart';
 
-/// 画像URL群を全画面ビューアで開く。
-///
-/// [onOpenExternally] を渡すと「ブラウザで開く」をそのハンドラに委ねる。
-/// 未指定ならシステムブラウザで開く。
+/// 全画面ビューアが送る 1 件。画像と動画をひと続きの並びに混ぜるための型。
+sealed class ViewerMedia {
+  const ViewerMedia(this.url);
+
+  final Uri url;
+}
+
+/// 直リンクの画像。
+class ViewerImageMedia extends ViewerMedia {
+  const ViewerImageMedia(super.url);
+}
+
+/// 直リンクの動画（mp4 等）。
+class ViewerVideoMedia extends ViewerMedia {
+  const ViewerVideoMedia(super.url);
+}
+
+/// レス本文から、ビューアで送る並びを本文の出現順どおりに組む。
+List<ViewerMedia> viewerMediaIn(String text) => [
+  for (final url in mediaUrlsIn(text))
+    if (isVideoUrl(url)) ViewerVideoMedia(url) else ViewerImageMedia(url),
+];
+
+/// [urls] を全画面ビューアで開く（画像だけの並び）。
 void openImageViewer(
   BuildContext context,
   List<Uri> urls, {
   int initialIndex = 0,
   ValueChanged<Uri>? onOpenExternally,
+}) => openMediaViewer(
+  context,
+  [for (final url in urls) ViewerImageMedia(url)],
+  initialIndex: initialIndex,
+  onOpenExternally: onOpenExternally,
+);
+
+/// 画像・動画の並びを全画面ビューアで開く。
+///
+/// ビューアは Navigator ではなく [MiniPlayerHost] の層に載る。動画を小窓へ
+/// 落としても再生器を作り直さずに済ませるためで、詳しくは `mini_player.dart`。
+///
+/// [onOpenExternally] を渡すと「ブラウザで開く」をそのハンドラに委ねる。
+/// 未指定ならシステムブラウザで開く。
+void openMediaViewer(
+  BuildContext context,
+  List<ViewerMedia> items, {
+  int initialIndex = 0,
+  ValueChanged<Uri>? onOpenExternally,
 }) {
-  if (urls.isEmpty) return;
-  Navigator.of(context).push(
-    PageRouteBuilder<void>(
-      transitionDuration: const Duration(milliseconds: 180),
-      reverseTransitionDuration: const Duration(milliseconds: 180),
-      pageBuilder: (_, _, _) => _ImageViewer(
-        urls: urls,
-        initialIndex: initialIndex,
-        onOpenExternally: onOpenExternally,
-      ),
-      transitionsBuilder: (_, animation, _, child) =>
-          FadeTransition(opacity: animation, child: child),
-    ),
+  if (items.isEmpty) return;
+  MiniPlayerController.shared.open(
+    context,
+    SequenceMedia(items, onOpenExternally: onOpenExternally),
+    initialIndex: initialIndex.clamp(0, items.length - 1),
+  );
+}
+
+/// ビューアの「ブラウザで開く」に渡すハンドラを組む。
+///
+/// 画像は呼び出し側の処理（アプリ内の URL 振り分け）へ渡してよいが、**動画は
+/// 既定でシステムブラウザへ回す**。振り分けは動画 URL を見るとアプリ内プレーヤー
+/// へ送り返すので、そのまま渡すとビューアからビューアへ戻る堂々巡りになる。
+ValueChanged<Uri> viewerBrowserHandoff(
+  ValueChanged<Uri>? onImage,
+  ValueChanged<Uri>? onVideo,
+) => (url) {
+  final handler = isVideoUrl(url) ? onVideo : onImage;
+  if (handler != null) {
+    handler(url);
+    return;
+  }
+  const SystemBrowserLauncher().open(url);
+};
+
+/// [url] を頭にして [items] を開く。並びに無い URL はそれ 1 件だけを開く。
+void openViewerAt(
+  BuildContext context,
+  List<ViewerMedia> items,
+  Uri url, {
+  ValueChanged<Uri>? onOpenExternally,
+}) {
+  final index = items.indexWhere((item) => item.url == url);
+  if (index < 0) {
+    openMediaViewer(context, [
+      if (isVideoUrl(url)) ViewerVideoMedia(url) else ViewerImageMedia(url),
+    ], onOpenExternally: onOpenExternally);
+    return;
+  }
+  openMediaViewer(
+    context,
+    items,
+    initialIndex: index,
+    onOpenExternally: onOpenExternally,
   );
 }
 
@@ -170,19 +241,19 @@ class PostImages extends StatelessWidget {
     this.onOpenImageExternally,
     this.onTapEmbed,
     this.onRemove,
-    this.viewerUrls,
+    this.viewerMedia,
     this.thumbSize = 160,
     this.blurImages = false,
   });
 
   final List<Uri> urls;
 
-  /// 全画面ビューアで巡回する画像の並び。未指定なら [urls] と同じ。
+  /// 全画面ビューアで巡回する並び。未指定なら [urls]＋[videoUrls] を並べたもの。
   ///
   /// 本文の途中にサムネイルを差し込むと [urls] はレスの一部だけになる。どの
-  /// サムネイルから開いてもレス内の全画像を送れるよう、ここへレス全体の並びを
-  /// 渡す。[urls] の URL がこの並びに無ければ、その 1 枚だけを開く。
-  final List<Uri>? viewerUrls;
+  /// サムネイルから開いてもレス内の全メディアを送れるよう、ここへレス全体の
+  /// 並びを渡す。タップした URL がこの並びに無ければ、その 1 件だけを開く。
+  final List<ViewerMedia>? viewerMedia;
 
   /// 本文中の動画 URL。タップでアプリ内の全画面プレーヤーを開く。
   final List<Uri> videoUrls;
@@ -231,6 +302,18 @@ class PostImages extends StatelessWidget {
   Widget build(BuildContext context) {
     final hasThumbs =
         urls.isNotEmpty || videoUrls.isNotEmpty || embedVideos.isNotEmpty;
+    // ビューアの並び。レス全体を渡されていないとき（入力欄の添付プレビュー等）は
+    // ここに出ているぶんだけを、サムネイルと同じ並び順で送る。
+    final sequence =
+        viewerMedia ??
+        [
+          for (final url in urls) ViewerImageMedia(url),
+          for (final url in videoUrls) ViewerVideoMedia(url),
+        ];
+    final openExternally = viewerBrowserHandoff(
+      onOpenImageExternally,
+      onOpenVideoExternally,
+    );
     return Padding(
       padding: const EdgeInsets.only(top: 8),
       child: Column(
@@ -246,12 +329,12 @@ class PostImages extends StatelessWidget {
                     url,
                     _Thumb(
                       url: url,
-                      viewerUrls: viewerUrls ?? urls,
+                      sequence: sequence,
                       size: thumbSize,
                       blurred: blurImages,
                       // 入力欄の添付プレビューでは NG の出番が無い。
                       canNg: onRemove == null,
-                      onOpenExternally: onOpenImageExternally,
+                      onOpenExternally: openExternally,
                     ),
                   ),
                 for (final url in videoUrls)
@@ -259,8 +342,9 @@ class PostImages extends StatelessWidget {
                     url,
                     _VideoThumb(
                       url: url,
+                      sequence: sequence,
                       size: thumbSize,
-                      onOpenExternally: onOpenVideoExternally,
+                      onOpenExternally: openExternally,
                     ),
                   ),
                 for (final video in embedVideos)
@@ -320,7 +404,7 @@ class _RemoveButton extends StatelessWidget {
 class _Thumb extends StatefulWidget {
   const _Thumb({
     required this.url,
-    required this.viewerUrls,
+    required this.sequence,
     this.size = 160,
     this.blurred = false,
     this.canNg = true,
@@ -328,8 +412,8 @@ class _Thumb extends StatefulWidget {
   });
   final Uri url;
 
-  /// タップで開く全画面ビューアの並び（[PostImages.viewerUrls] 参照）。
-  final List<Uri> viewerUrls;
+  /// タップで開く全画面ビューアの並び（[PostImages.viewerMedia] 参照）。
+  final List<ViewerMedia> sequence;
   final double size;
 
   /// 「グロ」注意が付いた画像で、初期表示をモザイクにするか。
@@ -351,24 +435,12 @@ class _ThumbState extends State<_Thumb> {
 
   Uri get _url => widget.url;
 
-  void _openViewer() {
-    final urls = widget.viewerUrls;
-    final index = urls.indexOf(_url);
-    if (index < 0) {
-      openImageViewer(
-        context,
-        [_url],
-        onOpenExternally: widget.onOpenExternally,
-      );
-      return;
-    }
-    openImageViewer(
-      context,
-      urls,
-      initialIndex: index,
-      onOpenExternally: widget.onOpenExternally,
-    );
-  }
+  void _openViewer() => openViewerAt(
+    context,
+    widget.sequence,
+    _url,
+    onOpenExternally: widget.onOpenExternally,
+  );
 
   /// 「読み込む」を選んだ。以後この URL は上限を上げて読む。
   void _load() => setState(() => ImageLoadPolicy.allow(_url));
@@ -615,18 +687,22 @@ class _GuroMask extends StatelessWidget {
 class _VideoThumb extends StatelessWidget {
   const _VideoThumb({
     required this.url,
+    required this.sequence,
     required this.onOpenExternally,
     this.size = 160,
   });
   final Uri url;
 
+  /// タップで開く全画面ビューアの並び（[PostImages.viewerMedia] 参照）。
+  final List<ViewerMedia> sequence;
+
   /// プレーヤー側の「ブラウザで開く」に渡すハンドラ。
   final ValueChanged<Uri>? onOpenExternally;
   final double size;
 
-  /// アプリ内の全画面プレーヤーを開く。ブラウザへは飛ばさない。
+  /// アプリ内の全画面ビューアを開く。ブラウザへは飛ばさない。
   void _open(BuildContext context) =>
-      openVideoPlayer(context, url, onOpenExternally: onOpenExternally);
+      openViewerAt(context, sequence, url, onOpenExternally: onOpenExternally);
 
   @override
   Widget build(BuildContext context) {
@@ -902,24 +978,48 @@ class _Placeholder extends StatelessWidget {
   }
 }
 
-/// 全画面の画像ビューア。ピンチズーム・パン可能。
-class _ImageViewer extends StatefulWidget {
-  const _ImageViewer({
-    required this.urls,
+/// 画像と動画をひと続きに送る全画面ビューア。画像はピンチズーム・パン可能。
+///
+/// **画面ではなく [MiniPlayerHost] に置かれる部品**で、全画面と小窓の両方で使う
+/// （開くのは [openMediaViewer]）。小窓へ落としても [VideoPlayerView] の State
+/// ＝再生器を作り直さないよう、[PageView] は常に組み立ての同じ位置に置き、
+/// 上に重ねるもの（題名・◀▶）だけを出し入れする。
+class MediaViewerView extends StatefulWidget {
+  const MediaViewerView({
+    super.key,
+    required this.items,
     required this.initialIndex,
+    required this.onClose,
+    required this.onMinimize,
+    required this.onIndexChanged,
+    this.mini = false,
     this.onOpenExternally,
   });
-  final List<Uri> urls;
+
+  final List<ViewerMedia> items;
   final int initialIndex;
+
+  /// ビューアを閉じる。
+  final VoidCallback onClose;
+
+  /// 表示中の動画を小窓へ落とす（再生は続く）。
+  final VoidCallback onMinimize;
+
+  /// ページが変わった。戻るキーの行き先（動画なら小窓・画像なら終了）を
+  /// 決めるために [MiniPlayerController] へ伝える。
+  final ValueChanged<int> onIndexChanged;
+
+  /// 小窓として描くかどうか。送りも操作も出さず、表示中のページだけを映す。
+  final bool mini;
 
   /// 「ブラウザで開く」の実処理。未指定ならシステムブラウザで開く。
   final ValueChanged<Uri>? onOpenExternally;
 
   @override
-  State<_ImageViewer> createState() => _ImageViewerState();
+  State<MediaViewerView> createState() => _MediaViewerViewState();
 }
 
-class _ImageViewerState extends State<_ImageViewer> {
+class _MediaViewerViewState extends State<MediaViewerView> {
   late final PageController _page;
   late int _index;
   final _activePointers = <int>{};
@@ -981,7 +1081,12 @@ class _ImageViewerState extends State<_ImageViewer> {
     super.dispose();
   }
 
-  Uri get _url => widget.urls[_index];
+  ViewerMedia get _current => widget.items[_index];
+  Uri get _url => _current.url;
+
+  /// 表示中が動画のページか。動画では拡大せず、上下ドラッグもタップも
+  /// [VideoPlayerView] の側が受け持つので、こちらは指に触らない。
+  bool get _onVideo => _current is ViewerVideoMedia;
 
   /// 表示中のページが拡大されているか。等倍のときだけ上下スワイプを閉じる操作・
   /// 左右スワイプをページ送りに割り当て、拡大中はドラッグを画像のパンとして通す。
@@ -1005,6 +1110,7 @@ class _ImageViewerState extends State<_ImageViewer> {
       _view.value = Matrix4.identity();
       _index = page;
     });
+    widget.onIndexChanged(page);
   }
 
   /// 表示中の画像をブラウザへ回す。アプリ内で読めない（大きすぎる・壊れている・
@@ -1021,15 +1127,14 @@ class _ImageViewerState extends State<_ImageViewer> {
   /// いま見ている画像を NG にする。伏せた画像を開いたままにしておく意味は
   /// 無いので、登録できたらビューアを閉じる。
   Future<void> _ngCurrent() async {
-    final added = await confirmAddNgImage(context, _url);
-    if (added && mounted) await Navigator.of(context).maybePop();
+    // この層は Navigator の外にいるので、ダイアログを出す文脈は
+    // [MiniPlayerController] が覚えているものを借りる。
+    final host = MiniPlayerController.shared.dialogContext ?? context;
+    final added = await confirmAddNgImage(host, _url);
+    if (added) widget.onClose();
   }
 
-  Future<void> _close() async {
-    final popped = await Navigator.of(context).maybePop();
-    if (popped || !mounted) return;
-    _resetDrag();
-  }
+  void _close() => widget.onClose();
 
   void _resetDrag() {
     setState(() {
@@ -1057,7 +1162,9 @@ class _ImageViewerState extends State<_ImageViewer> {
     _dragDy = 0;
     _dragging = false;
     _swiping = false;
-    _dragRejected = false;
+    // 動画のページでは指に触らない。左右は PageView がそのまま送り、上下
+    // （下＝小窓・上＝終了）とタップは [VideoPlayerView] が受け持つ。
+    _dragRejected = _onVideo;
   }
 
   void _onPointerMove(PointerMoveEvent event) {
@@ -1131,6 +1238,9 @@ class _ImageViewerState extends State<_ImageViewer> {
   void _onPointerSignal(PointerSignalEvent event) {
     if (event is! PointerScrollEvent) return;
     if (event.kind != PointerDeviceKind.trackpad) return;
+    // 動画は拡大しないので横スクロールは PageView がそのまま送る。縦で終わらせ
+    // ないのは、見ている最中に触れただけで再生が消えると困るため。
+    if (_onVideo) return;
     final last = _lastScrollTime;
     _lastScrollTime = event.timeStamp;
     if (last == null || event.timeStamp - last > _scrollGap) {
@@ -1156,7 +1266,7 @@ class _ImageViewerState extends State<_ImageViewer> {
   /// 止まる（巡回するのは左右のボタンだけ）。
   void _turnPage(int delta) {
     final next = _index + delta;
-    if (next < 0 || next >= widget.urls.length) return;
+    if (next < 0 || next >= widget.items.length) return;
     _jumpBy(delta);
   }
 
@@ -1166,9 +1276,9 @@ class _ImageViewerState extends State<_ImageViewer> {
   }
 
   void _jumpBy(int delta) {
-    if (widget.urls.length <= 1) return;
-    final next = (_index + delta) % widget.urls.length;
-    final normalized = next < 0 ? widget.urls.length - 1 : next;
+    if (widget.items.length <= 1) return;
+    final next = (_index + delta) % widget.items.length;
+    final normalized = next < 0 ? widget.items.length - 1 : next;
     _page.animateToPage(
       normalized,
       duration: const Duration(milliseconds: 220),
@@ -1180,96 +1290,168 @@ class _ImageViewerState extends State<_ImageViewer> {
   /// ピンチ中は拡大縮小に使う。
   bool get _pageLocked => _zoomed || _activePointers.length > 1;
 
+  /// 題名（`2/5  clip.mp4`）。1 件だけならファイル名だけを出す。
+  String get _title {
+    final name = _mediaFileName(_url);
+    if (widget.items.length <= 1) return name;
+    return '${_index + 1}/${widget.items.length}  $name';
+  }
+
+  /// 1 ページぶんの中身。
+  ///
+  /// 動画は**表示中のページだけ**プレーヤーにする。裏のページまで再生器を作ると
+  /// 通信も音も増えるので、そちらは先頭フレームのポスターに留める。
+  Widget _buildPage(int i) {
+    final item = widget.items[i];
+    return switch (item) {
+      ViewerImageMedia() => _ViewerImage(url: item.url, onDismiss: _close),
+      ViewerVideoMedia() when i != _index => _ViewerVideoPoster(url: item.url),
+      ViewerVideoMedia() => VideoPlayerView(
+        url: item.url,
+        mini: widget.mini,
+        title: _title,
+        onClose: widget.onClose,
+        onMinimize: widget.onMinimize,
+        onOpenExternally: widget.onOpenExternally,
+      ),
+    };
+  }
+
   @override
   Widget build(BuildContext context) {
-    final multiple = widget.urls.length > 1;
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        title: Text(
-          multiple
-              ? '${_index + 1}/${widget.urls.length}  ${_fileName(_url)}'
-              : _fileName(_url),
-          style: const TextStyle(fontSize: 14),
-        ),
-        actions: [
-          IconButton(
-            tooltip: 'この画像をNG',
-            onPressed: _ngCurrent,
-            icon: const Icon(Icons.hide_image_outlined),
-          ),
-          IconButton(
-            tooltip: 'ブラウザで開く',
-            onPressed: _openExternally,
-            icon: const Icon(Icons.open_in_browser),
-          ),
-        ],
-      ),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          final height = constraints.maxHeight;
-          return Listener(
-            behavior: HitTestBehavior.translucent,
-            onPointerDown: _onPointerDown,
-            onPointerMove: _onPointerMove,
-            onPointerUp: _onPointerUp,
-            onPointerCancel: _onPointerCancel,
-            onPointerSignal: _onPointerSignal,
-            child: AnimatedSlide(
-              offset: Offset(0, height == 0 ? 0 : _dragDy / height),
-              duration: _dragging
-                  ? Duration.zero
-                  : const Duration(milliseconds: 180),
-              curve: Curves.easeOut,
-              child: Opacity(
-                opacity: (1 - _dragDy.abs() / 320).clamp(0.5, 1.0),
-                child: Stack(
-                  children: [
-                    InteractiveViewer(
-                      transformationController: _view,
-                      minScale: 1,
-                      maxScale: 5,
-                      child: PageView.builder(
-                        controller: _page,
-                        itemCount: widget.urls.length,
-                        // 拡大中は PageView にページ送りをさせない。指の動きは
-                        // 画像をずらして見る操作に使い、端まで寄せ切ってからの
-                        // スワイプだけ [_onPointerUp] が隣の画像へ回す。
-                        physics: _pageLocked
-                            ? const NeverScrollableScrollPhysics()
-                            : null,
-                        onPageChanged: _onPageChanged,
-                        itemBuilder: (context, i) => _ViewerImage(
-                          url: widget.urls[i],
-                          onDismiss: _close,
-                        ),
-                      ),
-                    ),
-                    if (multiple) ...[
-                      _NavButton(
-                        alignment: Alignment.centerLeft,
-                        icon: Icons.chevron_left,
-                        onPressed: () => _jumpBy(-1),
-                      ),
-                      _NavButton(
-                        alignment: Alignment.centerRight,
-                        icon: Icons.chevron_right,
-                        onPressed: () => _jumpBy(1),
-                      ),
-                    ],
-                  ],
+    final multiple = widget.items.length > 1;
+    final height = MediaQuery.sizeOf(context).height;
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: _onPointerDown,
+      onPointerMove: _onPointerMove,
+      onPointerUp: _onPointerUp,
+      onPointerCancel: _onPointerCancel,
+      onPointerSignal: _onPointerSignal,
+      child: AnimatedSlide(
+        offset: Offset(0, height == 0 ? 0 : _dragDy / height),
+        duration: _dragging ? Duration.zero : const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
+        child: Opacity(
+          opacity: (1 - _dragDy.abs() / 320).clamp(0.5, 1.0),
+          // **[PageView] は必ず children[0]。** 小窓へ落とすときに重ねるものが
+          // 減るだけで済ませ、[VideoPlayerView] の State ＝再生器を作り直さない。
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              InteractiveViewer(
+                transformationController: _view,
+                minScale: 1,
+                maxScale: 5,
+                // 動画は拡大しない（映像は原寸を持たないので拡げても粗くなる
+                // だけで、指はプレーヤーの操作に要る）。
+                panEnabled: !_onVideo,
+                scaleEnabled: !_onVideo,
+                child: PageView.builder(
+                  controller: _page,
+                  itemCount: widget.items.length,
+                  // 拡大中は PageView にページ送りをさせない。指の動きは画像を
+                  // ずらして見る操作に使い、端まで寄せ切ってからのスワイプだけ
+                  // [_onPointerUp] が隣のページへ回す。小窓では送らせない
+                  // （窓の中の操作はホスト側が全部引き取る）。
+                  physics: _pageLocked || widget.mini
+                      ? const NeverScrollableScrollPhysics()
+                      : null,
+                  onPageChanged: _onPageChanged,
+                  itemBuilder: (context, i) => _buildPage(i),
                 ),
               ),
-            ),
-          );
-        },
+              // 動画のページでは題名も閉じるも [VideoPlayerView] の操作一式に
+              // 入っている（タップで出し入れする）。二重に出さない。
+              if (!widget.mini && !_onVideo)
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: AppBar(
+                    backgroundColor: Colors.black.withValues(alpha: 0.55),
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    leading: IconButton(
+                      tooltip: '閉じる',
+                      onPressed: _close,
+                      icon: const Icon(Icons.close),
+                    ),
+                    title: Text(_title, style: const TextStyle(fontSize: 14)),
+                    actions: [
+                      IconButton(
+                        tooltip: 'この画像をNG',
+                        onPressed: _ngCurrent,
+                        icon: const Icon(Icons.hide_image_outlined),
+                      ),
+                      IconButton(
+                        tooltip: 'ブラウザで開く',
+                        onPressed: _openExternally,
+                        icon: const Icon(Icons.open_in_browser),
+                      ),
+                    ],
+                  ),
+                ),
+              if (!widget.mini && multiple) ...[
+                _NavButton(
+                  alignment: Alignment.centerLeft,
+                  icon: Icons.chevron_left,
+                  onPressed: () => _jumpBy(-1),
+                ),
+                _NavButton(
+                  alignment: Alignment.centerRight,
+                  icon: Icons.chevron_right,
+                  onPressed: () => _jumpBy(1),
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }
+}
 
-  String _fileName(Uri url) => _mediaFileName(url);
+/// 送り先の動画ページ（まだ表示中ではないもの）に敷く先頭フレーム。
+///
+/// 裏のページで再生器を作らないための代わりで、絵はサムネイルと同じものを使う。
+class _ViewerVideoPoster extends StatelessWidget {
+  const _ViewerVideoPoster({required this.url});
+
+  final Uri url;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!VideoThumbnails.isSupported) return const _VideoPosterFrame();
+    return FutureBuilder<Uint8List?>(
+      future: VideoThumbnails.resolve(url),
+      builder: (context, snapshot) => _VideoPosterFrame(frame: snapshot.data),
+    );
+  }
+}
+
+class _VideoPosterFrame extends StatelessWidget {
+  const _VideoPosterFrame({this.frame});
+
+  final Uint8List? frame;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        if (frame != null)
+          Image.memory(
+            frame!,
+            fit: BoxFit.contain,
+            errorBuilder: (context, error, stack) => const SizedBox(),
+          ),
+        const Center(
+          child: Icon(Icons.play_circle_fill, size: 64, color: Colors.white70),
+        ),
+      ],
+    );
+  }
 }
 
 String _mediaFileName(Uri url) =>
@@ -1453,7 +1635,11 @@ class _NgImage extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.hide_image_outlined, color: Colors.white54, size: 64),
+          const Icon(
+            Icons.hide_image_outlined,
+            color: Colors.white54,
+            size: 64,
+          ),
           const SizedBox(height: 12),
           const Text('NGにした画像です', style: TextStyle(color: Colors.white70)),
           const SizedBox(height: 12),
