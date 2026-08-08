@@ -159,7 +159,14 @@ class _ThreadScreenState extends State<ThreadScreen>
   /// NG 判定されたが、タップで一時的に表示したレス番号。
   final _revealedNg = <int>{};
   final _itemScroll = ItemScrollController();
+  final _scrollOffset = ScrollOffsetController();
   final _positions = ItemPositionsListener.create();
+
+  /// 直近に届いた一覧の寸法（現在位置・端・画面の高さ）。
+  ///
+  /// [ScrollablePositionedList] はピクセル位置を持たず、行の位置も**画面に
+  /// 掛かっている行のぶんしか**教えてくれない。末尾までの残りはここから測る。
+  ScrollMetrics? _listMetrics;
   final _composer = TextEditingController();
   final _composerFocus = FocusNode();
   final _composerKey = GlobalKey();
@@ -671,15 +678,17 @@ class _ThreadScreenState extends State<ThreadScreen>
     unawaited(_history.markRead(widget.threadKey, count));
   }
 
-  /// 行が組み上がる次のフレームで末尾へ運ぶ。返る Future はスクロールが
-  /// 終わったところで完了する（[_noticeOwnPostAfter] の待ち合わせに使う）。
-  Future<void> _scrollToBottomSoon() {
-    final done = Completer<void>();
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await _scrollToBottom();
-      if (!done.isCompleted) done.complete();
-    });
-    return done.future;
+  /// 行が組み上がってから末尾へ運ぶ。返る Future はスクロールが終わったところ
+  /// で完了する（[_noticeOwnPostAfter] の待ち合わせに使う）。
+  ///
+  /// 二度待つのは、増えたぶんを含んだ**寸法が届く**まで（一覧の寸法は行が
+  /// 組み上がったフレームの後で届く）。古い寸法で測ると末尾までの残りを
+  /// 見誤り、行き過ぎて跳ね返る。
+  Future<void> _scrollToBottomSoon() async {
+    await WidgetsBinding.instance.endOfFrame;
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    await _scrollToBottom();
   }
 
   void _scrollToTopSoon() {
@@ -763,21 +772,60 @@ class _ThreadScreenState extends State<ThreadScreen>
   }
 
   /// 追従・書き込み後などに末尾へスクロールする。
+  ///
+  /// **行を指して頼まない**（[ItemScrollController.scrollTo] を使わない）。
+  /// あれは「その行の上端を画面のここへ」としか頼めず、最後の行を上端に置くには
+  /// その下に無いぶんまで送ることになる。スクロールは端で止まらずに越えていき、
+  /// 跳ね返って戻る。新着のたびに画面が大きく上へ流れて戻って見えるのはこれ。
+  ///
+  /// 代わりに**端までの残りぶんだけ**送る。行き先が端そのものなので越えない。
+  /// 残りが測れないとき（まだ寸法が来ていない）だけ、従来どおり行を指して頼む。
   Future<void> _scrollToBottom() {
     if (!_itemScroll.isAttached || _items.isEmpty) return Future.value();
     if (_contentFitsViewport()) {
       _scrollToTop();
       return Future.value();
     }
-    // alignment は**行の上端**を置く位置。1 にすると最後の行は画面の下端から
-    // 始まる＝丸ごと画面の外に落ちる。0 なら「その行から下を表示」を頼むこと
-    // になり、末尾なのでそれ以上は送れず、行の下端が画面の下端に揃う。
+    const duration = Duration(milliseconds: 300);
+    final room = _roomBelow();
+    if (room != null) {
+      if (room <= 0.5) return Future.value(); // すでに端に居る
+      return _scrollOffset.animateScroll(
+        offset: room,
+        duration: duration,
+        curve: Curves.easeOut,
+      );
+    }
     return _itemScroll.scrollTo(
       index: _items.length - 1,
       alignment: 0,
-      duration: const Duration(milliseconds: 300),
+      duration: duration,
       curve: Curves.easeOut,
     );
+  }
+
+  /// 一覧の寸法を控える。中の別のスクロール（本文の選択など）は数えない。
+  bool _onListMetrics(Notification notification) {
+    if (notification is ScrollNotification && notification.depth == 0) {
+      _listMetrics = notification.metrics;
+    } else if (notification is ScrollMetricsNotification &&
+        notification.depth == 0) {
+      _listMetrics = notification.metrics;
+    }
+    return false;
+  }
+
+  /// 末尾までの残り（ピクセル）。分からなければ null。
+  ///
+  /// 遠い（画面 2 つぶんより先）ときは返さない。そこまで一息に送るのは
+  /// [ItemScrollController.scrollTo] の仕事（間を飛ばして繋ぐ）で、こちらの
+  /// 出番ではない。間の行が組まれていない＝端の位置も概算でしかない。
+  double? _roomBelow() {
+    final m = _listMetrics;
+    if (m == null || !m.hasContentDimensions || !m.hasPixels) return null;
+    final room = m.maxScrollExtent - m.pixels;
+    if (room > m.viewportDimension * 2) return null;
+    return room;
   }
 
   bool _contentFitsViewport() {
@@ -2281,71 +2329,88 @@ class _ThreadScreenState extends State<ThreadScreen>
       children: [
         RefreshIndicator(
           onRefresh: _refresh,
-          child: ScrollablePositionedList.builder(
-            itemScrollController: _itemScroll,
-            itemPositionsListener: _positions,
-            initialScrollIndex: _initialIndex,
-            itemCount: items.length,
-            itemBuilder: (context, i) {
-              final row = items[i];
-              if (row is! ThreadTreeRow) return const _NewArrivalLine();
-              final item = row.res;
-              final ngHidden =
-                  _ng.matches(item) && !_revealedNg.contains(item.number);
-              // 返信先の再掲。NG のレスはここでも出さない（行だけ畳む）。
-              if (row.quote) {
-                if (ngHidden) return const SizedBox.shrink();
-                return QuotedResRow(
-                  res: item,
-                  onTap: () =>
-                      _showConversation(item.number, focusNumber: item.number),
-                );
-              }
-              // レス間は線を引かず、スレ一覧と同じく余白だけで区切る。各レスは
-              // 番号・名前の見出し行が始点の目印になる。
-              if (ngHidden) {
-                return ThreadTreeTier(
-                  depth: row.depth,
-                  child: _NgPlaceholder(
-                    number: item.number,
-                    onReveal: () =>
-                        setState(() => _revealedNg.add(item.number)),
-                    onLongPress: () => _showResActions(item),
-                  ),
-                );
-              }
-              // 字下げ帯は行の持ち物なので、スワイプはツリーの外側から掛ける。
-              // PostItem だけを包むと本文が自分の帯の下から抜け出す。
-              return SwipeToReply(
-                onReply: () => _reply(item.number),
-                child: ThreadTreeTier(
-                  depth: row.depth,
-                  child: PostItem(
-                    res: item,
-                    idCount: idCounts[item.id] ?? 1,
-                    idOrdinal: idOrdinals[item.number] ?? 1,
-                    onTapId: _showIdPosts,
-                    onTapRes: _showResPopup,
-                    onTapResRange: _showConversationRange,
-                    onTapUrl: _openUrl,
-                    replyCount: replies[item.number] ?? 0,
-                    onTapReplies: _showReplies,
-                    onBodySelectionActiveChanged: (active) =>
-                        _handleBodySelectionActiveChanged(item.number, active),
-                    onLongPress: () => _showResActions(item),
-                    bodySelectable: false,
-                    isOwn: _history.isOwnPost(widget.threadKey, item.number),
-                    isThreadOwner: _isThreadOwnerPost(item, threadOwnerId),
-                    isReplyToOwn: _isReplyToOwnPost(item),
-                    blurImages: guroMasked.contains(item.number),
-                    linkPreviews: _view.linkPreviews,
-                    highlightQuery: searchQuery,
-                    isCurrentMatch: item.number == currentMatchNumber,
-                    defaultName: widget.defaultName,
-                  ),
-                ),
-              );
-            },
+          // 一覧の寸法はここでしか受け取れない。中身が伸びただけのときも来る
+          // ので、行が増えた直後でも末尾までの残りが分かる。
+          child: NotificationListener<ScrollMetricsNotification>(
+            onNotification: _onListMetrics,
+            child: NotificationListener<ScrollNotification>(
+              onNotification: _onListMetrics,
+              child: ScrollablePositionedList.builder(
+                itemScrollController: _itemScroll,
+                scrollOffsetController: _scrollOffset,
+                itemPositionsListener: _positions,
+                initialScrollIndex: _initialIndex,
+                itemCount: items.length,
+                itemBuilder: (context, i) {
+                  final row = items[i];
+                  if (row is! ThreadTreeRow) return const _NewArrivalLine();
+                  final item = row.res;
+                  final ngHidden =
+                      _ng.matches(item) && !_revealedNg.contains(item.number);
+                  // 返信先の再掲。NG のレスはここでも出さない（行だけ畳む）。
+                  if (row.quote) {
+                    if (ngHidden) return const SizedBox.shrink();
+                    return QuotedResRow(
+                      res: item,
+                      onTap: () => _showConversation(
+                        item.number,
+                        focusNumber: item.number,
+                      ),
+                    );
+                  }
+                  // レス間は線を引かず、スレ一覧と同じく余白だけで区切る。各レスは
+                  // 番号・名前の見出し行が始点の目印になる。
+                  if (ngHidden) {
+                    return ThreadTreeTier(
+                      depth: row.depth,
+                      child: _NgPlaceholder(
+                        number: item.number,
+                        onReveal: () =>
+                            setState(() => _revealedNg.add(item.number)),
+                        onLongPress: () => _showResActions(item),
+                      ),
+                    );
+                  }
+                  // 字下げ帯は行の持ち物なので、スワイプはツリーの外側から掛ける。
+                  // PostItem だけを包むと本文が自分の帯の下から抜け出す。
+                  return SwipeToReply(
+                    onReply: () => _reply(item.number),
+                    child: ThreadTreeTier(
+                      depth: row.depth,
+                      child: PostItem(
+                        res: item,
+                        idCount: idCounts[item.id] ?? 1,
+                        idOrdinal: idOrdinals[item.number] ?? 1,
+                        onTapId: _showIdPosts,
+                        onTapRes: _showResPopup,
+                        onTapResRange: _showConversationRange,
+                        onTapUrl: _openUrl,
+                        replyCount: replies[item.number] ?? 0,
+                        onTapReplies: _showReplies,
+                        onBodySelectionActiveChanged: (active) =>
+                            _handleBodySelectionActiveChanged(
+                              item.number,
+                              active,
+                            ),
+                        onLongPress: () => _showResActions(item),
+                        bodySelectable: false,
+                        isOwn: _history.isOwnPost(
+                          widget.threadKey,
+                          item.number,
+                        ),
+                        isThreadOwner: _isThreadOwnerPost(item, threadOwnerId),
+                        isReplyToOwn: _isReplyToOwnPost(item),
+                        blurImages: guroMasked.contains(item.number),
+                        linkPreviews: _view.linkPreviews,
+                        highlightQuery: searchQuery,
+                        isCurrentMatch: item.number == currentMatchNumber,
+                        defaultName: widget.defaultName,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
           ),
         ),
         // 長いスレでは右端のつまみで一気に移動できるようにする。

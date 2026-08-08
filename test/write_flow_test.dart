@@ -340,6 +340,56 @@ void main() {
     expect(find.text('書き込みが反映されました'), findsNothing);
   });
 
+  testWidgets('新着の追従は末尾を通り越さない（跳ね返らない）', (tester) async {
+    final client = LongThreadClient();
+    final history = ReadHistory(MemoryReadHistoryStorage());
+    await history.markRead('123', 55);
+
+    // 端で跳ねる物理（iOS の挙動）で見る。行き過ぎを頼んでいれば、端を越えて
+    // から戻るぶんがはみ出し量として出る。端で止まる物理では隠れてしまう。
+    var overshoot = 0.0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ScrollConfiguration(
+          behavior: const _BouncingBehavior(),
+          child: NotificationListener<ScrollNotification>(
+            onNotification: (n) {
+              final over = n.metrics.pixels - n.metrics.maxScrollExtent;
+              if (over > overshoot) overshoot = over;
+              return false;
+            },
+            child: ThreadScreen(
+              threadKey: '123',
+              threadTitle: 'テスト',
+              fetcher: client,
+              authStore: AuthStore(MemoryTokenStorage()),
+              authLauncher: FakeLauncher(),
+              pollInterval: const Duration(seconds: 60),
+              readHistory: history,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 指で末尾まで送る（実況していて最新を見ているところ）。
+    for (var i = 0; i < 8; i++) {
+      await tester.drag(find.byType(PostItem).first, const Offset(0, -400));
+      await tester.pumpAndSettle();
+    }
+    expect(showsRes(tester, 60), isTrue);
+    expect(showsRes(tester, 61), isFalse);
+
+    // ポーリングで 61 が届き、末尾へ追従する。
+    overshoot = 0;
+    await tester.pump(const Duration(seconds: 60));
+    await tester.pumpAndSettle();
+
+    expect(showsRes(tester, 61), isTrue);
+    expect(overshoot, lessThan(1), reason: 'はみ出し $overshoot');
+  });
+
   testWidgets('コード無し認証ダイアログはURLを表示してコピーできる', (tester) async {
     final copied = <String>[];
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
@@ -843,4 +893,13 @@ void main() {
     expect(history.isOwnPost('123', 2), isTrue);
     expect(find.text('自分'), findsOneWidget);
   });
+}
+
+/// 端で跳ねる物理を使わせる（テストの既定は端で止まる Android の物理）。
+class _BouncingBehavior extends MaterialScrollBehavior {
+  const _BouncingBehavior();
+
+  @override
+  ScrollPhysics getScrollPhysics(BuildContext context) =>
+      const BouncingScrollPhysics();
 }
