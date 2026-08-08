@@ -2,7 +2,9 @@ import 'package:edge_core/edge_core.dart';
 import 'package:elec/src/net/auth_launcher.dart';
 import 'package:elec/src/net/auth_store.dart';
 import 'package:elec/src/net/read_history.dart';
+import 'package:elec/src/net/thread_view_settings.dart';
 import 'package:elec/src/net/token_storage.dart';
+import 'package:elec/src/ui/post_item.dart';
 import 'package:elec/src/ui/thread_screen.dart';
 import 'package:elec/src/ui/write_auth.dart';
 import 'package:flutter/material.dart';
@@ -173,7 +175,171 @@ class StaleOnceAfterPostClient implements HttpFetcher, HttpPoster {
   }
 }
 
+/// 画面に収まらない長さのスレ。60 レスで開き、投稿すると [afterPost] 件まで
+/// 増える（自分のレスは [resNum]）。[bodies] に無い番号の本文は `レスN`。
+class LongThreadClient implements HttpFetcher, HttpPoster {
+  LongThreadClient({
+    this.afterPost = 61,
+    this.resNum = 61,
+    this.bodies = const {},
+  });
+
+  final int afterPost;
+  final int resNum;
+  final Map<int, String> bodies;
+  int gets = 0;
+  int posts = 0;
+
+  List<int> _dat(int n) => [
+    for (var i = 1; i <= n; i++)
+      ...datLine(
+        '名無し<><>2025/11/03(月) 02:14:51.907 ID:a<> ${bodies[i] ?? 'レス$i'} '
+        '<>${i == 1 ? 'スレタイ' : ''}',
+      ),
+  ];
+
+  @override
+  Future<FetchResponse> get(
+    Uri url, {
+    Map<String, String> headers = const {},
+  }) async {
+    gets++;
+    return FetchResponse(
+      statusCode: 200,
+      bodyBytes: _dat(gets == 1 ? 60 : afterPost),
+    );
+  }
+
+  @override
+  Future<FetchResponse> post(
+    Uri url, {
+    Map<String, String> headers = const {},
+    required String body,
+  }) async {
+    posts++;
+    return FetchResponse(
+      statusCode: 200,
+      bodyBytes: successBody(),
+      headers: {'x-resnum': '$resNum'},
+    );
+  }
+}
+
 void main() {
+  Widget longThreadApp(
+    LongThreadClient client,
+    ReadHistory history, {
+    ThreadViewSettings? view,
+  }) => MaterialApp(
+    home: ThreadScreen(
+      threadKey: '123',
+      threadTitle: 'テスト',
+      fetcher: client,
+      authStore: AuthStore(MemoryTokenStorage()),
+      authLauncher: FakeLauncher(),
+      pollInterval: const Duration(seconds: 60),
+      readHistory: history,
+      threadViewSettings: view,
+    ),
+  );
+
+  /// 本文を打って送信し、書き込み後の取り直しと追従スクロールまで進める。
+  Future<void> post(WidgetTester tester) async {
+    await tester.enterText(find.byType(TextField), 'こんにちは');
+    await tester.tap(find.byIcon(Icons.send));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+    // 「映っているか」の判定は追従が落ち着いてから走る。
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pumpAndSettle();
+  }
+
+  /// [number] のレスが実際に画面へ出ているか（組まれているだけでは数えない）。
+  bool showsRes(WidgetTester tester, int number) {
+    final item = find.byWidgetPredicate(
+      (w) => w is PostItem && w.res.number == number,
+    );
+    if (item.evaluate().isEmpty) return false;
+    final screen = tester.getRect(find.byType(Scaffold));
+    final rect = tester.getRect(item);
+    return rect.top < screen.bottom && rect.bottom > screen.top;
+  }
+
+  testWidgets('途中を読んでいるときの投稿では読んでいた場所を動かさない', (tester) async {
+    final client = LongThreadClient();
+    final history = ReadHistory(MemoryReadHistoryStorage());
+
+    await tester.pumpWidget(longThreadApp(client, history));
+    await tester.pumpAndSettle();
+    // 先頭を読んでいる（末尾は組まれてもいない）。
+    expect(find.text('レス1'), findsOneWidget);
+    expect(find.text('レス60'), findsNothing);
+
+    await post(tester);
+
+    // 読んでいた先頭のまま。自分のレスへ勝手に飛ばさない。
+    expect(history.isOwnPost('123', 61), isTrue);
+    expect(find.text('レス1'), findsOneWidget);
+    expect(showsRes(tester, 61), isFalse);
+
+    // 代わりに押せば飛べる知らせを出す。
+    expect(find.text('書き込みが反映されました'), findsOneWidget);
+    await tester.tap(find.text('見る'));
+    await tester.pumpAndSettle();
+
+    expect(showsRes(tester, 61), isTrue);
+    expect(find.text('自分'), findsOneWidget);
+  });
+
+  testWidgets('ツリー表示で自分のレスが末尾に来ないときは知らせから飛べる', (tester) async {
+    final view = ThreadViewSettings(MemoryThreadViewSettingsStorage());
+    await view.setLayout(ThreadLayout.tree);
+    // 62〜75 は返信していないので根のまま並び、>>1 への返信である自分の 76 は
+    // 先に来た 61 と同じ引用行の下＝その手前へ入る（末尾から 14 行上）。
+    final client = LongThreadClient(
+      afterPost: 76,
+      resNum: 76,
+      bodies: const {61: '>>1 だれかの返信', 76: '>>1 自分の返信'},
+    );
+    final history = ReadHistory(MemoryReadHistoryStorage());
+    await history.markRead('123', 60); // 末尾を追っている
+
+    await tester.pumpWidget(longThreadApp(client, history, view: view));
+    await tester.pumpAndSettle();
+
+    await post(tester);
+
+    // 自分の 76 は末尾（75）のずっと上に入るので、末尾追従では映らない。
+    expect(history.isOwnPost('123', 76), isTrue);
+    expect(showsRes(tester, 76), isFalse);
+
+    await tester.tap(find.text('見る'));
+    await tester.pumpAndSettle();
+
+    expect(showsRes(tester, 76), isTrue);
+    expect(find.text('自分'), findsOneWidget);
+  });
+
+  testWidgets('末尾を追っているときは追従で見えるので知らせない', (tester) async {
+    final client = LongThreadClient();
+    final history = ReadHistory(MemoryReadHistoryStorage());
+    // 60 レスまで読んである＝続きから（末尾）で開く。実況しているところ。
+    await history.markRead('123', 60);
+
+    await tester.pumpWidget(longThreadApp(client, history));
+    await tester.pumpAndSettle();
+    expect(find.text('レス60'), findsOneWidget);
+    expect(find.text('レス1'), findsNothing);
+
+    await post(tester);
+
+    expect(history.isOwnPost('123', 61), isTrue);
+    expect(showsRes(tester, 61), isTrue);
+    expect(find.text('自分'), findsOneWidget);
+    expect(find.text('書き込みが反映されました'), findsNothing);
+  });
+
   testWidgets('コード無し認証ダイアログはURLを表示してコピーできる', (tester) async {
     final copied = <String>[];
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
