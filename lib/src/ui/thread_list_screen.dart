@@ -854,6 +854,8 @@ class _ThreadListScreenState extends State<ThreadListScreen>
           // もので、押さなかった人の画面に居座らせる意味は無い。他の通知と同じ
           // ように時間で消す。
           persist: false,
+          // 消えるのを待たずに退けられるようにする。
+          showCloseIcon: true,
           action: SnackBarAction(
             label: '取り消す',
             onPressed: () => _ng.removeCreator(metadent),
