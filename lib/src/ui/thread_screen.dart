@@ -159,7 +159,14 @@ class _ThreadScreenState extends State<ThreadScreen>
   /// NG 判定されたが、タップで一時的に表示したレス番号。
   final _revealedNg = <int>{};
   final _itemScroll = ItemScrollController();
+  final _scrollOffset = ScrollOffsetController();
   final _positions = ItemPositionsListener.create();
+
+  /// 直近に届いた一覧の寸法（現在位置・端・画面の高さ）。
+  ///
+  /// [ScrollablePositionedList] はピクセル位置を持たず、行の位置も**画面に
+  /// 掛かっている行のぶんしか**教えてくれない。末尾までの残りはここから測る。
+  ScrollMetrics? _listMetrics;
   final _composer = TextEditingController();
   final _composerFocus = FocusNode();
   final _composerKey = GlobalKey();
@@ -198,9 +205,13 @@ class _ThreadScreenState extends State<ThreadScreen>
   /// 追跡し、スレ一覧の既読位置として保存する。
   int _furthestRead = 0;
 
-  /// ツリー表示で実際に見えたレス番号。番号順に並んでいないので、既読位置は
+  /// ツリー表示で通り過ぎたレス番号。番号順に並んでいないので、既読位置は
   /// これが 1 から続いているところまでで測る（[_onPositions]）。
   final _seenResNumbers = <int>{};
+
+  /// [_seenResNumbers] に数え終わった行の位置。ここまでは通り過ぎている。
+  /// 行の並びが組み替わったら -1 に戻して数え直す。
+  int _passedRowIndex = -1;
 
   /// 一度でも取得を始めたか。控えのまま一度も表に出ていない画面は false。
   bool _loadStarted = false;
@@ -461,6 +472,8 @@ class _ThreadScreenState extends State<ThreadScreen>
         _loading = false;
         _error = null;
       });
+      // 行はこれから組み直される（新着ラインの位置が決まる）。
+      _passedRowIndex = -1;
       _maybeShowReplySwipeHint();
     } catch (e) {
       if (!mounted) return;
@@ -540,6 +553,8 @@ class _ThreadScreenState extends State<ThreadScreen>
       _openCount = _entryPositions(_state.res.length, lastSeen).openCount;
       _furthestRead = lastSeen ?? _furthestRead;
     });
+    // 新着ラインが動く＝ツリーの並びも組み替わるので、数え直しにする。
+    _passedRowIndex = -1;
   }
 
   Future<void> _poll({bool force = false}) async {
@@ -625,9 +640,9 @@ class _ThreadScreenState extends State<ThreadScreen>
   ///
   /// 番号順表示では「見えた最大レス番号」がそのまま既読位置になる（飛ばした
   /// ぶんは読み飛ばしたものとして扱う）。ツリー表示では並びが番号順でないので、
-  /// 見えた番号を覚えておき **1 から続いているところまで** を既読位置にする。
-  /// ツリーの上の方に出てきた新しい番号のレスで既読位置が飛ぶと、その手前の
-  /// 未読を読まずに読了扱いにしてしまうため。
+  /// **通り過ぎた行**のレス番号を覚えておき、それが 1 から続いているところまで
+  /// を既読位置にする。ツリーの上の方に出てきた新しい番号のレスで既読位置が
+  /// 飛ぶと、その手前の未読を読まずに読了扱いにしてしまうため。
   void _onPositions() {
     final positions = _positions.itemPositions.value;
     if (positions.isEmpty || _items.isEmpty) return;
@@ -635,22 +650,21 @@ class _ThreadScreenState extends State<ThreadScreen>
     final tree = _view.layout == ThreadLayout.tree;
     var maxRes = _furthestRead;
     var atBottom = false;
+    var deepest = -1;
     for (final p in positions) {
       // 一部でも見えている行か。
       if (p.itemTrailingEdge <= 0 || p.itemLeadingEdge >= 1) continue;
-      final item = _items[p.index];
       // 引用行（返信先の再掲）は読んだ位置に数えない。番号が前へ戻るうえ、
       // 本体はまだ下（新着側）にあるため。
-      if (item is ThreadTreeRow && !item.quote) {
-        if (tree) {
-          _seenResNumbers.add(item.res.number);
-        } else if (item.res.number > maxRes) {
-          maxRes = item.res.number;
-        }
+      final item = _items[p.index];
+      if (!tree && item is ThreadTreeRow && !item.quote) {
+        if (item.res.number > maxRes) maxRes = item.res.number;
       }
+      if (p.index > deepest) deepest = p.index;
       if (p.index == lastIndex && p.itemTrailingEdge <= 1.0001) atBottom = true;
     }
     if (tree) {
+      _passRowsThrough(deepest);
       var next = maxRes + 1;
       while (_seenResNumbers.contains(next)) {
         next++;
@@ -665,21 +679,41 @@ class _ThreadScreenState extends State<ThreadScreen>
     if (readAdvanced) _persistReadPosition(maxRes);
   }
 
+  /// [index] 行目までを通り過ぎたものとして数える（ツリー表示の既読位置用）。
+  ///
+  /// **見えている行をその都度拾うのでは足りない。** 勢いよく送ると行はフレーム
+  /// を跨いで飛ぶし、つまみで一気に運べば間の行はそもそも組まれない。取りこぼした
+  /// 番号が 1 つあるだけで既読位置はそこで止まり、下まで読んでも次に開いたとき
+  /// 古い位置と新着ラインへ戻される。**どこまで下ったか**で数えれば、通った行は
+  /// 全部数に入る（番号順表示が「見えた最大レス番号」で測るのと同じ扱い）。
+  void _passRowsThrough(int index) {
+    if (index <= _passedRowIndex) return;
+    for (var i = _passedRowIndex + 1; i <= index && i < _items.length; i++) {
+      final item = _items[i];
+      if (item is ThreadTreeRow && !item.quote) {
+        _seenResNumbers.add(item.res.number);
+      }
+    }
+    _passedRowIndex = index;
+  }
+
   void _persistReadPosition([int? resCount]) {
     final count = resCount ?? _furthestRead;
     if (count <= 0) return;
     unawaited(_history.markRead(widget.threadKey, count));
   }
 
-  /// 行が組み上がる次のフレームで末尾へ運ぶ。返る Future はスクロールが
-  /// 終わったところで完了する（[_noticeOwnPostAfter] の待ち合わせに使う）。
-  Future<void> _scrollToBottomSoon() {
-    final done = Completer<void>();
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await _scrollToBottom();
-      if (!done.isCompleted) done.complete();
-    });
-    return done.future;
+  /// 行が組み上がってから末尾へ運ぶ。返る Future はスクロールが終わったところ
+  /// で完了する（[_noticeOwnPostAfter] の待ち合わせに使う）。
+  ///
+  /// 二度待つのは、増えたぶんを含んだ**寸法が届く**まで（一覧の寸法は行が
+  /// 組み上がったフレームの後で届く）。古い寸法で測ると末尾までの残りを
+  /// 見誤り、行き過ぎて跳ね返る。
+  Future<void> _scrollToBottomSoon() async {
+    await WidgetsBinding.instance.endOfFrame;
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    await _scrollToBottom();
   }
 
   void _scrollToTopSoon() {
@@ -763,21 +797,60 @@ class _ThreadScreenState extends State<ThreadScreen>
   }
 
   /// 追従・書き込み後などに末尾へスクロールする。
+  ///
+  /// **行を指して頼まない**（[ItemScrollController.scrollTo] を使わない）。
+  /// あれは「その行の上端を画面のここへ」としか頼めず、最後の行を上端に置くには
+  /// その下に無いぶんまで送ることになる。スクロールは端で止まらずに越えていき、
+  /// 跳ね返って戻る。新着のたびに画面が大きく上へ流れて戻って見えるのはこれ。
+  ///
+  /// 代わりに**端までの残りぶんだけ**送る。行き先が端そのものなので越えない。
+  /// 残りが測れないとき（まだ寸法が来ていない）だけ、従来どおり行を指して頼む。
   Future<void> _scrollToBottom() {
     if (!_itemScroll.isAttached || _items.isEmpty) return Future.value();
     if (_contentFitsViewport()) {
       _scrollToTop();
       return Future.value();
     }
-    // alignment は**行の上端**を置く位置。1 にすると最後の行は画面の下端から
-    // 始まる＝丸ごと画面の外に落ちる。0 なら「その行から下を表示」を頼むこと
-    // になり、末尾なのでそれ以上は送れず、行の下端が画面の下端に揃う。
+    const duration = Duration(milliseconds: 300);
+    final room = _roomBelow();
+    if (room != null) {
+      if (room <= 0.5) return Future.value(); // すでに端に居る
+      return _scrollOffset.animateScroll(
+        offset: room,
+        duration: duration,
+        curve: Curves.easeOut,
+      );
+    }
     return _itemScroll.scrollTo(
       index: _items.length - 1,
       alignment: 0,
-      duration: const Duration(milliseconds: 300),
+      duration: duration,
       curve: Curves.easeOut,
     );
+  }
+
+  /// 一覧の寸法を控える。中の別のスクロール（本文の選択など）は数えない。
+  bool _onListMetrics(Notification notification) {
+    if (notification is ScrollNotification && notification.depth == 0) {
+      _listMetrics = notification.metrics;
+    } else if (notification is ScrollMetricsNotification &&
+        notification.depth == 0) {
+      _listMetrics = notification.metrics;
+    }
+    return false;
+  }
+
+  /// 末尾までの残り（ピクセル）。分からなければ null。
+  ///
+  /// 遠い（画面 2 つぶんより先）ときは返さない。そこまで一息に送るのは
+  /// [ItemScrollController.scrollTo] の仕事（間を飛ばして繋ぐ）で、こちらの
+  /// 出番ではない。間の行が組まれていない＝端の位置も概算でしかない。
+  double? _roomBelow() {
+    final m = _listMetrics;
+    if (m == null || !m.hasContentDimensions || !m.hasPixels) return null;
+    final room = m.maxScrollExtent - m.pixels;
+    if (room > m.viewportDimension * 2) return null;
+    return room;
   }
 
   bool _contentFitsViewport() {
@@ -1008,6 +1081,8 @@ class _ThreadScreenState extends State<ThreadScreen>
   void _onViewSettingsChanged() {
     if (!mounted) return;
     final anchor = _topVisibleResNumber();
+    // 並べ方が変われば行の並びも変わる。通り過ぎた行の数え直しから始める。
+    _passedRowIndex = -1;
     setState(() {});
     if (anchor == null) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -2183,11 +2258,12 @@ class _ThreadScreenState extends State<ThreadScreen>
                   ),
                 ),
               ),
-        // 検索中はポーリングのインジケータで AppBar の高さ・構造を毎回変えない。
-        // 5秒ごとの再構築で検索欄がちらつく・IME を妨げるのを避ける。
-        bottom: _polling && !_searching
-            ? const PreferredSize(
-                preferredSize: Size.fromHeight(2),
+        // 取得中の細い線は AppBar の下端に**重ねて**出す。bottom に置くと出て
+        // いる間だけ AppBar が 2px 高くなり、本文がそのぶん下がって戻る＝
+        // ポーリングのたびにレスが上下に揺れる。
+        flexibleSpace: _polling
+            ? const Align(
+                alignment: Alignment.bottomCenter,
                 child: LinearProgressIndicator(minHeight: 2),
               )
             : null,
@@ -2281,71 +2357,88 @@ class _ThreadScreenState extends State<ThreadScreen>
       children: [
         RefreshIndicator(
           onRefresh: _refresh,
-          child: ScrollablePositionedList.builder(
-            itemScrollController: _itemScroll,
-            itemPositionsListener: _positions,
-            initialScrollIndex: _initialIndex,
-            itemCount: items.length,
-            itemBuilder: (context, i) {
-              final row = items[i];
-              if (row is! ThreadTreeRow) return const _NewArrivalLine();
-              final item = row.res;
-              final ngHidden =
-                  _ng.matches(item) && !_revealedNg.contains(item.number);
-              // 返信先の再掲。NG のレスはここでも出さない（行だけ畳む）。
-              if (row.quote) {
-                if (ngHidden) return const SizedBox.shrink();
-                return QuotedResRow(
-                  res: item,
-                  onTap: () =>
-                      _showConversation(item.number, focusNumber: item.number),
-                );
-              }
-              // レス間は線を引かず、スレ一覧と同じく余白だけで区切る。各レスは
-              // 番号・名前の見出し行が始点の目印になる。
-              if (ngHidden) {
-                return ThreadTreeTier(
-                  depth: row.depth,
-                  child: _NgPlaceholder(
-                    number: item.number,
-                    onReveal: () =>
-                        setState(() => _revealedNg.add(item.number)),
-                    onLongPress: () => _showResActions(item),
-                  ),
-                );
-              }
-              // 字下げ帯は行の持ち物なので、スワイプはツリーの外側から掛ける。
-              // PostItem だけを包むと本文が自分の帯の下から抜け出す。
-              return SwipeToReply(
-                onReply: () => _reply(item.number),
-                child: ThreadTreeTier(
-                  depth: row.depth,
-                  child: PostItem(
-                    res: item,
-                    idCount: idCounts[item.id] ?? 1,
-                    idOrdinal: idOrdinals[item.number] ?? 1,
-                    onTapId: _showIdPosts,
-                    onTapRes: _showResPopup,
-                    onTapResRange: _showConversationRange,
-                    onTapUrl: _openUrl,
-                    replyCount: replies[item.number] ?? 0,
-                    onTapReplies: _showReplies,
-                    onBodySelectionActiveChanged: (active) =>
-                        _handleBodySelectionActiveChanged(item.number, active),
-                    onLongPress: () => _showResActions(item),
-                    bodySelectable: false,
-                    isOwn: _history.isOwnPost(widget.threadKey, item.number),
-                    isThreadOwner: _isThreadOwnerPost(item, threadOwnerId),
-                    isReplyToOwn: _isReplyToOwnPost(item),
-                    blurImages: guroMasked.contains(item.number),
-                    linkPreviews: _view.linkPreviews,
-                    highlightQuery: searchQuery,
-                    isCurrentMatch: item.number == currentMatchNumber,
-                    defaultName: widget.defaultName,
-                  ),
-                ),
-              );
-            },
+          // 一覧の寸法はここでしか受け取れない。中身が伸びただけのときも来る
+          // ので、行が増えた直後でも末尾までの残りが分かる。
+          child: NotificationListener<ScrollMetricsNotification>(
+            onNotification: _onListMetrics,
+            child: NotificationListener<ScrollNotification>(
+              onNotification: _onListMetrics,
+              child: ScrollablePositionedList.builder(
+                itemScrollController: _itemScroll,
+                scrollOffsetController: _scrollOffset,
+                itemPositionsListener: _positions,
+                initialScrollIndex: _initialIndex,
+                itemCount: items.length,
+                itemBuilder: (context, i) {
+                  final row = items[i];
+                  if (row is! ThreadTreeRow) return const _NewArrivalLine();
+                  final item = row.res;
+                  final ngHidden =
+                      _ng.matches(item) && !_revealedNg.contains(item.number);
+                  // 返信先の再掲。NG のレスはここでも出さない（行だけ畳む）。
+                  if (row.quote) {
+                    if (ngHidden) return const SizedBox.shrink();
+                    return QuotedResRow(
+                      res: item,
+                      onTap: () => _showConversation(
+                        item.number,
+                        focusNumber: item.number,
+                      ),
+                    );
+                  }
+                  // レス間は線を引かず、スレ一覧と同じく余白だけで区切る。各レスは
+                  // 番号・名前の見出し行が始点の目印になる。
+                  if (ngHidden) {
+                    return ThreadTreeTier(
+                      depth: row.depth,
+                      child: _NgPlaceholder(
+                        number: item.number,
+                        onReveal: () =>
+                            setState(() => _revealedNg.add(item.number)),
+                        onLongPress: () => _showResActions(item),
+                      ),
+                    );
+                  }
+                  // 字下げ帯は行の持ち物なので、スワイプはツリーの外側から掛ける。
+                  // PostItem だけを包むと本文が自分の帯の下から抜け出す。
+                  return SwipeToReply(
+                    onReply: () => _reply(item.number),
+                    child: ThreadTreeTier(
+                      depth: row.depth,
+                      child: PostItem(
+                        res: item,
+                        idCount: idCounts[item.id] ?? 1,
+                        idOrdinal: idOrdinals[item.number] ?? 1,
+                        onTapId: _showIdPosts,
+                        onTapRes: _showResPopup,
+                        onTapResRange: _showConversationRange,
+                        onTapUrl: _openUrl,
+                        replyCount: replies[item.number] ?? 0,
+                        onTapReplies: _showReplies,
+                        onBodySelectionActiveChanged: (active) =>
+                            _handleBodySelectionActiveChanged(
+                              item.number,
+                              active,
+                            ),
+                        onLongPress: () => _showResActions(item),
+                        bodySelectable: false,
+                        isOwn: _history.isOwnPost(
+                          widget.threadKey,
+                          item.number,
+                        ),
+                        isThreadOwner: _isThreadOwnerPost(item, threadOwnerId),
+                        isReplyToOwn: _isReplyToOwnPost(item),
+                        blurImages: guroMasked.contains(item.number),
+                        linkPreviews: _view.linkPreviews,
+                        highlightQuery: searchQuery,
+                        isCurrentMatch: item.number == currentMatchNumber,
+                        defaultName: widget.defaultName,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
           ),
         ),
         // 長いスレでは右端のつまみで一気に移動できるようにする。
