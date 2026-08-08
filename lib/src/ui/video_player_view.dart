@@ -17,6 +17,7 @@ import 'package:video_player/video_player.dart';
 
 import '../net/auth_launcher.dart';
 import 'audio_player_widget.dart';
+import 'media_scrim.dart';
 
 /// 動画 URL を再生する部品。
 ///
@@ -297,39 +298,46 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
                 children: [
                   Positioned.fill(child: Center(child: _content())),
                   if (_showChrome)
-                    SafeArea(
-                      child: Align(
-                        alignment: Alignment.topLeft,
-                        child: Padding(
-                          padding: const EdgeInsets.all(4),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(
-                                tooltip: '閉じる',
-                                color: Colors.white,
-                                onPressed: widget.onClose,
-                                icon: const Icon(Icons.close),
-                              ),
-                              IconButton(
-                                tooltip: '小さくする',
-                                color: Colors.white,
-                                onPressed: widget.onMinimize,
-                                icon: const Icon(Icons.keyboard_arrow_down),
-                              ),
-                              if (widget.title case final title?)
-                                Flexible(
-                                  child: Text(
-                                    title,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 14,
+                    Positioned(
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      // 明るい映像の上でも白いアイコンと題名が読めるように、
+                      // 上端だけ薄く落とす（下端のシークバーと同じ考え）。
+                      child: TopScrim(
+                        child: SafeArea(
+                          bottom: false,
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(4, 4, 4, 24),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  tooltip: '閉じる',
+                                  color: Colors.white,
+                                  onPressed: widget.onClose,
+                                  icon: const Icon(Icons.close),
+                                ),
+                                IconButton(
+                                  tooltip: '小さくする',
+                                  color: Colors.white,
+                                  onPressed: widget.onMinimize,
+                                  icon: const Icon(Icons.keyboard_arrow_down),
+                                ),
+                                if (widget.title case final title?)
+                                  Flexible(
+                                    child: Text(
+                                      title,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 14,
+                                      ),
                                     ),
                                   ),
-                                ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
                       ),

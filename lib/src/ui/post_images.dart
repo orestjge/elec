@@ -13,6 +13,7 @@ import 'audio_player_widget.dart';
 import 'embed_urls.dart';
 import 'format.dart';
 import 'image_urls.dart';
+import 'media_scrim.dart';
 import 'mini_player.dart';
 import 'nico_thumbnail.dart';
 import 'remote_image.dart';
@@ -1424,28 +1425,42 @@ class _MediaViewerViewState extends State<MediaViewerView> {
                   top: 0,
                   left: 0,
                   right: 0,
-                  child: AppBar(
-                    backgroundColor: Colors.black.withValues(alpha: 0.55),
-                    foregroundColor: Colors.white,
-                    elevation: 0,
-                    leading: IconButton(
-                      tooltip: '閉じる',
-                      onPressed: _close,
-                      icon: const Icon(Icons.close),
+                  child: TopScrim(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        AppBar(
+                          backgroundColor: Colors.transparent,
+                          surfaceTintColor: Colors.transparent,
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          leading: IconButton(
+                            tooltip: '閉じる',
+                            onPressed: _close,
+                            icon: const Icon(Icons.close),
+                          ),
+                          title: Text(
+                            _title,
+                            style: const TextStyle(fontSize: 14),
+                          ),
+                          actions: [
+                            IconButton(
+                              tooltip: 'この画像をNG',
+                              onPressed: _ngCurrent,
+                              icon: const Icon(Icons.hide_image_outlined),
+                            ),
+                            IconButton(
+                              tooltip: 'ブラウザで開く',
+                              onPressed: _openExternally,
+                              icon: const Icon(Icons.open_in_browser),
+                            ),
+                          ],
+                        ),
+                        // 溶けきるための余地。ここまで暗幕は伸びるが、絵の上に
+                        // 乗るものは無い。
+                        const SizedBox(height: 28),
+                      ],
                     ),
-                    title: Text(_title, style: const TextStyle(fontSize: 14)),
-                    actions: [
-                      IconButton(
-                        tooltip: 'この画像をNG',
-                        onPressed: _ngCurrent,
-                        icon: const Icon(Icons.hide_image_outlined),
-                      ),
-                      IconButton(
-                        tooltip: 'ブラウザで開く',
-                        onPressed: _openExternally,
-                        icon: const Icon(Icons.open_in_browser),
-                      ),
-                    ],
                   ),
                 ),
               // ◀▶ は操作一式の一部。種別を問わず、出しているときだけ添える。
