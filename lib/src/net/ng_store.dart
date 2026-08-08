@@ -5,6 +5,8 @@ import 'package:edge_core/edge_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'image_fingerprint.dart';
+
 /// NG ワード 1 件。正規表現として扱うかを持つ。
 @immutable
 class NgWord {
@@ -33,12 +35,101 @@ class NgWord {
   int get hashCode => Object.hash(pattern, isRegex);
 }
 
+/// NG にした画像 1 枚。中身の指紋で見分ける（URL は毎回変わるので使えない）。
+@immutable
+class NgImage {
+  const NgImage({
+    required this.sha256,
+    this.dhash,
+    this.thumbnail,
+    this.addedAt,
+  });
+
+  /// 登録元の [ImageFingerprint] から作る。[thumbnail] は一覧に出す見本（PNG）。
+  factory NgImage.from(
+    ImageFingerprint fingerprint, {
+    Uint8List? thumbnail,
+    DateTime? addedAt,
+  }) => NgImage(
+    sha256: fingerprint.sha256,
+    dhash: fingerprint.dhash,
+    thumbnail: thumbnail,
+    addedAt: addedAt ?? DateTime.now(),
+  );
+
+  /// 本文の SHA-256。完全一致の判定と、同じ画像を二重登録しないための鍵。
+  final String sha256;
+
+  /// dHash。のっぺりした画像では null になり、完全一致だけで判定する。
+  final Uint8List? dhash;
+
+  /// 一覧に出す小さな見本（PNG）。無くても判定には困らない。
+  final Uint8List? thumbnail;
+
+  final DateTime? addedAt;
+
+  /// [fingerprint] がこの画像と同じか。完全一致か、dHash が十分近ければ同じと見る。
+  bool matches(ImageFingerprint fingerprint) {
+    if (fingerprint.sha256 == sha256) return true;
+    final mine = dhash;
+    final theirs = fingerprint.dhash;
+    if (mine == null || theirs == null || mine.length != theirs.length) {
+      return false;
+    }
+    return hammingDistance(mine, theirs) <= ngImageMaxDistance;
+  }
+
+  Map<String, Object?> toJson() => {
+    'sha256': sha256,
+    if (dhash case final value?) 'dhash': hashToHex(value),
+    if (thumbnail case final bytes?) 'thumbnail': base64Encode(bytes),
+    if (addedAt case final at?) 'addedAt': at.toIso8601String(),
+  };
+
+  static NgImage? fromJson(Object? value) {
+    if (value is! Map) return null;
+    final sha = value['sha256'];
+    if (sha is! String || sha.isEmpty) return null;
+    final dhash = value['dhash'];
+    final thumbnail = value['thumbnail'];
+    final addedAt = value['addedAt'];
+    return NgImage(
+      sha256: sha,
+      dhash: dhash is String ? hexToHash(dhash) : null,
+      thumbnail: thumbnail is String ? _tryDecodeBase64(thumbnail) : null,
+      addedAt: addedAt is String ? DateTime.tryParse(addedAt) : null,
+    );
+  }
+
+  static Uint8List? _tryDecodeBase64(String text) {
+    try {
+      return base64Decode(text);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  bool operator ==(Object other) => other is NgImage && other.sha256 == sha256;
+
+  @override
+  int get hashCode => sha256.hashCode;
+}
+
+/// dHash がこの距離まで近ければ「同じ画像」と見なす（[imageHashBits] 中の相違数）。
+///
+/// 貼り直しの再エンコードなら 0〜3、1/4 まで縮めても実測で 12 までしか動かない。
+/// 一方で別の絵柄は 26 以上離れる。取りこぼすより巻き込む方が困る（無関係な画像
+/// が消える）ので、真ん中よりは低い側に置いてある。
+const int ngImageMaxDistance = 16;
+
 /// NG 設定の保存内容。
 class NgSnapshot {
   const NgSnapshot({
     this.words = const [],
     this.ids = const {},
     this.creators = const {},
+    this.images = const [],
   });
   final List<NgWord> words;
   final Set<String> ids;
@@ -46,6 +137,9 @@ class NgSnapshot {
   /// NG にしたスレ立て人の metadent（8 文字）。`subject-metadent.txt` の
   /// `[xxx★]` をそのまま持つ。
   final Set<String> creators;
+
+  /// NG にした画像（登録順）。
+  final List<NgImage> images;
 }
 
 /// NG 設定の保存先の抽象。
@@ -74,6 +168,7 @@ class FileNgStorage implements NgStorage {
       final wordsJson = json['words'];
       final idsJson = json['ids'];
       final creatorsJson = json['creators'];
+      final imagesJson = json['images'];
       return NgSnapshot(
         words: wordsJson is List
             ? wordsJson
@@ -85,6 +180,12 @@ class FileNgStorage implements NgStorage {
         creators: creatorsJson is List
             ? creatorsJson.whereType<String>().toSet()
             : const {},
+        images: imagesJson is List
+            ? imagesJson
+                  .map(NgImage.fromJson)
+                  .whereType<NgImage>()
+                  .toList(growable: false)
+            : const [],
       );
     } catch (_) {
       return const NgSnapshot();
@@ -99,6 +200,7 @@ class FileNgStorage implements NgStorage {
         'words': snapshot.words.map((w) => w.toJson()).toList(),
         'ids': snapshot.ids.toList()..sort(),
         'creators': snapshot.creators.toList()..sort(),
+        'images': snapshot.images.map((i) => i.toJson()).toList(),
       }),
     );
   }
@@ -109,18 +211,22 @@ class MemoryNgStorage implements NgStorage {
     List<NgWord>? words,
     Set<String>? ids,
     Set<String>? creators,
+    List<NgImage>? images,
   ]) : _words = words ?? [],
        _ids = ids ?? {},
-       _creators = creators ?? {};
+       _creators = creators ?? {},
+       _images = images ?? [];
   List<NgWord> _words;
   Set<String> _ids;
   Set<String> _creators;
+  List<NgImage> _images;
 
   @override
   Future<NgSnapshot> load() async => NgSnapshot(
     words: List.of(_words),
     ids: Set.of(_ids),
     creators: Set.of(_creators),
+    images: List.of(_images),
   );
 
   @override
@@ -128,21 +234,23 @@ class MemoryNgStorage implements NgStorage {
     _words = List.of(snapshot.words);
     _ids = Set.of(snapshot.ids);
     _creators = Set.of(snapshot.creators);
+    _images = List.of(snapshot.images);
   }
 }
 
-/// NG（あぼーん）設定。ワード（正規表現可）とユーザー ID で判定する。
+/// NG（あぼーん）設定。ワード（正規表現可）・ユーザー ID・画像で判定する。
 ///
 /// 変更を [ChangeNotifier] で通知するので、開いているスレ画面へ即時反映できる。
 class NgStore extends ChangeNotifier {
   NgStore(this._storage);
 
-  static final NgStore shared = NgStore(FileNgStorage());
+  static NgStore shared = NgStore(FileNgStorage());
 
   final NgStorage _storage;
   List<NgWord> _words = [];
   Set<String> _ids = {};
   Set<String> _creators = {};
+  List<NgImage> _images = [];
 
   /// 判定用にコンパイル済みのルール。正規表現ワードは [RegExp]、
   /// 部分一致ワードは null（小文字化して contains する）。
@@ -158,6 +266,7 @@ class NgStore extends ChangeNotifier {
     _words = List.of(snapshot.words);
     _ids = Set.of(snapshot.ids);
     _creators = Set.of(snapshot.creators);
+    _images = List.of(snapshot.images);
     _recompile();
   }
 
@@ -169,6 +278,15 @@ class NgStore extends ChangeNotifier {
 
   /// 登録済み NG のスレ立て人 metadent（昇順）。
   List<String> get creators => _creators.toList()..sort();
+
+  /// 登録済み NG 画像（登録順）。
+  List<NgImage> get images => List.unmodifiable(_images);
+
+  /// NG 画像が 1 枚でも登録されているか。
+  ///
+  /// 画像の指紋を採るには本文を丸ごと見る必要がある。1 枚も登録していない人に
+  /// その手間を掛けないよう、読み込み側はこれを見てから採る。
+  bool get hasImages => _images.isNotEmpty;
 
   bool isNgId(String? id) => id != null && _ids.contains(id);
 
@@ -240,6 +358,42 @@ class NgStore extends ChangeNotifier {
     await _save();
   }
 
+  /// [fingerprint] が当たっている NG 画像。無ければ null。
+  NgImage? ngImageFor(ImageFingerprint? fingerprint) {
+    if (fingerprint == null) return null;
+    for (final image in _images) {
+      if (image.matches(fingerprint)) return image;
+    }
+    return null;
+  }
+
+  /// [fingerprint] の画像が NG に該当するか。
+  bool isNgImage(ImageFingerprint? fingerprint) =>
+      ngImageFor(fingerprint) != null;
+
+  /// この URL の画像が当たっている NG 画像。指紋をまだ採れていない URL では
+  /// null になる（通信して中身を見るまでは分からない）。
+  NgImage? ngImageForUrl(Uri url) => _images.isEmpty
+      ? null
+      : ngImageFor(ImageFingerprintIndex.shared.get(url));
+
+  /// この URL の画像が NG だと**既に分かっている**か。
+  bool isNgImageUrl(Uri url) => ngImageForUrl(url) != null;
+
+  Future<void> addImage(NgImage image) async {
+    if (image.sha256.isEmpty) return;
+    if (_images.any((e) => e.sha256 == image.sha256)) return;
+    _images.add(image);
+    notifyListeners();
+    await _save();
+  }
+
+  Future<void> removeImage(NgImage image) async {
+    if (!_images.remove(image)) return;
+    notifyListeners();
+    await _save();
+  }
+
   Future<void> addCreator(String metadent) async {
     if (metadent.isEmpty || !_creators.add(metadent)) return;
     notifyListeners();
@@ -251,6 +405,9 @@ class NgStore extends ChangeNotifier {
     notifyListeners();
     await _save();
   }
+
+  @visibleForTesting
+  static void resetShared() => shared = NgStore(FileNgStorage());
 
   /// 正規表現として妥当か（設定 UI の入力チェック用）。
   static bool isValidRegex(String pattern) {
@@ -297,6 +454,7 @@ class NgStore extends ChangeNotifier {
       words: List.of(_words),
       ids: Set.of(_ids),
       creators: Set.of(_creators),
+      images: List.of(_images),
     );
     _pendingSave = _pendingSave.then((_) => _storage.save(snapshot));
     await _pendingSave;

@@ -9,6 +9,7 @@ import 'src/net/board_store.dart';
 import 'src/net/endpoints.dart';
 import 'src/net/file_upload_settings.dart';
 import 'src/net/image_cache_store.dart';
+import 'src/net/image_fingerprint.dart';
 import 'src/net/image_upload_settings.dart';
 import 'src/net/ng_store.dart';
 import 'src/net/read_history.dart';
@@ -31,6 +32,8 @@ Future<void> main() async {
     NgStore.shared.load(),
     ThreadSortSettings.shared.load(),
     ThreadViewSettings.shared.load(),
+    // 前に見た画像の指紋。NG 画像を落とし直さずに伏せるために要る。
+    ImageFingerprintIndex.shared.load(),
   ]);
   // 画像キャッシュの置き場を用意して、溜まっているぶんを刈る。表示を待たせる
   // 必要は無いので待たない。
