@@ -220,6 +220,12 @@ class _ThreadScreenState extends State<ThreadScreen>
   /// 番号が取れる場合（[PostAccepted.resNum]）は [_pendingOwnPosts] を使わないので、
   /// 再取得ループの継続はこのフラグで判断する。
   bool _awaitingOwnPost = false;
+
+  /// 届いたら映っているか見に行く自分のレスの番号（書き込み直後だけ入る）。
+  ///
+  /// 末尾に居るときだけ追従する既定の動きでは、ツリー表示で自分のレスが末尾に
+  /// 来ない並びのときに送ったレスを見失う。[_noticeOwnPostAfter] を参照。
+  int? _ownPostToShow;
   final _selectedBodyResNumbers = <int>{};
   static const int _postRefreshAttempts = 4;
   static const Duration _postRefreshRetryDelay = Duration(milliseconds: 700);
@@ -348,8 +354,7 @@ class _ThreadScreenState extends State<ThreadScreen>
     WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
     _postRefreshTimer?.cancel();
-    _topSnackTimer?.cancel();
-    _topSnackEntry?.remove();
+    _dismissTopSnack();
     _composer.dispose();
     _composerFocus.dispose();
     _searchController.dispose();
@@ -565,12 +570,19 @@ class _ThreadScreenState extends State<ThreadScreen>
         // 1000 に達して完走した場合も、dat落ちと同じく書けなくなる。
         _notifyStoppedWhileComposing(wasWritable);
         if (_searching) return;
+        final own = _ownPostToShow;
+        final ownArrived =
+            own != null && r.state.res.any((post) => post.number == own);
+        if (ownArrived) _ownPostToShow = null;
         // 末尾に居たなら追従する。
+        var settled = Future<void>.value();
         if (wasShortContent) {
           _scrollToTopSoon();
         } else if (wasAtBottom) {
-          _scrollToBottomSoon();
+          settled = _scrollToBottomSoon();
         }
+        // 送ったレスが映らなかったときだけ、追従が済んでから知らせる。
+        if (ownArrived) unawaited(_noticeOwnPostAfter(settled, own));
       }
     } catch (_) {
       // ポーリング失敗は無視。次周期で回復を試みる。
@@ -659,12 +671,69 @@ class _ThreadScreenState extends State<ThreadScreen>
     unawaited(_history.markRead(widget.threadKey, count));
   }
 
-  void _scrollToBottomSoon() {
-    WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+  /// 行が組み上がる次のフレームで末尾へ運ぶ。返る Future はスクロールが
+  /// 終わったところで完了する（[_noticeOwnPostAfter] の待ち合わせに使う）。
+  Future<void> _scrollToBottomSoon() {
+    final done = Completer<void>();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _scrollToBottom();
+      if (!done.isCompleted) done.complete();
+    });
+    return done.future;
   }
 
   void _scrollToTopSoon() {
     WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToTop());
+  }
+
+  /// 送ったレスが映っていないときだけ、押せば飛べる知らせを出す。
+  ///
+  /// **画面は勝手に動かさない。** 途中まで読んで返信しただけなのに運ばれると、
+  /// 読んでいた場所を探し直しになる。映っているなら知らせも要らない（送信時の
+  /// 「書き込みました」で足りる）ので、見えなかったときだけ道を出す。
+  ///
+  /// 判定は [settled]（末尾追従のスクロール）が終わってから。動いている途中で
+  /// 見ると、これから映るレスを「映っていない」と取り違える。
+  Future<void> _noticeOwnPostAfter(Future<void> settled, int number) async {
+    // 行が組み上がる（この更新の描画が済む）まで待ってから位置を見る。
+    await WidgetsBinding.instance.endOfFrame;
+    await settled;
+    if (!mounted) return;
+    final index = _indexForResNumber(number);
+    if (index == null || _isRowVisible(index)) return;
+    _showTopSnack(
+      '書き込みが反映されました',
+      actionLabel: '見る',
+      onAction: () => _showRes(number),
+    );
+  }
+
+  bool _isRowVisible(int index) {
+    for (final p in _positions.itemPositions.value) {
+      if (p.index != index) continue;
+      return p.itemTrailingEdge > 0 && p.itemLeadingEdge < 1;
+    }
+    return false;
+  }
+
+  /// レス [number] が見えるところへ運ぶ。
+  ///
+  /// 直前が**そのレスの引用行**ならそこから見せる。何への返信かごと目に入り、
+  /// 送った内容を確かめられる。
+  void _showRes(int number) {
+    if (!mounted || !_itemScroll.isAttached) return;
+    final index = _indexForResNumber(number);
+    if (index == null) return;
+    final previous = index > 0 ? _items[index - 1] : null;
+    final target = previous is ThreadTreeRow && previous.quote
+        ? index - 1
+        : index;
+    _itemScroll.scrollTo(
+      index: target,
+      alignment: 0,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+    );
   }
 
   void _scrollToTop() {
@@ -694,15 +763,18 @@ class _ThreadScreenState extends State<ThreadScreen>
   }
 
   /// 追従・書き込み後などに末尾へスクロールする。
-  void _scrollToBottom() {
-    if (!_itemScroll.isAttached || _items.isEmpty) return;
+  Future<void> _scrollToBottom() {
+    if (!_itemScroll.isAttached || _items.isEmpty) return Future.value();
     if (_contentFitsViewport()) {
       _scrollToTop();
-      return;
+      return Future.value();
     }
-    _itemScroll.scrollTo(
+    // alignment は**行の上端**を置く位置。1 にすると最後の行は画面の下端から
+    // 始まる＝丸ごと画面の外に落ちる。0 なら「その行から下を表示」を頼むこと
+    // になり、末尾なのでそれ以上は送れず、行の下端が画面の下端に揃う。
+    return _itemScroll.scrollTo(
       index: _items.length - 1,
-      alignment: 1,
+      alignment: 0,
       duration: const Duration(milliseconds: 300),
       curve: Curves.easeOut,
     );
@@ -910,6 +982,7 @@ class _ThreadScreenState extends State<ThreadScreen>
         : newRes.length;
     for (final res in newRes.skip(newRes.length - count)) {
       await _history.markOwnPost(widget.threadKey, res.number);
+      _ownPostToShow = res.number; // 番号が取れないサーバでもここで分かる
     }
     _pendingOwnPosts -= count;
   }
@@ -1862,40 +1935,76 @@ class _ThreadScreenState extends State<ThreadScreen>
     _showTopSnack(message);
   }
 
-  void _showTopSnack(String message) {
+  /// [actionLabel] を渡すと押せるボタンが付く。押すまで待つぶん、知らせだけの
+  /// ときより長く出す。ボタン無しのスナックはこれまで通り操作を透かす
+  /// （[IgnorePointer]）ので、下のレスをそのまま触れる。
+  void _showTopSnack(
+    String message, {
+    String? actionLabel,
+    VoidCallback? onAction,
+  }) {
     _topSnackTimer?.cancel();
     _topSnackEntry?.remove();
     final overlay = Overlay.of(context);
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final hasAction = actionLabel != null && onAction != null;
     _topSnackEntry = OverlayEntry(
-      builder: (context) => Positioned(
-        top: MediaQuery.paddingOf(context).top + 12,
-        left: 12,
-        right: 12,
-        child: IgnorePointer(
-          child: Material(
-            color: scheme.inverseSurface,
-            elevation: 6,
-            borderRadius: BorderRadius.circular(8),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Text(
-                message,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: scheme.onInverseSurface,
+      builder: (context) {
+        final bar = Material(
+          color: scheme.inverseSurface,
+          elevation: 6,
+          borderRadius: BorderRadius.circular(8),
+          child: Padding(
+            // ボタンは自前で余白を持つので、その側だけ詰めて高さを揃える。
+            padding: hasAction
+                ? const EdgeInsets.fromLTRB(16, 4, 8, 4)
+                : const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    message,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: scheme.onInverseSurface,
+                    ),
+                  ),
                 ),
-              ),
+                if (hasAction)
+                  TextButton(
+                    onPressed: () {
+                      _dismissTopSnack();
+                      onAction();
+                    },
+                    style: TextButton.styleFrom(
+                      foregroundColor: scheme.inversePrimary,
+                    ),
+                    child: Text(actionLabel),
+                  ),
+              ],
             ),
           ),
-        ),
-      ),
+        );
+        return Positioned(
+          top: MediaQuery.paddingOf(context).top + 12,
+          left: 12,
+          right: 12,
+          child: hasAction ? bar : IgnorePointer(child: bar),
+        );
+      },
     );
     overlay.insert(_topSnackEntry!);
-    _topSnackTimer = Timer(const Duration(seconds: 2), () {
-      _topSnackEntry?.remove();
-      _topSnackEntry = null;
-    });
+    _topSnackTimer = Timer(
+      Duration(seconds: hasAction ? 5 : 2),
+      _dismissTopSnack,
+    );
+  }
+
+  void _dismissTopSnack() {
+    _topSnackTimer?.cancel();
+    _topSnackTimer = null;
+    _topSnackEntry?.remove();
+    _topSnackEntry = null;
   }
 
   // ---- 書き込み ----
@@ -1959,6 +2068,7 @@ class _ThreadScreenState extends State<ThreadScreen>
       if (resNum != null) {
         // サーバが番号を返したら、その番号を直接自分のレスにする（正確）。
         unawaited(_history.markOwnPost(widget.threadKey, resNum));
+        _ownPostToShow = resNum;
       } else {
         // 番号が取れないサーバ向けのフォールバック（増えた末尾を自分とみなす）。
         _pendingOwnPosts++;
