@@ -1,5 +1,7 @@
 import 'package:edge_core/edge_core.dart';
+import 'package:elec/src/ui/post_item.dart';
 import 'package:elec/src/ui/thread_tree.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 Res post(int n, String body) => Res(
@@ -256,5 +258,78 @@ void main() {
   test('flatThreadRows は dat の順のまま深さ 0', () {
     final res = [post(1, 'OP'), post(2, '>>1 レス')];
     expect(shape(flatThreadRows(res)), ['1:0', '2:0']);
+  });
+
+  group('ThreadTreeTier（字下げ帯）', () {
+    testWidgets('目印を帯に乗せても本文の位置は動かない', (tester) async {
+      // 帯の太さと本文までの隙間は足して一定。目印が付いた行だけ本文がずれると、
+      // ツリーの縦の筋が折れて見える。
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ThreadTreeTier(depth: 1, child: Text('ふつう')),
+                ThreadTreeTier(
+                  depth: 1,
+                  accent: Colors.red,
+                  child: Text('目印つき'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      expect(
+        tester.getTopLeft(find.text('目印つき')).dx,
+        tester.getTopLeft(find.text('ふつう')).dx,
+      );
+    });
+
+    testWidgets('帯は 1 本だけ——レス側の目印は消して字下げ帯に移す', (tester) async {
+      // 2 本並べると、数 px ずれた縦線が 2 本走って「揃っていない」に見える。
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ListView(
+              children: [
+                ThreadTreeTier(
+                  depth: 1,
+                  child: PostItem(
+                    res: post(2, 'ふつうのレス'),
+                    idCount: 1,
+                    idOrdinal: 1,
+                    onTapId: null,
+                    bodySelectable: false,
+                  ),
+                ),
+                ThreadTreeTier(
+                  depth: 1,
+                  accent: Colors.red,
+                  child: PostItem(
+                    res: post(3, '自分宛のレス'),
+                    idCount: 1,
+                    idOrdinal: 1,
+                    onTapId: null,
+                    bodySelectable: false,
+                    isReplyToOwn: true,
+                    showAccentBar: false,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      // 本文の左端が揃っている＝レス側は帯を描いていない（描くと 3px ぶん
+      // 左パディングを詰めるので、ここがずれる）。
+      expect(
+        tester.getTopLeft(find.text('自分宛のレス')).dx,
+        tester.getTopLeft(find.text('ふつうのレス')).dx,
+      );
+    });
   });
 }
