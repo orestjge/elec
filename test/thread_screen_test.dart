@@ -782,6 +782,9 @@ void main() {
     await tester.tap(thumbs.last);
     await tester.pumpAndSettle();
 
+    // 題名バーは既定では出さない（絵をタップすると一式出る）。
+    await tester.tap(find.byType(PageView));
+    await tester.pumpAndSettle();
     expect(find.text('2/2  b.png'), findsOneWidget);
   });
 

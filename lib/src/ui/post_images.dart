@@ -1065,6 +1065,30 @@ class _MediaViewerViewState extends State<MediaViewerView> {
   /// これだけ間が空いたらスクロールは別の操作として数え直す。
   static const _scrollGap = Duration(milliseconds: 200);
 
+  /// ポインタを止めてからこれだけ経ったら、操作一式を引っ込める。
+  static const _hoverLinger = Duration(seconds: 3);
+
+  /// 画像のページで操作一式（題名バー・◀▶）を出しているか。
+  ///
+  /// **既定では何も重ねない。** ◀▶ を絵の左右に置きっぱなしにすると、送るのは
+  /// 一瞬なのに見ている間じゅう邪魔になる。絵をタップすると出て、もう一度で
+  /// 引っ込む——動画のページ（[VideoPlayerView]）と同じ規則に揃えてある。
+  ///
+  /// 出したままにするのは、静止画には「流れている」状態が無いため。動画のように
+  /// 時間で引っ込めると、見比べている最中に消えてしまう。
+  bool _imageChrome = false;
+
+  /// 動画のページで [VideoPlayerView] が操作一式を出しているか（あちらから
+  /// 知らせてもらう）。◀▶ は種別によらず操作一式と一緒に出す。
+  bool _videoChrome = false;
+
+  bool get _chromeVisible => _onVideo ? _videoChrome : _imageChrome;
+
+  /// マウス（トラックパッド）を止めてから引っ込めるまでのタイマー。
+  ///
+  /// タッチでは hover が来ないので、これはポインタのある環境専用の道になる。
+  Timer? _hoverTimer;
+
   @override
   void initState() {
     super.initState();
@@ -1075,10 +1099,34 @@ class _MediaViewerViewState extends State<MediaViewerView> {
 
   @override
   void dispose() {
+    _hoverTimer?.cancel();
     _view.removeListener(_onViewChanged);
     _view.dispose();
     _page.dispose();
     super.dispose();
+  }
+
+  /// 絵をタップした。操作一式を出し入れする（絵の外側のタップは閉じる操作なので、
+  /// ここへは来ない）。
+  void _toggleChrome() {
+    _hoverTimer?.cancel();
+    setState(() => _imageChrome = !_imageChrome);
+  }
+
+  /// ポインタが動いた。マウスで見ているなら送るボタンが要るので出し、手を止めた
+  /// ら引っ込める。タッチ端末では hover 自体が来ない。
+  void _onHover(PointerHoverEvent event) {
+    if (widget.mini || _onVideo) return;
+    if (!_imageChrome) setState(() => _imageChrome = true);
+    _hoverTimer?.cancel();
+    _hoverTimer = Timer(_hoverLinger, () {
+      if (mounted) setState(() => _imageChrome = false);
+    });
+  }
+
+  void _onVideoChrome(bool visible) {
+    if (_videoChrome == visible || !mounted) return;
+    setState(() => _videoChrome = visible);
   }
 
   ViewerMedia get _current => widget.items[_index];
@@ -1304,7 +1352,11 @@ class _MediaViewerViewState extends State<MediaViewerView> {
   Widget _buildPage(int i) {
     final item = widget.items[i];
     return switch (item) {
-      ViewerImageMedia() => _ViewerImage(url: item.url, onDismiss: _close),
+      ViewerImageMedia() => _ViewerImage(
+        url: item.url,
+        onDismiss: _close,
+        onTap: _toggleChrome,
+      ),
       ViewerVideoMedia() when i != _index => _ViewerVideoPoster(url: item.url),
       ViewerVideoMedia() => VideoPlayerView(
         url: item.url,
@@ -1312,6 +1364,7 @@ class _MediaViewerViewState extends State<MediaViewerView> {
         title: _title,
         onClose: widget.onClose,
         onMinimize: widget.onMinimize,
+        onChromeVisibilityChanged: _onVideoChrome,
         onOpenExternally: widget.onOpenExternally,
       ),
     };
@@ -1328,6 +1381,9 @@ class _MediaViewerViewState extends State<MediaViewerView> {
       onPointerUp: _onPointerUp,
       onPointerCancel: _onPointerCancel,
       onPointerSignal: _onPointerSignal,
+      // マウスで見ているなら送るボタンが要る。タッチでは hover が来ないので、
+      // この道は自然とポインタのある環境だけのものになる。
+      onPointerHover: _onHover,
       child: AnimatedSlide(
         offset: Offset(0, height == 0 ? 0 : _dragDy / height),
         duration: _dragging ? Duration.zero : const Duration(milliseconds: 180),
@@ -1363,7 +1419,7 @@ class _MediaViewerViewState extends State<MediaViewerView> {
               ),
               // 動画のページでは題名も閉じるも [VideoPlayerView] の操作一式に
               // 入っている（タップで出し入れする）。二重に出さない。
-              if (!widget.mini && !_onVideo)
+              if (!widget.mini && !_onVideo && _imageChrome)
                 Positioned(
                   top: 0,
                   left: 0,
@@ -1392,7 +1448,8 @@ class _MediaViewerViewState extends State<MediaViewerView> {
                     ],
                   ),
                 ),
-              if (!widget.mini && multiple) ...[
+              // ◀▶ は操作一式の一部。種別を問わず、出しているときだけ添える。
+              if (!widget.mini && multiple && _chromeVisible) ...[
                 _NavButton(
                   alignment: Alignment.centerLeft,
                   icon: Icons.chevron_left,
@@ -1462,9 +1519,18 @@ String _mediaFileName(Uri url) =>
 /// 拡大縮小・パンは親（[PageView] の外側の [InteractiveViewer]）が受け持つので、
 /// ここは表示だけを見る。
 class _ViewerImage extends StatefulWidget {
-  const _ViewerImage({required this.url, required this.onDismiss});
+  const _ViewerImage({
+    required this.url,
+    required this.onDismiss,
+    required this.onTap,
+  });
   final Uri url;
+
+  /// 絵の外側（余白）をタップした。閉じる。
   final VoidCallback onDismiss;
+
+  /// 絵そのものをタップした。操作一式を出し入れする。
+  final VoidCallback onTap;
 
   @override
   State<_ViewerImage> createState() => _ViewerImageState();
@@ -1567,8 +1633,12 @@ class _ViewerImageState extends State<_ViewerImage> {
 
   void _handleTapUp(Offset position, Size viewport) {
     // 拡大縮小は親が外側で掛けているので、ここに届く位置は既に変換前の座標。
-    // 画像矩形の外なら閉じる。
-    if (!_fittedRect(viewport).contains(position)) widget.onDismiss();
+    // 画像矩形の外なら閉じる。中なら操作一式の出し入れ。
+    if (_fittedRect(viewport).contains(position)) {
+      widget.onTap();
+    } else {
+      widget.onDismiss();
+    }
   }
 
   @override

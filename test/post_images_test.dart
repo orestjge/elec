@@ -41,6 +41,15 @@ class _StubFetcher implements HttpFetcher {
   }
 }
 
+/// 最初のサムネイルからビューアを開き、**絵をタップして操作一式（題名バー・◀▶）を
+/// 出す**。既定では何も重ならないので、題名やボタンを見るテストはこれで開ける。
+Future<void> _openViewer(WidgetTester tester) async {
+  await tester.tap(find.byType(GestureDetector).first);
+  await tester.pumpAndSettle();
+  await tester.tap(find.byType(PageView));
+  await tester.pumpAndSettle();
+}
+
 /// 全画面ビューアの表示中の画像を2本指のピンチで拡大する。
 Future<void> _pinchZoom(WidgetTester tester) async {
   final center = tester.getCenter(find.byType(PageView));
@@ -101,8 +110,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byType(GestureDetector).first);
-    await tester.pumpAndSettle();
+    await _openViewer(tester);
     expect(find.text('1/3  a.jpg'), findsOneWidget);
 
     await tester.tap(find.byIcon(Icons.chevron_right));
@@ -130,8 +138,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byType(GestureDetector).first);
-    await tester.pumpAndSettle();
+    await _openViewer(tester);
 
     await tester.tap(find.byIcon(Icons.open_in_browser));
     await tester.pump();
@@ -145,6 +152,48 @@ void main() {
     expect(opened, [urls.first, urls.last]);
   });
 
+  testWidgets('ビューアは既定で絵に何も重ねず、タップで出し入れする', (tester) async {
+    final urls = [
+      Uri.parse('https://example.com/a.jpg'),
+      Uri.parse('https://example.com/b.png'),
+    ];
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: _host,
+        home: Scaffold(body: PostImages(urls: urls)),
+      ),
+    );
+
+    await tester.tap(find.byType(GestureDetector).first);
+    await tester.pumpAndSettle();
+
+    // ◀▶ を絵の左右に置きっぱなしにすると、送るのは一瞬なのに見ている間じゅう
+    // 邪魔になる。開いた直後は絵だけ。
+    expect(find.byType(PageView), findsOneWidget);
+    expect(find.byIcon(Icons.chevron_left), findsNothing);
+    expect(find.text('1/2  a.jpg'), findsNothing);
+
+    // 絵をタップすると一式出る（動画のページと同じ規則）。
+    await tester.tap(find.byType(PageView));
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.chevron_left), findsOneWidget);
+    expect(find.byIcon(Icons.chevron_right), findsOneWidget);
+    expect(find.text('1/2  a.jpg'), findsOneWidget);
+
+    // 送っても出したままにする。静止画には「流れている」状態が無いので、
+    // 時間で引っ込めると見比べている最中に消えてしまう。
+    await tester.tap(find.byIcon(Icons.chevron_right));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 6));
+    expect(find.text('2/2  b.png'), findsOneWidget);
+
+    // もう一度タップで引っ込む。ビューアは開いたまま。
+    await tester.tap(find.byType(PageView));
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.chevron_left), findsNothing);
+    expect(MiniPlayerController.shared.media, isNotNull);
+  });
+
   testWidgets('画像ビューアは上下スワイプで閉じられる', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
@@ -155,8 +204,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byType(GestureDetector).first);
-    await tester.pumpAndSettle();
+    await _openViewer(tester);
     expect(find.text('a.jpg'), findsOneWidget);
 
     await tester.drag(find.byType(PageView), const Offset(0, 140));
@@ -182,8 +230,7 @@ void main() {
     tester.view.padding = const FakeViewPadding(top: 132);
     addTearDown(tester.view.reset);
 
-    await tester.tap(find.byType(GestureDetector).first);
-    await tester.pumpAndSettle();
+    await _openViewer(tester);
     expect(find.text('a.jpg'), findsOneWidget);
     expect(tester.getTopLeft(find.text('a.jpg')).dy, greaterThan(44));
 
@@ -204,8 +251,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byType(GestureDetector).first);
-    await tester.pumpAndSettle();
+    await _openViewer(tester);
 
     // 2本指のピンチで拡大する。
     final center = tester.getCenter(find.byType(InteractiveViewer));
@@ -239,8 +285,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byType(GestureDetector).first);
-    await tester.pumpAndSettle();
+    await _openViewer(tester);
 
     // 等倍のうちは左右スワイプで隣の画像へ送る。
     await tester.fling(find.byType(PageView), const Offset(-300, 0), 800);
@@ -279,8 +324,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byType(GestureDetector).first);
-    await tester.pumpAndSettle();
+    await _openViewer(tester);
     await _pinchZoom(tester);
 
     // ひと続きのスクロールでは、慣性で流れ続けても1枚だけ送る。
@@ -298,8 +342,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byType(GestureDetector).first);
-    await tester.pumpAndSettle();
+    await _openViewer(tester);
     expect(find.text('a.jpg'), findsOneWidget);
 
     await _scroll(tester, const Offset(0, 40), times: 3);
@@ -316,8 +359,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byType(GestureDetector).first);
-    await tester.pumpAndSettle();
+    await _openViewer(tester);
 
     // ホイールは拡大縮小なので、等倍のうちに回しても閉じない。
     await _scroll(
@@ -347,8 +389,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byType(GestureDetector).first);
-    await tester.pumpAndSettle();
+    await _openViewer(tester);
     expect(find.text('1/2  a.jpg'), findsOneWidget);
 
     await _pinchZoom(tester);
@@ -373,8 +414,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byType(GestureDetector).first);
-    await tester.pumpAndSettle();
+    await _openViewer(tester);
 
     // 隣へ送り、まだ流れ着かないうちにピンチする。
     await tester.fling(find.byType(PageView), const Offset(-300, 0), 800);
@@ -399,8 +439,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byType(GestureDetector).first);
-    await tester.pumpAndSettle();
+    await _openViewer(tester);
 
     await tester.tap(find.byIcon(Icons.chevron_right));
     await tester.pump(const Duration(milliseconds: 40));
@@ -448,17 +487,24 @@ void main() {
     // 画像のサムネから開くと、動画も同じ並びに入っている。
     await tester.tap(find.byType(GestureDetector).first);
     await settle(tester);
+    await tester.tap(find.byType(PageView));
+    await tester.pump();
     expect(find.text('1/2  a.jpg'), findsOneWidget);
 
     // 隣へ送ると動画のページ。そこで初めてプレーヤーが立ち上がる。
     await tester.tap(find.byIcon(Icons.chevron_right));
     await settle(tester);
     expect(find.byType(VideoPlayerView), findsOneWidget);
-    // 動画では見出しも操作の一部なので、流している間は隠れている。
+    // 動画では見出しも ◀▶ も操作の一部なので、流している間は隠れている。
     expect(find.text('2/2  movie.mp4'), findsNothing);
+    expect(find.byIcon(Icons.chevron_left), findsNothing);
+
+    // タップで一式出る。◀▶ はプレーヤー側の出し入れに合わせて付いてくる。
     await tester.tap(find.byType(AspectRatio), warnIfMissed: false);
     await tester.pump();
+    await tester.pump();
     expect(find.text('2/2  movie.mp4'), findsOneWidget);
+    expect(find.byIcon(Icons.chevron_left), findsOneWidget);
 
     // 画像へ戻れば、プレーヤーは畳まれて元の見出しに戻る。
     await tester.tap(find.byIcon(Icons.chevron_left));
@@ -490,6 +536,8 @@ void main() {
 
     await tester.tap(find.byType(GestureDetector).first);
     await settle(tester);
+    await tester.tap(find.byType(PageView));
+    await tester.pump();
     await tester.tap(find.byIcon(Icons.open_in_browser));
     await tester.pump();
     expect(images, [Uri.parse('https://example.com/a.jpg')]);
@@ -531,8 +579,13 @@ void main() {
     expect(find.byType(VideoPlayerView), findsOneWidget);
 
     // 3件目として開いているので、左へ送ると 2 枚目の画像に着く。
+    await tester.tap(find.byType(AspectRatio), warnIfMissed: false);
+    await tester.pump();
+    await tester.pump();
     await tester.tap(find.byIcon(Icons.chevron_left));
     await settle(tester);
+    await tester.tap(find.byType(PageView));
+    await tester.pump();
     expect(find.text('2/3  b.png'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox());

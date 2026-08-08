@@ -30,6 +30,7 @@ class VideoPlayerView extends StatefulWidget {
     required this.onMinimize,
     this.mini = false,
     this.title,
+    this.onChromeVisibilityChanged,
     this.onOpenExternally,
   });
 
@@ -39,6 +40,11 @@ class VideoPlayerView extends StatefulWidget {
   /// いま何本目を見ているかを示す。**ヘッダーとして常に出しはしない**——
   /// 映像を隠さないために、他の操作と同じくタップで出し入れする。
   final String? title;
+
+  /// 操作一式の出し入れが切り替わった。ビューアが自分で重ねているもの（◀▶）を
+  /// 同時に出し入れするために使う——**タップひとつで一式が出る**という規則を
+  /// 画像のページと揃えるため、出し入れの持ち主はこちらのままにしてある。
+  final ValueChanged<bool>? onChromeVisibilityChanged;
 
   /// 再生をやめる。
   final VoidCallback onClose;
@@ -195,6 +201,25 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
   /// 要るので常に出す。
   bool get _showChrome => !_ready || _failed || _controlsVisible;
 
+  /// 直近に知らせた [_showChrome]。切り替わったときだけ伝える。
+  bool? _reportedChrome;
+
+  /// 出し入れが変わったことを外へ知らせる。
+  ///
+  /// 出し入れは再生状態・自動引っ込め・タップの 3 つで動くので、変える箇所ごとに
+  /// 呼ぶと取りこぼす。組み立ての最後に見て、フレームを跨いでから伝える（描いて
+  /// いる最中に親を組み直させない）。
+  void _notifyChrome() {
+    final visible = _showChrome;
+    if (visible == _reportedChrome) return;
+    _reportedChrome = visible;
+    final notify = widget.onChromeVisibilityChanged;
+    if (notify == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) notify(visible);
+    });
+  }
+
   void _resetDrag() {
     setState(() {
       _dragging = false;
@@ -240,6 +265,7 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
 
   @override
   Widget build(BuildContext context) {
+    _notifyChrome();
     // 小窓では中身に触らせない（窓の移動・全画面へ戻す・閉じるはホスト側が持つ）。
     if (widget.mini) return Center(child: _content(compact: true));
 
