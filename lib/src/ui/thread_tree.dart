@@ -159,34 +159,56 @@ ThreadTreeLayout layOutThreadTree(List<Res> res, {required int settledCount}) {
 }
 
 /// ツリーの字下げ。深さ 0 では何も足さない（番号順表示と同じ見た目）。
+///
+/// **レスの左アクセント帯（自分宛・検索の現在位置）はこの帯に移す**（[accent]）。
+/// レス側（[PostItem]）にも描かせると、字下げ帯の数 px 右にもう 1 本縦線が走って
+/// 「揃っていない 2 本」に見える。色を持つのが 1 本だけなら、深さの筋と目印が
+/// 同じ列に乗る。深さ 0 では字下げ帯そのものが無いので、レス側に任せる
+/// （番号順表示と同じ見た目＝左端に帯）。
 class ThreadTreeTier extends StatelessWidget {
-  const ThreadTreeTier({super.key, required this.depth, required this.child});
+  const ThreadTreeTier({
+    super.key,
+    required this.depth,
+    required this.child,
+    this.accent,
+  });
 
   final int depth;
   final Widget child;
+
+  /// 字下げ帯に移してきた目印の色。無ければ深さの筋として淡く描く。
+  final Color? accent;
 
   /// 字下げを増やす上限。これ以上深くなっても下げない。深いツリーで本文幅が
   /// 潰れて表示が破綻するのを防ぐ（会話シートと同じ考え方）。
   static const _maxIndentLevels = 6;
   static const _indentStep = 14.0;
 
+  /// 帯と本文の間。**帯の太さと足して一定**にしてあり、目印が付いた行でも本文の
+  /// 位置は動かない（[PostItem] が帯の分だけ左パディングを詰めるのと同じ理屈）。
+  static const _barAndGap = 8.0;
+
   @override
   Widget build(BuildContext context) {
     if (depth <= 0) return child;
     final scheme = Theme.of(context).colorScheme;
     final levels = depth < _maxIndentLevels ? depth : _maxIndentLevels;
+    final width = accent != null ? 3.0 : 2.0;
     return Padding(
       padding: EdgeInsets.only(left: levels * _indentStep),
       child: Container(
         decoration: BoxDecoration(
           border: Border(
             left: BorderSide(
-              color: scheme.outlineVariant.withValues(alpha: 0.8),
-              width: 2,
+              color: accent ?? scheme.outlineVariant.withValues(alpha: 0.8),
+              width: width,
             ),
           ),
         ),
-        child: Padding(padding: const EdgeInsets.only(left: 6), child: child),
+        child: Padding(
+          padding: EdgeInsets.only(left: _barAndGap - width),
+          child: child,
+        ),
       ),
     );
   }

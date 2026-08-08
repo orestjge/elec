@@ -38,7 +38,7 @@ class PostItem extends StatelessWidget {
     this.isOwn = false,
     this.isThreadOwner = false,
     this.isReplyToOwn = false,
-    this.showReplyToOwnAccent = true,
+    this.showAccentBar = true,
     this.blurImages = false,
     this.linkPreviews = false,
     this.highlightQuery = '',
@@ -99,8 +99,12 @@ class PostItem extends StatelessWidget {
   /// 自分のレスへ `>>N` で返信しているレスか（自分宛のレス）。
   final bool isReplyToOwn;
 
-  /// 自分宛レスの左アクセント帯をこのレス内で描くか。
-  final bool showReplyToOwnAccent;
+  /// 左のアクセント帯（自分宛・検索の現在位置）をこのレス内で描くか。
+  ///
+  /// **外側に自前の帯を持つ入れ物では false にする。** ツリーの字下げ帯
+  /// （[ThreadTreeTier]）や会話シートの枠は、その帯自体に色を移して 1 本に
+  /// まとめる——2 本並べると数 px ずれた縦線が 2 本走ることになる。
+  final bool showAccentBar;
 
   /// この画像に「グロ」注意が付いており、サムネイルへモザイクを掛けるか。
   final bool blurImages;
@@ -181,7 +185,7 @@ class PostItem extends StatelessWidget {
     // 現在ジャンプ中の一致レスは、左のアクセント帯と薄い背景でひと目で分かる
     // ようにする（左パディングを帯の分だけ詰めて本文位置は揃える）。
     final showAccent =
-        isCurrentMatch || (showReplyToOwnAccent && isReplyToOwn && !isOwn);
+        showAccentBar && (isCurrentMatch || (isReplyToOwn && !isOwn));
 
     final content = Container(
       decoration: BoxDecoration(
@@ -194,11 +198,11 @@ class PostItem extends StatelessWidget {
             : Colors.transparent,
         // 自分宛のレスは左のアクセント帯で行ごと際立たせ、塗り背景の「自分」と
         // 形の違いで見分けられるようにする（現在の一致レスが最優先）。
-        border: isCurrentMatch
+        border: !showAccent
+            ? null
+            : isCurrentMatch
             ? Border(left: BorderSide(color: scheme.tertiary, width: 3))
-            : (showReplyToOwnAccent && isReplyToOwn && !isOwn)
-            ? Border(left: BorderSide(color: scheme.primary, width: 3))
-            : null,
+            : Border(left: BorderSide(color: scheme.primary, width: 3)),
       ),
       padding: EdgeInsets.fromLTRB(showAccent ? 13 : 16, 6, 16, 6),
       child: Column(

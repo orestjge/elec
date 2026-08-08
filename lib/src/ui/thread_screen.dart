@@ -2399,12 +2399,25 @@ class _ThreadScreenState extends State<ThreadScreen>
                       ),
                     );
                   }
+                  // 目印（自分宛・検索の現在位置）は字下げ帯の色に移す。深さ 0
+                  // には字下げ帯が無いので、そこだけはレス側に描かせる。
+                  final isMatch = item.number == currentMatchNumber;
+                  final isToOwn =
+                      _isReplyToOwnPost(item) &&
+                      !_history.isOwnPost(widget.threadKey, item.number);
+                  final scheme = Theme.of(context).colorScheme;
+                  final accent = isMatch
+                      ? scheme.tertiary
+                      : isToOwn
+                      ? scheme.primary
+                      : null;
                   // 字下げ帯は行の持ち物なので、スワイプはツリーの外側から掛ける。
                   // PostItem だけを包むと本文が自分の帯の下から抜け出す。
                   return SwipeToReply(
                     onReply: () => _reply(item.number),
                     child: ThreadTreeTier(
                       depth: row.depth,
+                      accent: row.depth > 0 ? accent : null,
                       child: PostItem(
                         res: item,
                         idCount: idCounts[item.id] ?? 1,
@@ -2428,6 +2441,7 @@ class _ThreadScreenState extends State<ThreadScreen>
                         ),
                         isThreadOwner: _isThreadOwnerPost(item, threadOwnerId),
                         isReplyToOwn: _isReplyToOwnPost(item),
+                        showAccentBar: row.depth <= 0,
                         blurImages: guroMasked.contains(item.number),
                         linkPreviews: _view.linkPreviews,
                         highlightQuery: searchQuery,
@@ -3213,7 +3227,7 @@ class _ConversationSheetState extends State<_ConversationSheet> {
                               isOwn: widget.isOwnPost(entry.res.number),
                               isThreadOwner: widget.isThreadOwner(entry.res),
                               isReplyToOwn: widget.isReplyToOwn(entry.res),
-                              showReplyToOwnAccent: false,
+                              showAccentBar: false,
                               blurImages: widget.guroMasked.contains(
                                 entry.res.number,
                               ),
