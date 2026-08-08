@@ -50,6 +50,26 @@ class MapFetcher implements HttpFetcher {
       const FetchResponse(statusCode: 404, bodyBytes: []);
 }
 
+/// 2 回目以降の取得を [gate] で止められる（＝通信中の見た目を作れる）フェイク。
+class GatedFetcher implements HttpFetcher {
+  GatedFetcher(this._body);
+  final List<int> _body;
+  int calls = 0;
+  Completer<void>? gate;
+
+  @override
+  Future<FetchResponse> get(
+    Uri url, {
+    Map<String, String> headers = const {},
+  }) async {
+    calls++;
+    if (calls > 1) {
+      await (gate = Completer<void>()).future;
+    }
+    return ok(_body);
+  }
+}
+
 class PendingFetcher implements HttpFetcher {
   final completer = Completer<FetchResponse>();
 
@@ -500,6 +520,25 @@ void main() {
 
     expect(f.calls, 2);
     expect(find.textContaining('あとから来た', findRichText: true), findsOneWidget);
+  });
+
+  testWidgets('取得中の表示で本文を上下に動かさない', (tester) async {
+    final f = GatedFetcher([...res1, ...res2]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+    final before = tester.getRect(posts(1));
+
+    await tester.pump(const Duration(seconds: 5)); // ポーリング開始
+    await tester.pump();
+
+    // 取得中の細い線は AppBar に重ねて出す。本文の位置は変わらない。
+    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+    expect(tester.getRect(posts(1)), before);
+
+    f.gate!.complete();
+    await tester.pumpAndSettle();
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+    expect(tester.getRect(posts(1)), before);
   });
 
   testWidgets('ID タップで同一 ID のレス一覧シートが出る', (tester) async {

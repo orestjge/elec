@@ -2231,11 +2231,12 @@ class _ThreadScreenState extends State<ThreadScreen>
                   ),
                 ),
               ),
-        // 検索中はポーリングのインジケータで AppBar の高さ・構造を毎回変えない。
-        // 5秒ごとの再構築で検索欄がちらつく・IME を妨げるのを避ける。
-        bottom: _polling && !_searching
-            ? const PreferredSize(
-                preferredSize: Size.fromHeight(2),
+        // 取得中の細い線は AppBar の下端に**重ねて**出す。bottom に置くと出て
+        // いる間だけ AppBar が 2px 高くなり、本文がそのぶん下がって戻る＝
+        // ポーリングのたびにレスが上下に揺れる。
+        flexibleSpace: _polling
+            ? const Align(
+                alignment: Alignment.bottomCenter,
                 child: LinearProgressIndicator(minHeight: 2),
               )
             : null,
