@@ -131,6 +131,26 @@ void main() {
     // 5 の指し先（1）は画面のずっと上なので、手前に薄く再掲する。
     final quote = tester.widget<QuotedResRow>(find.byType(QuotedResRow));
     expect(quote.res.number, 1);
+    // 番号は裸で出す（`>>1` だとこの行が 1 への返信に見えてしまう）。
+    expect(
+      find.descendant(of: find.byType(QuotedResRow), matching: find.text('1')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byType(QuotedResRow),
+        matching: find.text('>>1'),
+      ),
+      findsNothing,
+    );
+    // いつのレスへの返信かも分かるよう、日時を添える（過去の日付なので日付付き）。
+    expect(
+      find.descendant(
+        of: find.byType(QuotedResRow),
+        matching: find.text('11/03 02:14'),
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets('開いたあとに来たレスはツリーへ挿さず末尾に積む', (tester) async {

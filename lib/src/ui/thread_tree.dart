@@ -17,7 +17,9 @@ library;
 import 'package:edge_core/edge_core.dart';
 import 'package:flutter/material.dart';
 
+import 'format.dart';
 import 'id_icon.dart';
+import 'now_ticker.dart';
 
 /// レス一覧の 1 行。番号順表示では [depth] 0 の行が並ぶだけになる。
 class ThreadTreeRow {
@@ -56,10 +58,7 @@ List<ThreadTreeRow> flatThreadRows(List<Res> res) => [
 /// 親は **本文で最初に指している既存の若いレス**（`>>5 >>7` なら 5）。番号が
 /// 若い方へしか繋がないので循環しない。指し先が無い・自分より新しい番号しか
 /// 指していないレスは根になる。
-ThreadTreeLayout layOutThreadTree(
-  List<Res> res, {
-  required int settledCount,
-}) {
+ThreadTreeLayout layOutThreadTree(List<Res> res, {required int settledCount}) {
   final byNumber = {for (final r in res) r.number: r};
   final parentOf = <int, int>{};
   for (final r in res) {
@@ -199,6 +198,22 @@ String resExcerpt(Res res) => res.isAbone
     ? 'あぼーん'
     : htmlToText(res.body).replaceAll(RegExp(r'\s+'), ' ').trim();
 
+/// 引用行に添える日時。24 時間以内なら「たった今 / n分前 / n時間前」、それより
+/// 古ければ `MM/DD HH:MM`。日時の分からないレス（あぼーん・1001）では空。
+///
+/// 古い側で日付まで出すのはヘッダ（HH:MM だけ）と違う扱いだが、引用先は画面の
+/// ずっと上＝別の日のことも多く、時刻だけでは「いつの話か」が分からないため。
+/// [now] は試験用。
+String quotedResTime(Res res, {DateTime? now}) {
+  final relative = relativeResTime(res.dateTime, now: now);
+  if (relative != null) return relative;
+  final m = RegExp(
+    r'(\d{4})/(\d{2})/(\d{2}).*?(\d{2}:\d{2})',
+  ).firstMatch(res.dateText);
+  if (m == null) return '';
+  return '${m.group(2)}/${m.group(3)} ${m.group(4)}';
+}
+
 /// 新着レスの手前に薄く再掲する返信先。
 ///
 /// 本体はツリー側（画面のずっと上）にあって見えないので、番号と本文の頭だけを
@@ -215,6 +230,7 @@ class QuotedResRow extends StatelessWidget {
     final scheme = theme.colorScheme;
     final dim = scheme.onSurfaceVariant.withValues(alpha: 0.7);
     final excerpt = resExcerpt(res);
+    final time = quotedResTime(res);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
       child: InkWell(
@@ -236,8 +252,10 @@ class QuotedResRow extends StatelessWidget {
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  // 番号は `>>N` ではなく裸で出す。この行は返信先そのものなので、
+                  // `>>` を付けるとこの行が N への返信に見えてしまう。
                   Text(
-                    '>>${res.number}',
+                    '${res.number}',
                     style: theme.textTheme.labelSmall?.copyWith(
                       color: dim,
                       fontWeight: FontWeight.w600,
@@ -250,6 +268,20 @@ class QuotedResRow extends StatelessWidget {
                     Semantics(
                       label: 'ID:${res.id}',
                       child: IdIcon(id: res.id!, size: 14),
+                    ),
+                  ],
+                  // いつのレスへの返信かは、それが前の日の話かどうかで意味が
+                  // 変わる。引用先は画面のずっと上＝時間も離れていることが多い
+                  // ので、ヘッダの時刻（HH:MM のみ）より情報を足して出す。
+                  if (time.isNotEmpty) ...[
+                    const SizedBox(width: 6),
+                    LiveResTime(
+                      when: res.dateTime,
+                      text: (now) => quotedResTime(res, now: now),
+                      builder: (context, text) => Text(
+                        text,
+                        style: theme.textTheme.labelSmall?.copyWith(color: dim),
+                      ),
                     ),
                   ],
                 ],

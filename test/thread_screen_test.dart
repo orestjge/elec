@@ -211,8 +211,9 @@ void main() {
     await swipeToReply(tester, posts(1));
 
     expect(find.text('>>1\n'), findsOneWidget); // 入力欄に反映
-    // 誰への返信を書いているかが入力欄の上に出る（番号＋本文の頭）。
-    expect(inReplyTargetBar('>>1'), findsOneWidget);
+    // 誰への返信を書いているかが入力欄の上に出る（番号＋本文の頭）。番号は
+    // その行が指すレスの番号なので、`>>` は付けずに裸で出す。
+    expect(inReplyTargetBar('1'), findsOneWidget);
     expect(inReplyTargetBar('最初のレス'), findsOneWidget);
   });
 
@@ -227,8 +228,8 @@ void main() {
     await tester.enterText(composer, '>>2 そうだね');
     await tester.pump();
 
-    expect(inReplyTargetBar('>>2'), findsOneWidget);
-    await tester.tap(inReplyTargetBar('>>2'));
+    expect(inReplyTargetBar('2'), findsOneWidget);
+    await tester.tap(inReplyTargetBar('2'));
     await tester.pumpAndSettle();
 
     expect(find.textContaining('会話 #2'), findsOneWidget);
@@ -247,8 +248,8 @@ void main() {
     );
     await tester.pump();
 
-    expect(inReplyTargetBar('>>1'), findsOneWidget);
-    expect(inReplyTargetBar('>>2'), findsOneWidget);
+    expect(inReplyTargetBar('1'), findsOneWidget);
+    expect(inReplyTargetBar('2'), findsOneWidget);
     // それぞれの行に本文の頭が付く。
     expect(inReplyTargetBar('最初のレス'), findsOneWidget);
     expect(inReplyTargetBar('>>1 同じIDの2つ目'), findsOneWidget);
@@ -271,10 +272,10 @@ void main() {
     await tester.pump();
 
     // 頭の 3 件は本文付きの行のまま。4 件目は出さず、件数だけ添える。
-    expect(inReplyTargetBar('>>1'), findsOneWidget);
+    expect(inReplyTargetBar('1'), findsOneWidget);
     expect(inReplyTargetBar('レス1'), findsOneWidget);
-    expect(inReplyTargetBar('>>3'), findsOneWidget);
-    expect(inReplyTargetBar('>>4'), findsNothing);
+    expect(inReplyTargetBar('3'), findsOneWidget);
+    expect(inReplyTargetBar('4'), findsNothing);
     expect(inReplyTargetBar('レス4'), findsNothing);
     expect(inReplyTargetBar('他1件に返信'), findsOneWidget);
   });

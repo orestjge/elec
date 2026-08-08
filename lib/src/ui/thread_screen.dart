@@ -3203,7 +3203,9 @@ class _ReplyTargetBar extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 2),
         child: Text(
-          '>>${target.number}',
+          // 各行は返信先のレスそのもの（番号＋本文の頭）なので、番号は裸で出す。
+          // `>>N` と書くと、この行が N への返信に見えてしまう。
+          '${target.number}',
           style: theme.textTheme.labelSmall?.copyWith(
             color: scheme.primary,
             fontWeight: FontWeight.w700,

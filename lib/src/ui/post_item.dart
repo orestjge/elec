@@ -8,7 +8,9 @@ import 'package:flutter/services.dart';
 
 import '../net/thread_link.dart';
 import 'mini_player.dart';
+import 'format.dart';
 import 'id_color.dart';
+import 'now_ticker.dart';
 import 'id_icon.dart';
 import 'image_urls.dart';
 import 'link_card.dart';
@@ -878,12 +880,16 @@ class _OwnChip extends StatelessWidget {
   }
 }
 
-/// レス時刻。既定は HH:MM のみ。タップでコンマ以下・日付まで含む完全な
-/// 日時をスナックバーに出す。
+/// レス時刻。24 時間以内は「たった今 / n分前 / n時間前」、それより古ければ
+/// HH:MM。タップでコンマ以下・日付まで含む完全な日時をその場に出す。
 ///
-/// 秒を落とすのは、ヘッダの右端で幅を 1 文字分でも空けるため（左の名前・ID の
-/// 幅がその分増え、ID の位置が揃いやすくなる）。秒が要る場面（連投の間隔を見る
-/// など）はタップで完全な日時が出るので、情報自体は失われない。
+/// 直近を相対にするのは、読んでいる最中に効く情報が「何時に書かれたか」より
+/// 「どれくらい前か」だから。1 日以上前は逆で、「3日前」が並ぶより時刻の方が
+/// 位置を掴めるので絶対表記に戻す。
+///
+/// 絶対表記で秒を落とすのは、ヘッダの右端で幅を 1 文字分でも空けるため（左の
+/// 名前・ID の幅がその分増え、ID の位置が揃いやすくなる）。秒が要る場面（連投の
+/// 間隔を見るなど）はタップで完全な日時が出るので、情報自体は失われない。
 class _TimeLabel extends StatelessWidget {
   const _TimeLabel({required this.res});
   final Res res;
@@ -896,9 +902,13 @@ class _TimeLabel extends StatelessWidget {
       leadingDistribution: TextLeadingDistribution.even,
     );
     final full = res.dateText.trim();
-    final label = Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-      child: Text(_short(res), style: style),
+    final label = LiveResTime(
+      when: res.dateTime,
+      text: (now) => relativeResTime(res.dateTime, now: now) ?? _short(res),
+      builder: (context, text) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+        child: Text(text, style: style),
+      ),
     );
     if (full.isEmpty) return label;
     // タップ／ホバーでコンマ以下・日付まで含む完全な日時をその場に出す。画面下の
