@@ -140,14 +140,45 @@ void main() {
     expect(find.byType(IdIcon), findsOneWidget);
   });
 
+  testWidgets('`.` や `/` で始まる・終わる ID もまるごと拾う', (tester) async {
+    final tapped = <String>[];
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ResBody(
+            text:
+                '24 名無し 2026/08/08(土) 00:00:00.000 ID:.fNwf8r5\n'
+                '25 名無し 2026/08/08(土) 00:00:01.000 ID:0.fNwf8.\n'
+                '26 名無し 2026/08/08(土) 00:00:02.000 ID:/9Jh576/',
+            onTapRes: (_) {},
+            onTapUrl: (_) {},
+            onTapId: tapped.add,
+          ),
+        ),
+      ),
+    );
+
+    final icons = tester
+        .widgetList<IdIcon>(find.byType(IdIcon))
+        .map((i) => i.id)
+        .toList();
+    expect(icons, ['.fNwf8r5', '0.fNwf8.', '/9Jh576/']);
+
+    await tester.tap(find.byType(IdIcon).first);
+    expect(tapped, ['.fNwf8r5']);
+  });
+
   testWidgets('ID らしくない ID: 表記は加工しない', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
           body: ResBody(
-            // 短すぎるもの、英数字に続くもの、URL の一部。
+            // 短すぎるもの、英数字に続くもの、英数字を含まないもの、
+            // ID に使わない字を含むもの、URL の一部。
             text:
-                'ID:me と GRID:X9Jh576dp と\n'
+                'ID:me と GRID:X9Jh576dp と ID:...... と\n'
+                'ID:non-existent と\n'
                 'https://example.com/x?ID=X9Jh576dp',
             onTapRes: (_) {},
             onTapUrl: (_) {},
