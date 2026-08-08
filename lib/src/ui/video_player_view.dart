@@ -308,7 +308,12 @@ class _VideoPlayerViewState extends State<VideoPlayerView> {
                         child: SafeArea(
                           bottom: false,
                           child: Padding(
-                            padding: const EdgeInsets.fromLTRB(4, 4, 4, 24),
+                            padding: const EdgeInsets.fromLTRB(
+                              4,
+                              4,
+                              4,
+                              TopScrim.fadeTail,
+                            ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [

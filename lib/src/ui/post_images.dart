@@ -1457,8 +1457,8 @@ class _MediaViewerViewState extends State<MediaViewerView> {
                           ],
                         ),
                         // 溶けきるための余地。ここまで暗幕は伸びるが、絵の上に
-                        // 乗るものは無い。
-                        const SizedBox(height: 28),
+                        // 乗るものは無い（指も素通りする）。
+                        const SizedBox(height: TopScrim.fadeTail),
                       ],
                     ),
                   ),
