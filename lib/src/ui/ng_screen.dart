@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../net/ng_store.dart';
+import 'format.dart';
 
 /// NG ワード追加ダイアログを開く。追加されたら [NgWord]、取り消しなら null。
 /// 設定画面とレスのメニューから共用する。
@@ -27,6 +28,7 @@ class NgScreen extends StatelessWidget {
           final words = store.words;
           final ids = store.ids;
           final creators = store.creators;
+          final images = store.images;
           return ListView(
             children: [
               _SectionHeader(title: 'NGワード', onAdd: () => _addWord(context)),
@@ -89,6 +91,17 @@ class NgScreen extends StatelessWidget {
                       onPressed: () => store.removeCreator(metadent),
                     ),
                   ),
+              const Divider(height: 1),
+              // 手では足せない（中身の指紋で見分けるため）ので「追加」は出さない。
+              const _SectionHeader(title: 'NG画像'),
+              if (images.isEmpty)
+                const _EmptyHint(
+                  '画像を長押し、または全画面表示の「この画像をNG」から追加します。'
+                  'URL が違っても、同じ画像・貼り直しで少し変わった画像を隠します',
+                )
+              else
+                for (final image in images)
+                  _NgImageTile(image: image, store: store),
               const SizedBox(height: 24),
             ],
           );
@@ -119,10 +132,64 @@ class NgScreen extends StatelessWidget {
   }
 }
 
+/// NG 画像 1 件。見本が無いと、どれを消せばよいか分からないので添える。
+class _NgImageTile extends StatelessWidget {
+  const _NgImageTile({required this.image, required this.store});
+
+  final NgImage image;
+  final NgStore store;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final thumbnail = image.thumbnail;
+    return ListTile(
+      leading: SizedBox(
+        width: 44,
+        height: 44,
+        child: thumbnail == null
+            ? Icon(Icons.hide_image_outlined, color: scheme.onSurfaceVariant)
+            : ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: Image.memory(
+                  thumbnail,
+                  fit: BoxFit.cover,
+                  gaplessPlayback: true,
+                  errorBuilder: (context, _, _) => Icon(
+                    Icons.hide_image_outlined,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+      ),
+      title: Text(
+        image.addedAt == null
+            ? '登録済みの画像'
+            : '${formatAge(image.addedAt!.toUtc())}に追加',
+      ),
+      subtitle: Text(
+        image.dhash == null
+            // 起伏の乏しい画像。近似で拾うと無関係な画像まで巻き込むので、
+            // 完全一致だけで判定していることを出しておく。
+            ? '完全一致のみ  ${image.sha256.substring(0, 12)}'
+            : '同じ・似た画像  ${image.sha256.substring(0, 12)}',
+        style: TextStyle(color: scheme.onSurfaceVariant),
+      ),
+      trailing: IconButton(
+        icon: const Icon(Icons.delete_outline),
+        tooltip: '削除',
+        onPressed: () => store.removeImage(image),
+      ),
+    );
+  }
+}
+
 class _SectionHeader extends StatelessWidget {
-  const _SectionHeader({required this.title, required this.onAdd});
+  const _SectionHeader({required this.title, this.onAdd});
   final String title;
-  final VoidCallback onAdd;
+
+  /// null なら「追加」を出さない（画像のように手で足せないもの）。
+  final VoidCallback? onAdd;
 
   @override
   Widget build(BuildContext context) {
@@ -139,11 +206,12 @@ class _SectionHeader extends StatelessWidget {
             ),
           ),
           const Spacer(),
-          TextButton.icon(
-            onPressed: onAdd,
-            icon: const Icon(Icons.add, size: 18),
-            label: const Text('追加'),
-          ),
+          if (onAdd case final add?)
+            TextButton.icon(
+              onPressed: add,
+              icon: const Icon(Icons.add, size: 18),
+              label: const Text('追加'),
+            ),
         ],
       ),
     );

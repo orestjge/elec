@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -6,6 +7,8 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 import '../net/auth_launcher.dart';
+import '../net/image_fingerprint.dart';
+import '../net/ng_store.dart';
 import 'audio_player_widget.dart';
 import 'embed_urls.dart';
 import 'format.dart';
@@ -39,6 +42,120 @@ void openImageViewer(
           FadeTransition(opacity: animation, child: child),
     ),
   );
+}
+
+/// [url] の画像を NG に登録する。登録できたら、その内容を返す（取り消し用）。
+///
+/// 指紋は本文からしか採れない。表示済みの画像なら本文は手元（メモリかディスク）
+/// にあるので、通信はしない。手元に無ければ何もできないので null を返す。
+Future<NgImage?> addNgImage(Uri url) async {
+  final bytes = await RemoteImage.cachedBytes(url);
+  if (bytes == null || bytes.isEmpty) return null;
+  final fingerprint =
+      ImageFingerprintIndex.shared.get(url) ??
+      await computeImageFingerprint(bytes);
+  if (fingerprint == null) return null;
+  ImageFingerprintIndex.shared.put(url, fingerprint);
+  final image = NgImage.from(
+    fingerprint,
+    thumbnail: await makeNgThumbnail(bytes),
+  );
+  await NgStore.shared.addImage(image);
+  _evictDecodedImages();
+  return image;
+}
+
+/// NG を解除して、伏せた画像を出し直す。
+Future<void> removeNgImage(NgImage image) async {
+  await NgStore.shared.removeImage(image);
+  _evictDecodedImages();
+}
+
+/// 確認してから NG に登録する。登録できたら true。
+///
+/// 本文が手元に無い（まだ読み込めていない）画像は NG にできない。指紋を採れない
+/// ので、黙って何もしないのではなく理由を出す。
+Future<bool> confirmAddNgImage(BuildContext context, Uri url) async {
+  final agreed = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('この画像をNG'),
+      content: const Text('同じ画像は、次から別の URL で貼られても隠します。貼り直しで多少変わった画像も隠します。'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('キャンセル'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('NGにする'),
+        ),
+      ],
+    ),
+  );
+  if (agreed != true || !context.mounted) return false;
+
+  final messenger = ScaffoldMessenger.maybeOf(context);
+  final image = await addNgImage(url);
+  if (image == null) {
+    messenger?.showSnackBar(
+      const SnackBar(content: Text('まだ読み込めていない画像はNGにできません')),
+    );
+    return false;
+  }
+  messenger?.showSnackBar(
+    SnackBar(
+      content: const Text('この画像をNGにしました'),
+      // 操作の付いた通知は既定で出しっぱなしになる（[SnackBar.persist] は
+      // action があると true）。取り消しは「今すぐ気が変わったら」のためのもので、
+      // 押さなかった人の画面に居座らせる意味は無い。他の通知と同じく時間で消す。
+      persist: false,
+      // 消えるのを待たずに退けられるようにする。取り消す気は無いのに、
+      // 見たい画像の上に数秒居座られるのは鬱陶しい。
+      showCloseIcon: true,
+      action: SnackBarAction(
+        label: '取り消し',
+        onPressed: () => unawaited(removeNgImage(image)),
+      ),
+    ),
+  );
+  return true;
+}
+
+/// 確認してから NG を解除する。
+Future<void> confirmRemoveNgImage(BuildContext context, Uri url) async {
+  final image = NgStore.shared.ngImageForUrl(url);
+  if (image == null) return;
+  final agreed = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('この画像のNGを解除'),
+      content: const Text('隠していた画像をまた表示します。'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('キャンセル'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('解除'),
+        ),
+      ],
+    ),
+  );
+  if (agreed == true) await removeNgImage(image);
+}
+
+/// デコード済みの画像を捨てて、NG 判定を掛け直させる。
+///
+/// [ImageCache] は URL と目標サイズを鍵に**デコード済みの絵**を持っている。
+/// NG にした瞬間はそれが残っているので、捨てないと画面に出たままになる。
+/// 利用者が明示的に NG にしたときだけ通るので、丸ごと捨ててよい（本文は
+/// 手元に残っているから、出し直しに通信は要らない）。
+void _evictDecodedImages() {
+  PaintingBinding.instance.imageCache
+    ..clear()
+    ..clearLiveImages();
 }
 
 /// レス本文に含まれる画像 URL のサムネイル群。タップで全画面表示。
@@ -132,6 +249,8 @@ class PostImages extends StatelessWidget {
                       viewerUrls: viewerUrls ?? urls,
                       size: thumbSize,
                       blurred: blurImages,
+                      // 入力欄の添付プレビューでは NG の出番が無い。
+                      canNg: onRemove == null,
                       onOpenExternally: onOpenImageExternally,
                     ),
                   ),
@@ -204,6 +323,7 @@ class _Thumb extends StatefulWidget {
     required this.viewerUrls,
     this.size = 160,
     this.blurred = false,
+    this.canNg = true,
     this.onOpenExternally,
   });
   final Uri url;
@@ -214,6 +334,9 @@ class _Thumb extends StatefulWidget {
 
   /// 「グロ」注意が付いた画像で、初期表示をモザイクにするか。
   final bool blurred;
+
+  /// 長押しで NG に登録できるか。
+  final bool canNg;
 
   /// 全画面ビューアの「ブラウザで開く」の実処理（[PostImages.onOpenImageExternally]）。
   final ValueChanged<Uri>? onOpenExternally;
@@ -250,9 +373,23 @@ class _ThumbState extends State<_Thumb> {
   /// 「読み込む」を選んだ。以後この URL は上限を上げて読む。
   void _load() => setState(() => ImageLoadPolicy.allow(_url));
 
+  Future<void> _confirmNg() => confirmAddNgImage(context, _url);
+
   @override
   Widget build(BuildContext context) {
+    // NG 画像の増減で伏せ札に切り替わる（ビューア側で NG にした直後も含む）。
+    return ListenableBuilder(
+      listenable: NgStore.shared,
+      builder: (context, _) => _buildThumb(context),
+    );
+  }
+
+  Widget _buildThumb(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    // 指紋を覚えている URL なら、通信も描画もせずに伏せ札を出す。
+    if (NgStore.shared.isNgImageUrl(_url)) {
+      return _NgThumb(size: widget.size, url: _url);
+    }
     // グロ指定があり、まだ解除していない間だけモザイクを掛ける。最初のタップは
     // 全画面を開かず解除に使い、不意にグロ画像を大きく表示しないようにする。
     final masked = widget.blurred && !_revealed;
@@ -261,6 +398,7 @@ class _ThumbState extends State<_Thumb> {
     final skipped = ImageLoadPolicy.skipsAutoLoad(_url);
     return GestureDetector(
       onTap: masked ? () => setState(() => _revealed = true) : _openViewer,
+      onLongPress: widget.canNg ? _confirmNg : null,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(10),
         child: Stack(
@@ -307,6 +445,11 @@ class _ThumbState extends State<_Thumb> {
                       bytes: error.bytes,
                       onLoad: _load,
                     );
+                  }
+                  // 中身を見て初めて NG と分かった。デコード前に弾いているので、
+                  // 絵は一度も出ていない。
+                  if (error is ImageNgException) {
+                    return _NgThumb(size: widget.size, url: _url);
                   }
                   return _Placeholder(
                     size: widget.size,
@@ -373,6 +516,56 @@ class _TooLargeThumb extends StatelessWidget {
                   color: scheme.primary,
                 ),
               ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// NG にした画像の代わりに出す伏せ札。タップで解除できる。
+class _NgThumb extends StatelessWidget {
+  const _NgThumb({required this.size, required this.url});
+
+  final double size;
+  final Uri url;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return GestureDetector(
+      // 全画面には開かない。伏せている画像を開けてしまっては意味がない。
+      onTap: () => unawaited(confirmRemoveNgImage(context, url)),
+      child: _Placeholder(
+        size: size,
+        color: scheme.surfaceContainerHighest,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.hide_image_outlined, color: scheme.onSurfaceVariant),
+              const SizedBox(height: 4),
+              Text(
+                'NG画像',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+              if (size >= 120) ...[
+                const SizedBox(height: 2),
+                Text(
+                  'タップで解除',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 11, color: scheme.primary),
+                ),
+              ],
             ],
           ),
         ),
@@ -825,6 +1018,13 @@ class _ImageViewerState extends State<_ImageViewer> {
     const SystemBrowserLauncher().open(_url);
   }
 
+  /// いま見ている画像を NG にする。伏せた画像を開いたままにしておく意味は
+  /// 無いので、登録できたらビューアを閉じる。
+  Future<void> _ngCurrent() async {
+    final added = await confirmAddNgImage(context, _url);
+    if (added && mounted) await Navigator.of(context).maybePop();
+  }
+
   Future<void> _close() async {
     final popped = await Navigator.of(context).maybePop();
     if (popped || !mounted) return;
@@ -995,6 +1195,11 @@ class _ImageViewerState extends State<_ImageViewer> {
           style: const TextStyle(fontSize: 14),
         ),
         actions: [
+          IconButton(
+            tooltip: 'この画像をNG',
+            onPressed: _ngCurrent,
+            icon: const Icon(Icons.hide_image_outlined),
+          ),
           IconButton(
             tooltip: 'ブラウザで開く',
             onPressed: _openExternally,
@@ -1210,13 +1415,15 @@ class _ViewerImageState extends State<_ViewerImage> {
                         color: Colors.white70,
                       ),
                     ),
-              errorBuilder: (context, error, stack) => const Center(
-                child: Icon(
-                  Icons.broken_image_outlined,
-                  color: Colors.white54,
-                  size: 64,
-                ),
-              ),
+              errorBuilder: (context, error, stack) => error is ImageNgException
+                  ? _NgImage(url: widget.url)
+                  : const Center(
+                      child: Icon(
+                        Icons.broken_image_outlined,
+                        color: Colors.white54,
+                        size: 64,
+                      ),
+                    ),
             ),
             // 画像より上に薄いレイヤーを重ね、タップだけを拾う。
             // ピンチ・パンは外側の InteractiveViewer に流れる。
@@ -1230,6 +1437,32 @@ class _ViewerImageState extends State<_ViewerImage> {
           ],
         );
       },
+    );
+  }
+}
+
+/// 全画面ビューアで、NG にした画像の代わりに出す案内。
+class _NgImage extends StatelessWidget {
+  const _NgImage({required this.url});
+
+  final Uri url;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.hide_image_outlined, color: Colors.white54, size: 64),
+          const SizedBox(height: 12),
+          const Text('NGにした画像です', style: TextStyle(color: Colors.white70)),
+          const SizedBox(height: 12),
+          FilledButton.tonal(
+            onPressed: () => unawaited(confirmRemoveNgImage(context, url)),
+            child: const Text('NGを解除'),
+          ),
+        ],
+      ),
     );
   }
 }

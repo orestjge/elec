@@ -26,6 +26,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
 import '../net/image_cache_store.dart';
+import '../net/image_fingerprint.dart';
+import '../net/ng_store.dart';
 
 /// これを超える画像は自動で読み込まない（利用者がタップしたら読む）。
 ///
@@ -53,6 +55,16 @@ class ImageTooLargeException implements Exception {
   @override
   String toString() =>
       'ImageTooLargeException($url, ${bytes ?? '?'} bytes exceeds limit)';
+}
+
+/// NG に登録された画像だった。表示側はこれを受けて伏せ札に差し替える。
+class ImageNgException implements Exception {
+  const ImageNgException(this.url);
+
+  final Uri url;
+
+  @override
+  String toString() => 'ImageNgException($url)';
 }
 
 /// 画像ごとの「大きさが分かったか」「利用者が読むと決めたか」をプロセス内で
@@ -222,6 +234,8 @@ class RemoteImage extends ImageProvider<RemoteImage> {
     ImageDecoderCallback decode,
   ) async {
     try {
+      // 指紋を覚えている URL なら、通信する前に弾ける。
+      if (NgStore.shared.isNgImageUrl(url)) throw ImageNgException(url);
       // 本文は 3 段で探す。メモリ（直前に見たもの）→ ディスク（前に見たもの）
       // → 通信。同じ URL を別の大きさで開き直すたびに落とすのは無駄なので。
       final bytes =
@@ -229,6 +243,9 @@ class RemoteImage extends ImageProvider<RemoteImage> {
           await _readFromDisk(url) ??
           await _fetch(chunkEvents);
       if (bytes.isEmpty) throw Exception('empty image: $url');
+      // 初めて見る URL は中身を見ないと分からない。デコードの前に調べるので、
+      // NG なら画面には一度も出ない。
+      if (await _isNgImage(bytes)) throw ImageNgException(url);
       final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
       return await decode(buffer, getTargetSize: _targetSize);
     } catch (_) {
@@ -240,6 +257,22 @@ class RemoteImage extends ImageProvider<RemoteImage> {
       unawaited(chunkEvents.close());
     }
   }
+
+  /// 本文の指紋を採って NG に当たるか調べる。採った指紋は URL に紐づけて
+  /// 覚えるので、同じ URL を次に見るときは通信の前に判断できる。
+  ///
+  /// NG 画像を 1 枚も登録していないなら何もしない（指紋を採る手間を掛けない）。
+  Future<bool> _isNgImage(Uint8List bytes) async {
+    final ng = NgStore.shared;
+    if (!ng.hasImages) return false;
+    final fingerprint = await ImageFingerprintIndex.shared.resolve(url, bytes);
+    return ng.isNgImage(fingerprint);
+  }
+
+  /// この URL の本文を、覚えていれば返す。NG 登録のように、表示とは別に中身が
+  /// 要るときに使う。通信はしない。
+  static Future<Uint8List?> cachedBytes(Uri url) async =>
+      _BytesCache.get(url) ?? await ImageCacheStore.shared.read(url);
 
   /// ディスクに覚えているものを読む。読めたらメモリ側にも載せる。
   Future<Uint8List?> _readFromDisk(Uri url) async {
