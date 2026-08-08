@@ -238,9 +238,7 @@ void main() {
     expect(seenOf('スレC'), ThreadSeen.fresh);
   });
 
-  testWidgets('新着・未読優先は 初めて見る → 新着レスあり → 既読 → スレタイだけ見た に並べる', (
-    tester,
-  ) async {
+  testWidgets('新着・未読優先は 初めて見る → 新着レスあり → 既読 → スレタイだけ見た に並べる', (tester) async {
     final history = ReadHistory(MemoryReadHistoryStorage());
     // 一覧で見たことがある＝初めて見るスレではない（4 だけが初めて見るスレ）。
     await history.markListed(['1', '2', '3', '5']);
@@ -605,6 +603,91 @@ void main() {
     expect(history.isOwnThread('2'), isTrue);
     expect(find.text('立てたスレ'), findsOneWidget);
     expect(find.text('自分'), findsOneWidget);
+  });
+
+  testWidgets('スレ立て直後の subject に載っていなくても、待って取り直しスレを開く', (tester) async {
+    final history = ReadHistory(MemoryReadHistoryStorage());
+    final fetcher = QueueFetcher([
+      subjectOk('1.dat<>既存スレ (10)\n', 'LM1'),
+      // 書き込み直後の強制更新。サーバ／CDN の反映が間に合わず、まだ載っていない。
+      subjectOk('1.dat<>既存スレ (10)\n', 'LM1'),
+      // 少し待って取り直すと出てくる。
+      subjectOk('2.dat<>立てたスレ (1)\n1.dat<>既存スレ (10)\n', 'LM2'),
+      datOk(datLine('名無し<><>2025/11/03(月) 02:14:51.907 ID:aaa<> 本文 <>立てたスレ')),
+    ]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadListScreen(
+          fetcher: fetcher,
+          pollInterval: const Duration(seconds: 60),
+          readHistory: history,
+          authStore: AuthStore(MemoryTokenStorage()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('スレを立てる'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).at(0), '立てたスレ');
+    await tester.enterText(find.byType(TextField).at(1), '本文');
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('new-thread-submit')));
+    // 待っている間はインジケータが回り続けるので pumpAndSettle は使えない。
+    await tester.pump();
+    await tester.pump();
+
+    // 1 回目の取得では見つからず、まだ自分のスレになっていない。
+    expect(history.isOwnThread('2'), isFalse);
+
+    // 待ち時間を進めると取り直して見つける。
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pumpAndSettle();
+
+    expect(history.isOwnThread('2'), isTrue);
+    expect(find.text('自分'), findsOneWidget);
+    // そのままスレ面へ移る（自動リダイレクト）。
+    expect(find.textContaining('本文', findRichText: true), findsOneWidget);
+  });
+
+  testWidgets('待ちきれず出てきたスレは、ポーリングが拾って知らせる', (tester) async {
+    final history = ReadHistory(MemoryReadHistoryStorage());
+    final old = subjectOk('1.dat<>既存スレ (10)\n', 'LM1');
+    final fetcher = QueueFetcher([
+      old, old, old, old, old, old,
+      // 待ちを打ち切った（合計 11 秒）あと、15 秒のポーリングでようやく出てくる。
+      subjectOk('2.dat<>立てたスレ (1)\n1.dat<>既存スレ (10)\n', 'LM2'),
+    ]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadListScreen(
+          fetcher: fetcher,
+          pollInterval: const Duration(seconds: 15),
+          readHistory: history,
+          authStore: AuthStore(MemoryTokenStorage()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('スレを立てる'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).at(0), '立てたスレ');
+    await tester.enterText(find.byType(TextField).at(1), '本文');
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('new-thread-submit')));
+    await tester.pump();
+    // 待ちを使い切っても見つからない。
+    await tester.pump(const Duration(seconds: 12));
+    expect(history.isOwnThread('2'), isFalse);
+
+    // 次のポーリングで出てきたら、自分のスレとして記録して知らせる。
+    await tester.pump(const Duration(seconds: 15));
+    await tester.pumpAndSettle();
+    expect(history.isOwnThread('2'), isTrue);
+    expect(find.text('立てたスレが一覧に出ました'), findsOneWidget);
   });
 
   testWidgets('タイトルにエンティティ化される文字があっても自分のスレと判定する', (tester) async {
