@@ -28,3 +28,17 @@ String formatAge(DateTime createdUtc, {DateTime? now}) {
   if (months < 12) return '$monthsヶ月前';
   return '${d.inDays ~/ 365}年前';
 }
+
+/// レス時刻の相対表記。24 時間以内なら [formatAge] と同じ「たった今 / n分前 /
+/// n時間前」、それより古い・時刻が分からないなら null。
+///
+/// 1 日以上前で切るのは、スレを遡ったときに「3日前」が並んでも位置を掴めない
+/// ため。そこから先は日付そのものの方が読めるので、絶対表記は呼び手に任せる。
+String? relativeResTime(DateTime? whenUtc, {DateTime? now}) {
+  if (whenUtc == null) return null;
+  final d = (now ?? DateTime.now()).toUtc().difference(whenUtc);
+  if (d.inHours >= 24) return null;
+  // 端末の時計が board より遅れていると差が負になる。formatAge が「たった今」に
+  // 丸めてくれるので、そのまま渡す。
+  return formatAge(whenUtc, now: now);
+}

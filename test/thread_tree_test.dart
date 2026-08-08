@@ -45,11 +45,7 @@ void main() {
     });
 
     test('複数を指すレスは最初の指し先にぶら下がる', () {
-      final res = [
-        post(1, 'OP'),
-        post(2, 'ふつう'),
-        post(3, '>>2 >>1 まとめて'),
-      ];
+      final res = [post(1, 'OP'), post(2, 'ふつう'), post(3, '>>2 >>1 まとめて')];
       expect(shape(layOutThreadTree(res, settledCount: 3).settled), [
         '1:0',
         '2:0',
@@ -162,13 +158,7 @@ void main() {
       ];
       final layout = layOutThreadTree(res, settledCount: 2);
       // 5 は先に来た 3 と同じ >>1 のまとまりへ。4 は別の引用行を持つ。
-      expect(shape(layout.arrivals), [
-        '1:0:引用',
-        '3:1',
-        '5:1',
-        '2:0:引用',
-        '4:1',
-      ]);
+      expect(shape(layout.arrivals), ['1:0:引用', '3:1', '5:1', '2:0:引用', '4:1']);
     });
 
     test('間に無関係な新着を挟んでも同じ引用先はまとめる', () {
@@ -194,6 +184,72 @@ void main() {
       final layout = layOutThreadTree(res, settledCount: 0);
       expect(layout.settled, isEmpty);
       expect(shape(layout.arrivals), ['1:0', '2:1']);
+    });
+  });
+
+  group('quotedResTime（引用行の日時）', () {
+    Res at(String dateText, {DateTime? dateTime}) => Res(
+      number: 1,
+      name: '名無し',
+      mail: '',
+      dateText: dateText,
+      dateTime: dateTime,
+      id: 'x',
+      beId: null,
+      body: '本文',
+      kind: ResKind.normal,
+      threadTitle: null,
+    );
+
+    // JST 2025/11/03 10:00 = UTC 01:00。
+    final now = DateTime.utc(2025, 11, 3, 1);
+
+    test('24 時間以内なら相対表記', () {
+      expect(
+        quotedResTime(
+          at(
+            '2025/11/03(月) 09:55:00.000',
+            dateTime: now.subtract(const Duration(minutes: 5)),
+          ),
+          now: now,
+        ),
+        '5分前',
+      );
+      expect(
+        quotedResTime(
+          at(
+            '2025/11/03(月) 07:00:00.000',
+            dateTime: now.subtract(const Duration(hours: 3)),
+          ),
+          now: now,
+        ),
+        '3時間前',
+      );
+    });
+
+    test('24 時間より前は日付＋時刻に戻す', () {
+      expect(
+        quotedResTime(
+          at(
+            '2025/11/02(日) 09:00:00.000',
+            dateTime: now.subtract(const Duration(hours: 25)),
+          ),
+          now: now,
+        ),
+        '11/02 09:00',
+      );
+    });
+
+    test('時刻をパースできなくても dat の表記から日付＋時刻を出す', () {
+      expect(
+        quotedResTime(at('2025/11/02(日) 23:59:00.000'), now: now),
+        '11/02 23:59',
+      );
+    });
+
+    test('日時の分からないレスでは空', () {
+      expect(quotedResTime(at(''), now: now), '');
+      expect(quotedResTime(at('Over 1000 Thread'), now: now), '');
     });
   });
 

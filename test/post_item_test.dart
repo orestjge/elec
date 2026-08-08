@@ -1,5 +1,6 @@
 import 'package:edge_core/edge_core.dart';
 import 'package:elec/src/ui/id_icon.dart';
+import 'package:elec/src/ui/now_ticker.dart';
 import 'package:elec/src/ui/post_images.dart';
 import 'package:elec/src/ui/post_item.dart';
 import 'package:elec/src/ui/res_body.dart';
@@ -201,6 +202,61 @@ void main() {
       find.textContaining('https://example.com/page.html', findRichText: true),
       findsOneWidget,
     );
+  });
+
+  group('レス時刻', () {
+    Res at(DateTime? whenUtc) => Res(
+      number: 1,
+      name: '名無し',
+      mail: '',
+      dateText: '2025/11/03(月) 02:14:51.907',
+      dateTime: whenUtc,
+      id: 'aaa',
+      beId: null,
+      body: '本文',
+      kind: ResKind.normal,
+      threadTitle: null,
+    );
+
+    Widget item(Res res) =>
+        wrap(PostItem(res: res, idCount: 1, idOrdinal: 1, onTapId: (_) {}));
+
+    // 秒の端数で「4分前」に転ばないよう、境界から離した時刻で見る。
+    const fiveMinutesAgo = Duration(minutes: 5, seconds: 30);
+
+    testWidgets('直近のレスは「n分前」で出る', (tester) async {
+      await tester.pumpWidget(
+        item(at(DateTime.now().toUtc().subtract(fiveMinutesAgo))),
+      );
+
+      expect(find.text('5分前'), findsOneWidget);
+      expect(find.text('02:14'), findsNothing);
+    });
+
+    testWidgets('共有の時計が進めば、操作しなくても表示が進む', (tester) async {
+      final now = DateTime.now();
+      await tester.pumpWidget(item(at(now.toUtc().subtract(fiveMinutesAgo))));
+      expect(find.text('5分前'), findsOneWidget);
+
+      // レス側は何も変わらないまま、時計だけが 1 分進んだとき。
+      nowTicker.value = now.add(const Duration(minutes: 1));
+      await tester.pump();
+
+      expect(find.text('6分前'), findsOneWidget);
+    });
+
+    testWidgets('1 日以上前のレスは時刻表記のまま', (tester) async {
+      final res = at(DateTime.now().toUtc().subtract(const Duration(days: 2)));
+      await tester.pumpWidget(item(res));
+
+      expect(find.text('02:14'), findsOneWidget);
+    });
+
+    testWidgets('時刻の分からないレスでも dat の表記から時刻を出す', (tester) async {
+      await tester.pumpWidget(item(at(null)));
+
+      expect(find.text('02:14'), findsOneWidget);
+    });
   });
 
   testWidgets('アイコンをタップすると ID が返る', (tester) async {
