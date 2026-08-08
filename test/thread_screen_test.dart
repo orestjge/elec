@@ -6,6 +6,7 @@ import 'package:elec/src/net/ng_store.dart';
 import 'package:elec/src/net/read_history.dart';
 import 'package:elec/src/net/thread_link.dart';
 import 'package:elec/src/ui/id_icon.dart';
+import 'package:elec/src/ui/mini_player.dart';
 import 'package:elec/src/ui/post_images.dart';
 import 'package:elec/src/ui/post_item.dart';
 import 'package:elec/src/ui/thread_map.dart';
@@ -70,6 +71,10 @@ FetchResponse redirect(String location) => FetchResponse(
 );
 
 void main() {
+  // 全画面ビューアは 1 つしかない（[MiniPlayerController.shared]）ので、
+  // 開きっぱなしを次のテストへ持ち越さない。
+  tearDown(MiniPlayerController.shared.debugReset);
+
   final res1 = datLine(
     '名無し<><>2025/11/03(月) 02:14:51.907 ID:aaa<> 最初のレス <>スレタイ',
   );
@@ -82,6 +87,9 @@ void main() {
   final over1000 = datLine('1001<><>Over 1000 Thread<>このスレッドは1000を超えました。<>');
 
   Widget app(HttpFetcher f, {String? defaultName}) => MaterialApp(
+    // 全画面ビューアは Navigator の外（この層）に載る（`mini_player.dart`）。
+    builder: (context, child) =>
+        MiniPlayerHost(child: child ?? const SizedBox.shrink()),
     home: ThreadScreen(
       threadKey: '1762103691',
       threadTitle: 'テストスレ',
@@ -774,6 +782,9 @@ void main() {
     await tester.tap(thumbs.last);
     await tester.pumpAndSettle();
 
+    // 題名バーは既定では出さない（絵をタップすると一式出る）。
+    await tester.tap(find.byType(PageView));
+    await tester.pumpAndSettle();
     expect(find.text('2/2  b.png'), findsOneWidget);
   });
 

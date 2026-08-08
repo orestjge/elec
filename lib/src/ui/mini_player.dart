@@ -22,7 +22,7 @@ import 'package:flutter/material.dart';
 import '../net/auth_launcher.dart';
 import 'embed_player.dart';
 import 'embed_urls.dart';
-import 'video_player_view.dart';
+import 'post_images.dart';
 
 /// プレーヤーの見せ方。
 enum MiniPlayerMode { fullscreen, mini }
@@ -42,11 +42,14 @@ class EmbedMedia extends MiniPlayerMedia {
   final EmbedVideo video;
 }
 
-/// mp4 等の直リンク（`video_player` 再生）。
-class FileMedia extends MiniPlayerMedia {
-  const FileMedia(this.url, {super.onOpenExternally});
+/// 画像と動画（mp4 等の直リンク）をひと続きに送る並び。
+///
+/// 画像だけ・動画 1 本だけもこの形で扱う。全画面ビューアと小窓は同じ
+/// [MediaViewerView] で、見せ方（大きさ）が変わるだけ。
+class SequenceMedia extends MiniPlayerMedia {
+  const SequenceMedia(this.items, {super.onOpenExternally});
 
-  final Uri url;
+  final List<ViewerMedia> items;
 }
 
 /// 再生中のメディアと見せ方を持つ。アプリに 1 つだけ（[shared]）。
@@ -61,6 +64,7 @@ class MiniPlayerController extends ChangeNotifier {
   MiniPlayerMedia? _media;
   MiniPlayerMode _mode = MiniPlayerMode.fullscreen;
   int _session = 0;
+  int _index = 0;
   Offset? _miniTopLeft;
 
   NavigatorState? _navigator;
@@ -68,6 +72,28 @@ class MiniPlayerController extends ChangeNotifier {
 
   MiniPlayerMedia? get media => _media;
   MiniPlayerMode get mode => _mode;
+
+  /// [SequenceMedia] のいま出しているページ。ビューアから知らせてもらう。
+  int get index => _index;
+
+  /// 送った先を知らせる。**組み直しはしない**（位置はビューアが持っている）。
+  /// ここで覚えるのは「小窓へ落とせるか」「戻るキーで終わりか」の判断のため。
+  void setIndex(int value) => _index = value;
+
+  /// いま出しているものを小窓に残せるか。**動画だけが対象**——静止画を小窓に
+  /// 残しても読む邪魔になるだけなので、画像のページでは終わりにする。
+  bool get canMinimize => switch (_media) {
+    null => false,
+    EmbedMedia() => true,
+    SequenceMedia(:final items) =>
+      _index < items.length && items[_index] is ViewerVideoMedia,
+  };
+
+  /// Navigator の外にいるビューアが、確認ダイアログを出すために借りる文脈。
+  BuildContext? get dialogContext {
+    final navigator = _navigator;
+    return navigator != null && navigator.mounted ? navigator.context : null;
+  }
 
   /// 再生ごとに増える通し番号。プレーヤーのウィジェット key に使い、**別の動画に
   /// 差し替わったときだけ**作り直されるようにする（全画面⇔小窓では作り直さない）。
@@ -79,9 +105,14 @@ class MiniPlayerController extends ChangeNotifier {
   bool get isPlaying => _media != null;
 
   /// [media] を全画面で開く。すでに何か流れていれば差し替える。
-  void open(BuildContext context, MiniPlayerMedia media) {
+  void open(
+    BuildContext context,
+    MiniPlayerMedia media, {
+    int initialIndex = 0,
+  }) {
     _media = media;
     _session++;
+    _index = initialIndex;
     _mode = MiniPlayerMode.fullscreen;
     _miniTopLeft = null;
     notifyListeners();
@@ -90,6 +121,7 @@ class MiniPlayerController extends ChangeNotifier {
 
   /// 小窓へ落とす（再生は続く）。
   void minimize() {
+    if (!canMinimize) return;
     if (_media == null || _mode == MiniPlayerMode.mini) return;
     _mode = MiniPlayerMode.mini;
     _removeBackdrop();
@@ -112,6 +144,7 @@ class MiniPlayerController extends ChangeNotifier {
     if (_media == null) return;
     _media = null;
     _mode = MiniPlayerMode.fullscreen;
+    _index = 0;
     _miniTopLeft = null;
     _removeBackdrop();
     notifyListeners();
@@ -142,7 +175,12 @@ class MiniPlayerController extends ChangeNotifier {
       // _route を先に null にしてあるので素通りする。
       if (!identical(_route, route)) return;
       _route = null;
-      minimize();
+      // 動画は小窓へ落として流したまま読みに戻れる。画像はそのまま終わり。
+      if (canMinimize) {
+        minimize();
+      } else {
+        close();
+      }
     });
   }
 
@@ -163,6 +201,7 @@ class MiniPlayerController extends ChangeNotifier {
   void debugReset() {
     _media = null;
     _mode = MiniPlayerMode.fullscreen;
+    _index = 0;
     _miniTopLeft = null;
     _navigator = null;
     _route = null;
@@ -193,16 +232,15 @@ void openEmbedPlayer(
 }
 
 /// [url]（mp4 等の直リンク）をアプリ内プレーヤーで開く。
+///
+/// 画像と混ぜて送りたいときは [openMediaViewer] に並びごと渡す。
 void openVideoPlayer(
   BuildContext context,
   Uri url, {
   ValueChanged<Uri>? onOpenExternally,
-}) {
-  MiniPlayerController.shared.open(
-    context,
-    FileMedia(url, onOpenExternally: onOpenExternally),
-  );
-}
+}) => openMediaViewer(context, [
+  ViewerVideoMedia(url),
+], onOpenExternally: onOpenExternally);
 
 /// アプリ全体を包み、その上にプレーヤーを浮かせる層。`MaterialApp.builder` に置く。
 class MiniPlayerHost extends StatefulWidget {
@@ -401,11 +439,15 @@ class _MiniPlayerHostState extends State<MiniPlayerHost> {
       onMinimize: _controller.minimize,
       onOpenExternally: onOpenExternally,
     ),
-    FileMedia(:final url, :final onOpenExternally) => VideoPlayerView(
-      url: url,
+    SequenceMedia(:final items, :final onOpenExternally) => MediaViewerView(
+      items: items,
+      // ここは開いたときの位置。以後の送りはビューア側が持ち、
+      // [MiniPlayerController.index] へ知らせ返すだけ（組み直さない）。
+      initialIndex: _controller.index,
       mini: mini,
       onClose: _controller.close,
       onMinimize: _controller.minimize,
+      onIndexChanged: _controller.setIndex,
       onOpenExternally: onOpenExternally,
     ),
   };

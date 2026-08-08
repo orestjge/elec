@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 
 import 'package:elec/src/net/image_cache_store.dart';
 import 'package:elec/src/ui/format.dart';
+import 'package:elec/src/ui/mini_player.dart';
 import 'package:elec/src/ui/post_images.dart';
 import 'package:elec/src/ui/remote_image.dart';
 import 'package:flutter/material.dart';
@@ -362,8 +363,12 @@ void main() {
     ImageLoadPolicy.remember(url, 20 << 20);
     addTearDown(ImageLoadPolicy.reset);
 
+    addTearDown(MiniPlayerController.shared.debugReset);
     await tester.pumpWidget(
       MaterialApp(
+        // 全画面ビューアは Navigator の外（この層）に載る。
+        builder: (context, child) =>
+            MiniPlayerHost(child: child ?? const SizedBox.shrink()),
         home: Scaffold(
           body: Builder(
             builder: (context) => TextButton(
