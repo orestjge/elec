@@ -15,6 +15,55 @@ Res post(int n, String body) => Res(
 );
 
 void main() {
+  group('resNumbersInAnchor', () {
+    test('単発・範囲・カンマ区切りを番号に開く', () {
+      expect(resNumbersInAnchor('5'), [5]);
+      expect(resNumbersInAnchor('3-5'), [3, 4, 5]);
+      expect(resNumbersInAnchor('1,3,5'), [1, 3, 5]);
+    });
+
+    test('カンマと範囲の混在も 1 つの参照として読む', () {
+      expect(resNumbersInAnchor('1,4-6,9'), [1, 4, 5, 6, 9]);
+    });
+
+    test('書かれた順を保ち重複は落とす', () {
+      expect(resNumbersInAnchor('5,1,5,2-3'), [5, 1, 2, 3]);
+    });
+
+    test('逆順の範囲も同じ範囲として読む', () {
+      expect(resNumbersInAnchor('5-3'), [3, 4, 5]);
+    });
+
+    test('1 つの参照あたり 50 件で打ち切る', () {
+      expect(resNumbersInAnchor('1-999').length, 50);
+      expect(resNumbersInAnchor('1-40,100-140').length, 50);
+    });
+
+    test('int にならない桁数の番号は読み飛ばす', () {
+      expect(resNumbersInAnchor('99999999999999999999'), isEmpty);
+      expect(resNumbersInAnchor('99999999999999999999,7'), [7]);
+    });
+  });
+
+  group('referencedResNumbers', () {
+    test('カンマ区切りのまとめ書きを拾う', () {
+      expect(referencedResNumbers('>>12,34,56 まとめて'), [12, 34, 56]);
+    });
+
+    test('dat 上のエスケープ越しでも拾う', () {
+      expect(referencedResNumbers('&gt;&gt;1,2 テスト'), [1, 2]);
+    });
+
+    test('読点は区切りにしない', () {
+      // `>>1、2人ともありがとう` の「2」は地の文なので参照ではない。
+      expect(referencedResNumbers('>>1、2人ともありがとう'), [1]);
+    });
+
+    test('カンマの後に数字が続かなければそこで切る', () {
+      expect(referencedResNumbers('>>1, そうだね'), [1]);
+    });
+  });
+
   group('replyCounts', () {
     test('>>N の参照を数える', () {
       final res = [
@@ -49,6 +98,16 @@ void main() {
         post(4, '>>1-3 まとめて'),
       ];
       expect(replyCounts(res), {1: 1, 2: 1, 3: 1});
+    });
+
+    test('カンマ区切りのまとめ書きを別々に数える', () {
+      final res = [
+        post(1, 'a'),
+        post(2, 'b'),
+        post(3, 'c'),
+        post(4, '>>1,3 まとめて'),
+      ];
+      expect(replyCounts(res), {1: 1, 3: 1});
     });
 
     test('返信が無ければ空', () {

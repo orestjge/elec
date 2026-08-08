@@ -1,7 +1,46 @@
 import 'package:elec/src/ui/id_icon.dart';
 import 'package:elec/src/ui/res_body.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+/// 本文中の [label] という文字の span を返す（レス参照・URL の当たり判定用）。
+TextSpan _linkSpan(WidgetTester tester, String label) {
+  final root = tester.widget<SelectableText>(find.byType(SelectableText));
+  TextSpan? found;
+  void walk(InlineSpan span) {
+    if (span is! TextSpan) return;
+    if (span.text == label) found ??= span;
+    for (final child in span.children ?? const <InlineSpan>[]) {
+      walk(child);
+    }
+  }
+
+  walk(root.textSpan!);
+  expect(found, isNotNull, reason: '「$label」の span が無い');
+  return found!;
+}
+
+/// 本文の素の文字（リンクでない部分）をつなげたもの。
+String _plainText(WidgetTester tester) {
+  final root = tester.widget<SelectableText>(find.byType(SelectableText));
+  final buffer = StringBuffer();
+  void walk(InlineSpan span) {
+    if (span is! TextSpan) return;
+    if (span.recognizer == null && span.text != null) buffer.write(span.text);
+    for (final child in span.children ?? const <InlineSpan>[]) {
+      walk(child);
+    }
+  }
+
+  walk(root.textSpan!);
+  return buffer.toString();
+}
+
+void tapLink(WidgetTester tester, String label) {
+  final recognizer = _linkSpan(tester, label).recognizer;
+  (recognizer! as TapGestureRecognizer).onTap!();
+}
 
 void main() {
   test('AA らしい複数行本文を検出する', () {
@@ -97,6 +136,80 @@ void main() {
     expect(find.byType(SingleChildScrollView), findsNothing);
     final text = tester.widget<SelectableText>(find.byType(SelectableText));
     expect(text.textSpan?.style?.fontFamily, isNull);
+  });
+
+  group('レス参照', () {
+    Future<void> pump(
+      WidgetTester tester,
+      String text, {
+      ValueChanged<int>? onTapRes,
+      ValueChanged<List<int>>? onTapResRange,
+    }) => tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ResBody(
+            text: text,
+            onTapRes: onTapRes ?? (_) {},
+            onTapResRange: onTapResRange,
+            onTapUrl: (_) {},
+          ),
+        ),
+      ),
+    );
+
+    testWidgets('カンマ区切りのまとめ書きを 1 つの参照として開く', (tester) async {
+      final ranges = <List<int>>[];
+      await pump(tester, 'これ >>1,3,5 まとめて', onTapResRange: ranges.add);
+
+      tapLink(tester, '>>1,3,5');
+      expect(ranges, [
+        [1, 3, 5],
+      ]);
+    });
+
+    testWidgets('カンマと範囲の混在も開く', (tester) async {
+      final ranges = <List<int>>[];
+      await pump(tester, '>>1,4-6', onTapResRange: ranges.add);
+
+      tapLink(tester, '>>1,4-6');
+      expect(ranges, [
+        [1, 4, 5, 6],
+      ]);
+    });
+
+    testWidgets('dat のエスケープ越しでも >> 表記で出す', (tester) async {
+      final ranges = <List<int>>[];
+      await pump(tester, '&gt;&gt;2,4 テスト', onTapResRange: ranges.add);
+
+      tapLink(tester, '>>2,4');
+      expect(ranges, [
+        [2, 4],
+      ]);
+    });
+
+    testWidgets('一覧を出せない場所では先頭のレスへ飛ぶ', (tester) async {
+      final tapped = <int>[];
+      await pump(tester, '>>3,8', onTapRes: tapped.add);
+
+      tapLink(tester, '>>3,8');
+      expect(tapped, [3]);
+    });
+
+    testWidgets('読点は区切りに含めず地の文のまま残す', (tester) async {
+      final tapped = <int>[];
+      final ranges = <List<int>>[];
+      await pump(
+        tester,
+        '>>1、2人ともありがとう',
+        onTapRes: tapped.add,
+        onTapResRange: ranges.add,
+      );
+
+      tapLink(tester, '>>1');
+      expect(tapped, [1]);
+      expect(ranges, isEmpty);
+      expect(_plainText(tester), '、2人ともありがとう');
+    });
   });
 
   testWidgets('貼られたレスの ID に identicon を添えてタップ可能にする', (tester) async {

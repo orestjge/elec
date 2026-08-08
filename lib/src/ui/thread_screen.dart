@@ -1465,6 +1465,21 @@ class _ThreadScreenState extends State<ThreadScreen>
     _showConversationRange([number], focusNumber: focusNumber);
   }
 
+  /// 会話シートの見出しに出す対象レスの並び（[centers] は昇順・重複なし）。
+  ///
+  /// `>>3-5` のような連続した並びは `3-5` と縮める。`>>1,5,9` のように飛んだ
+  /// 並びを縮めると別のレスまで含んでいるように読めるので、そちらは番号を並べる。
+  /// 見出しが折り返さない程度で打ち切る。
+  static String _conversationRangeLabel(List<int> centers) {
+    if (centers.length == 1) return '${centers.single}';
+    if (centers.last - centers.first + 1 == centers.length) {
+      return '${centers.first}-${centers.last}';
+    }
+    const shown = 5;
+    if (centers.length <= shown) return centers.join(',');
+    return '${centers.take(shown).join(',')}…';
+  }
+
   void _showConversationRange(List<int> numbers, {int? focusNumber}) {
     final res = _state.res;
     final centers =
@@ -1479,9 +1494,7 @@ class _ThreadScreenState extends State<ThreadScreen>
     final idOrdinals = _idOrdinals(res);
     final replyCountByNumber = replyCounts(res);
     final guroMasked = guroMaskedResNumbers(res);
-    final title = centers.length == 1
-        ? '会話 #${centers.single}'
-        : '会話 #${centers.first}-${centers.last}';
+    final title = '会話 #${_conversationRangeLabel(centers)}';
     final effectiveFocusNumber =
         focusNumber != null && centers.contains(focusNumber)
         ? focusNumber
