@@ -200,6 +200,18 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   Timer? _timer;
   bool _fetching = false; // 多重取得の抑止
 
+  /// 立てたスレが subject.txt に出てくるのを待っている間の控え。
+  /// 見つかれば自分のスレとして記録して捨てる（[_claimOwnThread]）。
+  _OwnThreadWatch? _ownWatch;
+
+  /// 立てたスレの登場を待っている最中か（インジケータ用・ポーリング側の判定用）。
+  bool _awaitingCreated = false;
+
+  /// 強制更新の世代。先に始まっていたポーリングが、あとから始めた強制更新を
+  /// 追い越して**古い一覧**を貼り直してしまうと、そこに新スレは居ない。
+  /// 強制更新のたびに進めて、跨いだポーリングの結果は捨てる。
+  int _forceEpoch = 0;
+
   @override
   void initState() {
     super.initState();
@@ -316,6 +328,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
     // 取りに行くついでに、前の周期で目に入ったぶんを保存しておく。
     _flushListed();
     _fetching = true;
+    final epoch = _forceEpoch;
     setState(() => _polling = true);
     try {
       final r = await _subject.fetch(
@@ -324,6 +337,8 @@ class _ThreadListScreenState extends State<ThreadListScreen>
         metadent: widget.endpoints.supportsMetadent,
       );
       if (!mounted) return;
+      // 待っている間に強制更新が走っていたら、こちらの結果は古い。捨てる。
+      if (epoch != _forceEpoch) return;
       if (!r.notModified) {
         await _rememberThreads(r.state.threads);
         // データだけ差し替え、並び順（_order）はあえて触らない。レス数・新着
@@ -332,6 +347,12 @@ class _ThreadListScreenState extends State<ThreadListScreen>
           _adoptState(r.state);
           _error = null;
         });
+        // 立てたスレが遅れて出てきたら、ここで自分のスレとして拾う。待っている
+        // 最中（[_awaitCreatedThread]）は向こうに任せる（そちらは開くところまでやる）。
+        if (!_awaitingCreated) {
+          final created = await _claimOwnThread();
+          if (created != null) _announceOwnThread(created);
+        }
       }
     } catch (_) {
       // ポーリングの失敗は無視。次の周期で回復を試みる。
@@ -343,6 +364,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
 
   /// 引っ張って更新。初回失敗からの復帰にも使う。
   Future<void> _refresh({bool force = false}) async {
+    if (force) _forceEpoch++;
     try {
       final r = await _subject.fetch(
         widget.endpoints.subjectListUrl,
@@ -990,36 +1012,101 @@ class _ThreadListScreenState extends State<ThreadListScreen>
     );
     // 立てたら一覧を更新して新スレを見えるようにする。
     if (createdTitle != null && mounted) {
-      await _refresh(force: true);
-      final created = await _markOwnCreatedThread(createdTitle, beforeKeys);
-      // 自分で立てたスレはそのまま開いて、書き込み結果を確認しやすくする。
-      if (created != null && mounted) {
-        _openThread(created);
-      }
+      _ownWatch = _OwnThreadWatch(
+        title: createdTitle,
+        beforeKeys: beforeKeys,
+        since: DateTime.now(),
+      );
+      await _awaitCreatedThread();
     }
   }
 
-  Future<ThreadSummary?> _markOwnCreatedThread(
-    String title,
-    Set<String> beforeKeys,
-  ) async {
+  /// 立てたスレが subject.txt に出るまでの待ち方。書き込みが通っても、サーバ側の
+  /// 反映と CDN の 1 秒キャッシュ（`s-maxage=1`）で、直後の 1 回では**まだ載って
+  /// いない**ことがある。1 回で諦めると自分のスレの印もリダイレクトも不発になる
+  /// ので、間を空けながら取り直す。
+  static const _createdThreadWaits = [
+    Duration.zero,
+    Duration(seconds: 1),
+    Duration(seconds: 2),
+    Duration(seconds: 3),
+    Duration(seconds: 5),
+  ];
+
+  /// 立てたスレが一覧に出るのを待ち、自分のスレとして記録してそのまま開く。
+  /// 待ちきれなかったぶんは控え（[_ownWatch]）に残り、あとのポーリングが拾う。
+  Future<void> _awaitCreatedThread() async {
+    setState(() => _awaitingCreated = true);
+    try {
+      for (final wait in _createdThreadWaits) {
+        if (wait > Duration.zero) await Future<void>.delayed(wait);
+        if (!mounted || _ownWatch == null) return;
+        await _refresh(force: true);
+        if (!mounted) return;
+        final created = await _claimOwnThread();
+        // 自分で立てたスレはそのまま開いて、書き込み結果を確認しやすくする。
+        if (created != null) {
+          if (mounted) _openThread(created);
+          return;
+        }
+      }
+    } finally {
+      if (mounted) setState(() => _awaitingCreated = false);
+    }
+  }
+
+  /// 待っている自分のスレが一覧に現れていたら、自分のスレとして記録して返す。
+  /// まだ現れていなければ null。
+  Future<ThreadSummary?> _claimOwnThread() async {
+    final watch = _ownWatch;
+    if (watch == null) return null;
+    if (watch.isStaleAt(DateTime.now())) {
+      _ownWatch = null;
+      return null;
+    }
+    final created = _findCreatedThread(watch);
+    if (created == null) return null;
+    _ownWatch = null;
+    await _history.rememberThread(created);
+    await _history.markOwnThread(created.key);
+    // 強制更新の側では [_refresh] が並べ直し済みなので、ここは印の描き直しだけ。
+    if (mounted) setState(() {});
+    return created;
+  }
+
+  /// 一覧の中から、立てたスレに当たる行を探す。
+  ThreadSummary? _findCreatedThread(_OwnThreadWatch watch) {
     final state = _state;
     if (state == null) return null;
     // subject 上のタイトルは HTML エンティティ化されている（`&`→`&amp;`、絵文字は
     // `&#…;` 等）。入力タイトルは生なので、デコードしてから突き合わせる。
     final candidates = state.threads.where(
       (t) =>
-          !beforeKeys.contains(t.key) &&
-          decodeEntities(t.title).trim() == title,
+          !watch.beforeKeys.contains(t.key) &&
+          decodeEntities(t.title).trim() == watch.title,
     );
     if (candidates.isEmpty) return null;
-    final created = candidates.reduce(
-      (a, b) => a.keyAsInt >= b.keyAsInt ? a : b,
+    return candidates.reduce((a, b) => a.keyAsInt >= b.keyAsInt ? a : b);
+  }
+
+  /// 待ちきれずに諦めたあと、ポーリングが立てたスレを見つけたときの知らせ。
+  /// 何分も経ってから勝手にスレ面へ飛ばすと今見ている物を奪うので、開くかどうかは
+  /// 相手に決めてもらう。
+  void _announceOwnThread(ThreadSummary created) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('立てたスレが一覧に出ました'),
+        persist: false,
+        showCloseIcon: true,
+        action: SnackBarAction(
+          label: '開く',
+          onPressed: () {
+            if (mounted) _openThread(created);
+          },
+        ),
+      ),
     );
-    await _history.rememberThread(created);
-    await _history.markOwnThread(created.key);
-    if (mounted) setState(_reorder);
-    return created;
   }
 
   Future<void> _rememberThreads(List<ThreadSummary> threads) async {
@@ -1132,7 +1219,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
                     SliverAppBar.medium(
                       title: Text(widget.board.title),
                       actions: [
-                        _PollingIndicator(active: _polling),
+                        _PollingIndicator(active: _polling || _awaitingCreated),
                         _SortButton(sort: _sort, onPressed: _pickSort),
                         _OverflowMenu(
                           onOpenUrl: _openThreadFromUrl,
@@ -1212,6 +1299,28 @@ class _ThreadListScreenState extends State<ThreadListScreen>
       ),
     );
   }
+}
+
+/// 立てたスレが subject.txt に出てくるのを待つ間の控え。タイトルで突き合わせる
+/// ので、立てる前に居たスレ（[beforeKeys]）は候補から外す。
+///
+/// 遅れて出てくることがあるので、待ちを打ち切ったあともポーリングが拾えるように
+/// 持ち回す。ただし永久には持たない（同じタイトルのスレが後から立つと、他人の
+/// スレを自分のものとして印してしまう）。
+class _OwnThreadWatch {
+  const _OwnThreadWatch({
+    required this.title,
+    required this.beforeKeys,
+    required this.since,
+  });
+
+  final String title;
+  final Set<String> beforeKeys;
+  final DateTime since;
+
+  static const _lifetime = Duration(minutes: 10);
+
+  bool isStaleAt(DateTime now) => now.difference(since) > _lifetime;
 }
 
 /// 一覧の上に浮く「新しいスレ N件」。タップで取り込み、今の並び順に並べ直す。
