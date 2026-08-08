@@ -22,7 +22,7 @@ class TopScrim extends StatelessWidget {
   const TopScrim({super.key, required this.child});
 
   /// [child] の下に足す、暗幕が抜けきるための余地（絵の上に乗るものは無い）。
-  static const fadeTail = 48.0;
+  static const fadeTail = 32.0;
 
   final Widget child;
 
@@ -33,11 +33,11 @@ class TopScrim extends StatelessWidget {
   /// 抜け方。`(高さの割合, 濃さの割合)` で、最初の 1 点までは濃さを保つ。
   /// S 字（smoothstep）を折れ線で近似した `1 - s` を並べてある。
   static const _fade = <(double, double)>[
-    (0.45, 1.0),
-    (0.55, 0.915),
-    (0.65, 0.705),
-    (0.75, 0.425),
-    (0.85, 0.180),
+    (0.30, 1.0),
+    (0.44, 0.896),
+    (0.58, 0.648),
+    (0.72, 0.352),
+    (0.86, 0.104),
     (1.0, 0.0),
   ];
 

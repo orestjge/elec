@@ -78,23 +78,24 @@ void main() {
   testWidgets('抜けきる手前は傾きが寝ていて、終わりが線に見えない', (tester) async {
     final profile = await _profile(tester, barHeight: 56);
 
-    // 1px あたりの変化がいちばん大きいところ（抜けの中ほど）。
+    // 傾きは 8px の窓で測る。1px ごとの差は 0〜1 に丸められて、緩やかなところ
+    // ほど量子化の誤差に埋もれてしまう。
+    int slopeAt(int y) => profile[y] - profile[y - 8];
+
     var steepest = 0;
-    for (var y = 1; y < profile.length; y++) {
-      final step = profile[y] - profile[y - 1];
-      if (step > steepest) steepest = step;
+    for (var y = 8; y < profile.length; y++) {
+      final slope = slopeAt(y);
+      if (slope > steepest) steepest = slope;
     }
     expect(steepest, greaterThan(0));
 
-    // 透けきる直前の 8px は、そこよりずっと緩やかに着地している。**ここが急だと
-    // 傾きの折れ目が横一文字の線として見え、「境界がいちばん濃い」ように読める。**
-    final landed = profile.indexOf(255);
-    for (var y = landed - 8; y < landed; y++) {
-      expect(
-        profile[y] - profile[y - 1],
-        lessThan(steepest / 2),
-        reason: 'y=$y の着地が急すぎる',
-      );
-    }
+    // 透けきる直前の 8px は、いちばん急なところよりずっと寝ている。**ここが同じ
+    // 傾きのまま透明に着くと、傾きの折れ目が横一文字の線として見え、「境界が
+    // いちばん濃い」ように読める。** 直線のグラデーションではここが最大になる。
+    expect(
+      slopeAt(profile.indexOf(255)),
+      lessThan(steepest * 0.6),
+      reason: '着地が急すぎる（終わりが線に見える）',
+    );
   });
 }
