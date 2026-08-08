@@ -236,10 +236,10 @@ void main() {
   });
 
   testWidgets('末尾まで送れば、開き直しても末尾から続く', (tester) async {
-    // ツリーは並びが番号順でないので、既読位置は「見えた番号が 1 から続いて
-    // いるところまで」で進める。勢いよく送ると行はフレームを跨いで飛ぶので、
-    // これだけだと下まで読んでも既読位置が途中で止まり、次に開いたとき古い
-    // 位置と新着ラインへ戻される。
+    // ツリーは並びが番号順でないので、既読位置は「通り過ぎた行の番号が 1 から
+    // 続いているところまで」で進める。見えている行をその都度拾うだけだと、
+    // 勢いよく送ったときに行がフレームを跨いで飛び、下まで読んでも既読位置が
+    // 途中で止まる（次に開いたとき古い位置と新着ラインへ戻される）。
     final history = ReadHistory(MemoryReadHistoryStorage());
     await history.markRead(threadKey, 3);
     final view = await treeSettings();
@@ -270,6 +270,59 @@ void main() {
     // 続きから＝末尾。古い新着ラインも残らない。
     expect(shownNumbers(tester).last, 60);
     expect(find.text('ここから新着'), findsNothing);
+  });
+
+  testWidgets('途中まで送ったぶんも既読になる', (tester) async {
+    final history = ReadHistory(MemoryReadHistoryStorage());
+    final view = await treeSettings();
+    final f = QueueFetcher([
+      ok(dat(300, const {5: '>>1 返信'})),
+    ]);
+
+    await tester.pumpWidget(app(f, history: history, view: view));
+    await tester.pumpAndSettle();
+    // 末尾までは行かない勢いで送る。
+    await tester.fling(
+      find.byType(PostItem).first,
+      const Offset(0, -600),
+      6000,
+    );
+    await tester.pumpAndSettle();
+
+    final shown = shownNumbers(tester);
+    expect(shown.last, lessThan(300)); // まだ途中
+    expect(history.lastSeen(threadKey), shown.last);
+
+    // 開き直すと、その続き（新着ライン）から。
+    await tester.pumpWidget(const MaterialApp(home: SizedBox()));
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(app(f, history: history, view: view));
+    await tester.pumpAndSettle();
+    expect(find.text('ここから新着'), findsOneWidget);
+  });
+
+  testWidgets('ツリーの上に出てきた新しい番号では既読位置を進めない', (tester) async {
+    // 30 は 1 への返信なので 1 のすぐ下に並ぶ。画面に出たからといって
+    // 2〜29 を読んだことにはしない（間の未読を読み飛ばしてしまう）。
+    final history = ReadHistory(MemoryReadHistoryStorage());
+    final f = QueueFetcher([
+      ok(dat(30, const {30: '>>1 ずっと下からの返信'})),
+    ]);
+
+    await tester.pumpWidget(
+      app(f, history: history, view: await treeSettings()),
+    );
+    await tester.pumpAndSettle();
+
+    final shown = shownNumbers(tester).toSet();
+    expect(shown, contains(30));
+    // 既読位置は 1 から続いているところまで。
+    var contiguous = 0;
+    while (shown.contains(contiguous + 1)) {
+      contiguous++;
+    }
+    expect(contiguous, lessThan(30));
+    expect(history.lastSeen(threadKey), contiguous);
   });
 
   testWidgets('設定で並べ方を切り替えると保存され、その場で効く', (tester) async {

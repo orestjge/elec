@@ -205,9 +205,13 @@ class _ThreadScreenState extends State<ThreadScreen>
   /// 追跡し、スレ一覧の既読位置として保存する。
   int _furthestRead = 0;
 
-  /// ツリー表示で実際に見えたレス番号。番号順に並んでいないので、既読位置は
+  /// ツリー表示で通り過ぎたレス番号。番号順に並んでいないので、既読位置は
   /// これが 1 から続いているところまでで測る（[_onPositions]）。
   final _seenResNumbers = <int>{};
+
+  /// [_seenResNumbers] に数え終わった行の位置。ここまでは通り過ぎている。
+  /// 行の並びが組み替わったら -1 に戻して数え直す。
+  int _passedRowIndex = -1;
 
   /// 一度でも取得を始めたか。控えのまま一度も表に出ていない画面は false。
   bool _loadStarted = false;
@@ -468,6 +472,8 @@ class _ThreadScreenState extends State<ThreadScreen>
         _loading = false;
         _error = null;
       });
+      // 行はこれから組み直される（新着ラインの位置が決まる）。
+      _passedRowIndex = -1;
       _maybeShowReplySwipeHint();
     } catch (e) {
       if (!mounted) return;
@@ -547,6 +553,8 @@ class _ThreadScreenState extends State<ThreadScreen>
       _openCount = _entryPositions(_state.res.length, lastSeen).openCount;
       _furthestRead = lastSeen ?? _furthestRead;
     });
+    // 新着ラインが動く＝ツリーの並びも組み替わるので、数え直しにする。
+    _passedRowIndex = -1;
   }
 
   Future<void> _poll({bool force = false}) async {
@@ -632,10 +640,9 @@ class _ThreadScreenState extends State<ThreadScreen>
   ///
   /// 番号順表示では「見えた最大レス番号」がそのまま既読位置になる（飛ばした
   /// ぶんは読み飛ばしたものとして扱う）。ツリー表示では並びが番号順でないので、
-  /// 見えた番号を覚えておき **1 から続いているところまで** を既読位置にする。
-  /// ツリーの上の方に出てきた新しい番号のレスで既読位置が飛ぶと、その手前の
-  /// 未読を読まずに読了扱いにしてしまうため。ただし**末尾に着いたときは
-  /// 最新レスまで**進める（どちらの表示でも）。
+  /// **通り過ぎた行**のレス番号を覚えておき、それが 1 から続いているところまで
+  /// を既読位置にする。ツリーの上の方に出てきた新しい番号のレスで既読位置が
+  /// 飛ぶと、その手前の未読を読まずに読了扱いにしてしまうため。
   void _onPositions() {
     final positions = _positions.itemPositions.value;
     if (positions.isEmpty || _items.isEmpty) return;
@@ -643,36 +650,26 @@ class _ThreadScreenState extends State<ThreadScreen>
     final tree = _view.layout == ThreadLayout.tree;
     var maxRes = _furthestRead;
     var atBottom = false;
+    var deepest = -1;
     for (final p in positions) {
       // 一部でも見えている行か。
       if (p.itemTrailingEdge <= 0 || p.itemLeadingEdge >= 1) continue;
-      final item = _items[p.index];
       // 引用行（返信先の再掲）は読んだ位置に数えない。番号が前へ戻るうえ、
       // 本体はまだ下（新着側）にあるため。
-      if (item is ThreadTreeRow && !item.quote) {
-        if (tree) {
-          _seenResNumbers.add(item.res.number);
-        } else if (item.res.number > maxRes) {
-          maxRes = item.res.number;
-        }
+      final item = _items[p.index];
+      if (!tree && item is ThreadTreeRow && !item.quote) {
+        if (item.res.number > maxRes) maxRes = item.res.number;
       }
+      if (p.index > deepest) deepest = p.index;
       if (p.index == lastIndex && p.itemTrailingEdge <= 1.0001) atBottom = true;
     }
     if (tree) {
+      _passRowsThrough(deepest);
       var next = maxRes + 1;
       while (_seenResNumbers.contains(next)) {
         next++;
       }
       maxRes = next - 1;
-    }
-    // 末尾まで来ていれば、その上は全部通り過ぎている。「見えた番号が続いて
-    // いるところまで」では拾いきれない（勢いよく送ると行がフレームを跨いで
-    // 飛ぶし、つまみで一気に運べば間の行はそもそも組まれない）ので、末尾に
-    // 着いたときだけ最新レスまで進める。ここを進めないと、下まで読んだのに
-    // 次に開いたとき古い位置と新着ラインへ戻されてしまう。
-    if (atBottom && _state.res.isNotEmpty) {
-      final newest = _state.res.last.number;
-      if (newest > maxRes) maxRes = newest;
     }
     final readAdvanced = maxRes > _furthestRead;
     // どちらも表示には出ない（既読の保存と新着追従の判定にだけ使う）ので、
@@ -680,6 +677,24 @@ class _ThreadScreenState extends State<ThreadScreen>
     _furthestRead = maxRes;
     _atBottomNow = atBottom;
     if (readAdvanced) _persistReadPosition(maxRes);
+  }
+
+  /// [index] 行目までを通り過ぎたものとして数える（ツリー表示の既読位置用）。
+  ///
+  /// **見えている行をその都度拾うのでは足りない。** 勢いよく送ると行はフレーム
+  /// を跨いで飛ぶし、つまみで一気に運べば間の行はそもそも組まれない。取りこぼした
+  /// 番号が 1 つあるだけで既読位置はそこで止まり、下まで読んでも次に開いたとき
+  /// 古い位置と新着ラインへ戻される。**どこまで下ったか**で数えれば、通った行は
+  /// 全部数に入る（番号順表示が「見えた最大レス番号」で測るのと同じ扱い）。
+  void _passRowsThrough(int index) {
+    if (index <= _passedRowIndex) return;
+    for (var i = _passedRowIndex + 1; i <= index && i < _items.length; i++) {
+      final item = _items[i];
+      if (item is ThreadTreeRow && !item.quote) {
+        _seenResNumbers.add(item.res.number);
+      }
+    }
+    _passedRowIndex = index;
   }
 
   void _persistReadPosition([int? resCount]) {
@@ -1066,6 +1081,8 @@ class _ThreadScreenState extends State<ThreadScreen>
   void _onViewSettingsChanged() {
     if (!mounted) return;
     final anchor = _topVisibleResNumber();
+    // 並べ方が変われば行の並びも変わる。通り過ぎた行の数え直しから始める。
+    _passedRowIndex = -1;
     setState(() {});
     if (anchor == null) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
