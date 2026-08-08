@@ -1,3 +1,4 @@
+import 'package:edge_core/edge_core.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
@@ -229,9 +230,12 @@ const _idChar = r'[0-9A-Za-z./+]';
 const _idPattern =
     '(?<![0-9A-Za-z])ID:(?=$_idChar{5})($_idChar*[0-9A-Za-z]$_idChar*)';
 
-/// レス本文。`>>123` / `>>3-5` のレス参照・URL・`ID:xxx` をタップ可能にして表示する。
+/// レス本文。`>>123` / `>>3-5` / `>>1,3,5` のレス参照・URL・`ID:xxx` を
+/// タップ可能にして表示する。
 ///
 /// - `>>N` タップ → [onTapRes]（該当レスへスクロール）
+/// - `>>N-M` / `>>N,M` タップ → [onTapResRange]（まとめて一覧表示）。
+///   渡されていなければ先頭の 1 件へスクロールする
 /// - URL タップ → [onTapUrl]（ブラウザで開く）
 /// - `ID:xxx` タップ → [onTapId]（同じ ID のレス一覧）
 ///
@@ -282,7 +286,7 @@ class _ResBodyState extends State<ResBody> {
   // URL か >>数字 か ID:xxx を拾う。URL を先に（貪欲に）判定する。URL の中の
   // `ID:` を ID として切り出さないため、この順でなければならない。
   static final _pattern = RegExp(
-    '($linkUrlPattern)|(&gt;&gt;|>>)(\\d+)(?:-(\\d+))?|$_idPattern',
+    '($linkUrlPattern)|(?:&gt;&gt;|>>)($resAnchorSpecPattern)|$_idPattern',
   );
 
   @override
@@ -362,7 +366,7 @@ class _ResBodyState extends State<ResBody> {
         spans.add(
           TextSpan(text: url, style: linkStyle, recognizer: recognizer),
         );
-      } else if (m.group(5) case final id?) {
+      } else if (m.group(3) case final id?) {
         // 絵と文字はひとかたまりの WidgetSpan にする。別々の span にすると
         // 行末で絵だけが前の行に取り残され（word joiner でも止まらない）、
         // どの ID の絵なのか読めなくなる。
@@ -382,35 +386,31 @@ class _ResBodyState extends State<ResBody> {
           ),
         );
       } else {
-        // >>N / >>N-M
-        final start = int.parse(m.group(3)!);
-        final endText = m.group(4);
-        final end = endText == null ? start : int.parse(endText);
-        final label = endText == null
-            ? '>>${m.group(3)}'
-            : '>>${m.group(3)}-$endText';
-        final recognizer = TapGestureRecognizer()
-          ..onTap = () {
-            if (start == end) {
-              widget.onTapRes(start);
-              return;
-            }
-            final from = start <= end ? start : end;
-            final to = start <= end ? end : start;
-            final numbers = <int>[
-              for (var n = from; n <= to && n < from + 50; n++) n,
-            ];
-            final rangeHandler = widget.onTapResRange;
-            if (rangeHandler == null) {
-              widget.onTapRes(numbers.first);
-            } else {
-              rangeHandler(numbers);
-            }
-          };
-        _recognizers.add(recognizer);
-        spans.add(
-          TextSpan(text: label, style: linkStyle, recognizer: recognizer),
-        );
+        // >>N / >>N-M / >>N,M
+        final numbers = resNumbersInAnchor(m.group(2)!);
+        if (numbers.isEmpty) {
+          // 桁が多すぎて番号として読めなかったもの。書かれたまま地の文で出す。
+          addPlain(m.group(0)!);
+        } else {
+          final recognizer = TapGestureRecognizer()
+            ..onTap = () {
+              final rangeHandler = widget.onTapResRange;
+              if (numbers.length == 1 || rangeHandler == null) {
+                widget.onTapRes(numbers.first);
+              } else {
+                rangeHandler(numbers);
+              }
+            };
+          _recognizers.add(recognizer);
+          spans.add(
+            TextSpan(
+              // 書かれた表記のまま出す（`&gt;&gt;` のエスケープだけ直す）。
+              text: '>>${m.group(2)}',
+              style: linkStyle,
+              recognizer: recognizer,
+            ),
+          );
+        }
       }
       last = m.end;
     }
