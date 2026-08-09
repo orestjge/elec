@@ -141,6 +141,7 @@ Future<void> _shoot(
   ThreadLayout layout = ThreadLayout.number,
   int? lastSeen,
   bool openIdSheet = false,
+  ResLayout resLayout = ResLayout.gutter,
 }) async {
   tester.view.physicalSize = Size(width * 2, 900 * 2);
   tester.view.devicePixelRatio = 2;
@@ -152,6 +153,7 @@ Future<void> _shoot(
   if (lastSeen != null) await history.markRead('1762103691', lastSeen);
   final view = ThreadViewSettings(MemoryThreadViewSettingsStorage());
   await view.setLayout(layout);
+  await view.setResLayout(resLayout);
 
   await tester.pumpWidget(
     MaterialApp(
@@ -269,6 +271,27 @@ void main() {
       ElecTheme.light(),
       '$dir/thread_plain.png',
       plain: true,
+    );
+  });
+
+  // ヘッダにまとめる組み方（設定で選べるもう一方）。ID の絵を小さくして名前・
+  // 時刻と 1 行に並べ、レス 1 件を小さく収める。
+  testWidgets('header layout', (tester) async {
+    await _shoot(
+      tester,
+      ElecTheme.light(),
+      '$dir/thread_header_layout.png',
+      resLayout: ResLayout.header,
+    );
+  });
+
+  testWidgets('header layout plain', (tester) async {
+    await _shoot(
+      tester,
+      ElecTheme.light(),
+      '$dir/thread_header_layout_plain.png',
+      plain: true,
+      resLayout: ResLayout.header,
     );
   });
 

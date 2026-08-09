@@ -343,4 +343,24 @@ void main() {
     expect(storage.values['layout'], 'tree');
     expect(find.textContaining('ツリー'), findsOneWidget);
   });
+
+  testWidgets('設定でレスの見せ方を切り替えると保存され、その場で効く', (tester) async {
+    final storage = MemoryThreadViewSettingsStorage();
+    final view = ThreadViewSettings(storage);
+    expect(view.resLayout, ResLayout.gutter);
+
+    await tester.pumpWidget(
+      MaterialApp(home: SettingsScreen(threadView: view)),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('settings-res-layout')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('ヘッダにまとめる').last);
+    await tester.pumpAndSettle();
+
+    expect(view.resLayout, ResLayout.header);
+    expect(storage.values['resLayout'], 'header');
+    expect(find.textContaining('ヘッダにまとめる'), findsOneWidget);
+  });
 }

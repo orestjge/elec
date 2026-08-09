@@ -1,4 +1,5 @@
 import 'package:edge_core/edge_core.dart';
+import 'package:elec/src/net/thread_view_settings.dart';
 import 'package:elec/src/ui/id_icon.dart';
 import 'package:elec/src/ui/now_ticker.dart';
 import 'package:elec/src/ui/post_images.dart';
@@ -36,6 +37,80 @@ Res post(int number, String id) => Res(
 Widget wrap(Widget child) => MaterialApp(home: Scaffold(body: child));
 
 void main() {
+  // 見せ方はどちらでも成り立つ性質——絵が出る、押せる、ID の文字は出さない——
+  // を両方で確かめる。組み方を切り替えたときに片方だけ壊れるのを防ぐ。
+  for (final layout in ResLayout.values) {
+    testWidgets('$layout でも identicon は出て、押すと ID を渡す', (tester) async {
+      String? tapped;
+      await tester.pumpWidget(
+        wrap(
+          PostItem(
+            res: post(1, 'aBc1De2f'),
+            idCount: 1,
+            idOrdinal: 1,
+            resLayout: layout,
+            onTapId: (id) => tapped = id,
+          ),
+        ),
+      );
+
+      expect(
+        find.byWidgetPredicate((w) => w is IdIcon && w.id == 'aBc1De2f'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('ID:'), findsNothing);
+      // 時刻はどちらの組み方でも必ずどこかに出る（ヘッダか、レスの足元か）。
+      expect(find.textContaining('02:14'), findsOneWidget);
+
+      await tester.tap(find.byType(IdIcon));
+      expect(tapped, 'aBc1De2f');
+    });
+  }
+
+  testWidgets('ヘッダに出すものが無いレスでは、柱の組み方はヘッダの行を作らない', (tester) async {
+    // 名無し・返信なし・スレ主でも自分でもないレス。板の既定名を渡すと名前が
+    // 省かれ、ヘッダに出すものが何も無くなる。ヘッダの行を出すと、時刻だけが
+    // 右端に浮いた空の行になる。
+    final res = post(1, 'aBc1De2f');
+    await tester.pumpWidget(
+      wrap(
+        Column(
+          children: [
+            PostItem(
+              res: res,
+              idCount: 1,
+              idOrdinal: 1,
+              defaultName: '名無し',
+              onTapId: (_) {},
+            ),
+          ],
+        ),
+      ),
+    );
+    final gutterHeight = tester.getSize(find.byType(PostItem)).height;
+
+    await tester.pumpWidget(
+      wrap(
+        Column(
+          children: [
+            PostItem(
+              res: res,
+              idCount: 1,
+              idOrdinal: 1,
+              resLayout: ResLayout.header,
+              defaultName: '名無し',
+              onTapId: (_) {},
+            ),
+          ],
+        ),
+      ),
+    );
+    final headerHeight = tester.getSize(find.byType(PostItem)).height;
+
+    // 柱の組み方のほうが絵は大きいのに、行が 1 本減るぶん高さは増えない。
+    expect(gutterHeight, lessThanOrEqualTo(headerHeight));
+  });
+
   testWidgets('ID は文字列ではなく identicon で出る', (tester) async {
     await tester.pumpWidget(
       wrap(

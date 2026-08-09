@@ -1195,6 +1195,7 @@ class _ThreadScreenState extends State<ThreadScreen>
                       _state.res,
                     ).contains(res.number),
                     linkPreviews: _view.linkPreviews,
+                    resLayout: _view.resLayout,
                     defaultName: widget.defaultName,
                   ),
                 ),
@@ -1533,6 +1534,7 @@ class _ThreadScreenState extends State<ThreadScreen>
                         isReplyToOwn: _isReplyToOwnPost(post),
                         blurImages: guroMasked.contains(post.number),
                         linkPreviews: _view.linkPreviews,
+                        resLayout: _view.resLayout,
                         defaultName: widget.defaultName,
                       ),
                     );
@@ -1607,6 +1609,7 @@ class _ThreadScreenState extends State<ThreadScreen>
           replyCountByNumber: replyCountByNumber,
           guroMasked: guroMasked,
           linkPreviews: _view.linkPreviews,
+          resLayout: _view.resLayout,
           onTapId: _showIdPosts,
           onTapRes: (_, target) {
             Navigator.pop(context);
@@ -2435,6 +2438,7 @@ class _ThreadScreenState extends State<ThreadScreen>
                       accent: row.depth > 0 ? accent : null,
                       child: PostItem(
                         res: item,
+                        nested: row.depth > 0,
                         idCount: idCounts[item.id] ?? 1,
                         idOrdinal: idOrdinals[item.number] ?? 1,
                         onTapId: _showIdPosts,
@@ -2459,6 +2463,7 @@ class _ThreadScreenState extends State<ThreadScreen>
                         showAccentBar: row.depth <= 0,
                         blurImages: guroMasked.contains(item.number),
                         linkPreviews: _view.linkPreviews,
+                        resLayout: _view.resLayout,
                         highlightQuery: searchQuery,
                         isCurrentMatch: item.number == currentMatchNumber,
                         defaultName: widget.defaultName,
@@ -3043,6 +3048,7 @@ class _ConversationSheet extends StatefulWidget {
     required this.replyCountByNumber,
     required this.guroMasked,
     required this.linkPreviews,
+    required this.resLayout,
     required this.onTapId,
     required this.onTapRes,
     required this.onTapResRange,
@@ -3074,6 +3080,9 @@ class _ConversationSheet extends StatefulWidget {
 
   /// 行を単独で占めるリンクを OGP カードにするか（[PostItem.linkPreviews]）。
   final bool linkPreviews;
+
+  /// レス 1 件の組み方（[PostItem.resLayout]）。
+  final ResLayout resLayout;
   final ValueChanged<String> onTapId;
   final void Function(int source, int target) onTapRes;
   final void Function(int source, List<int> targets) onTapResRange;
@@ -3220,6 +3229,7 @@ class _ConversationSheetState extends State<_ConversationSheet> {
                             )
                           : PostItem(
                               res: entry.res,
+                              nested: entry.depth > 0,
                               idCount: widget.idCounts[entry.res.id] ?? 1,
                               idOrdinal:
                                   widget.idOrdinals[entry.res.number] ?? 1,
@@ -3247,6 +3257,7 @@ class _ConversationSheetState extends State<_ConversationSheet> {
                                 entry.res.number,
                               ),
                               linkPreviews: widget.linkPreviews,
+                              resLayout: widget.resLayout,
                               defaultName: widget.defaultName,
                             ),
                     );
