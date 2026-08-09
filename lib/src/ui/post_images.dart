@@ -279,7 +279,9 @@ class PostImages extends StatelessWidget {
   /// 入力欄の添付プレビューで、本文から URL を取り消すために使う。
   final ValueChanged<Uri>? onRemove;
 
-  /// サムネイルの一辺（px）。入力欄プレビューなどで小さく出したいとき使う。
+  /// サムネイルの一辺の**上限**（px）。入力欄プレビューなどで小さく出したいとき
+  /// 使う。実際の一辺は「1 行に 2 つ並ぶ」を満たすところまで縮む（[_thumbSpacing]
+  /// と、置かれた場所の幅から決まる）。
   final double thumbSize;
 
   /// このレスの画像に「グロ」注意が付いており、サムネイルへモザイクを掛けるか。
@@ -322,45 +324,64 @@ class PostImages extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (hasThumbs)
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final url in urls)
-                  _removable(
-                    url,
-                    _Thumb(
-                      url: url,
-                      sequence: sequence,
-                      size: thumbSize,
-                      blurred: blurImages,
-                      // 入力欄の添付プレビューでは NG の出番が無い。
-                      canNg: onRemove == null,
-                      onOpenExternally: openExternally,
-                    ),
+            // 一辺は幅から決める。固定値だと、置かれる場所（レスの左に identicon
+            // の柱が立つ・ツリーで字下げされる）や端末の幅が少し違うだけで
+            // 2 つ目が次の行へ落ち、サムネイルが 1 列に縦積みされてしまう。
+            // **2 つ並ぶことを幅の側から保証して**、余りを一辺に返す。
+            //
+            // ただし [_minThumbSize] より小さくはしない。深く字下げされたツリーの
+            // 行まで 2 つ並べようとすると、絵柄が分からない大きさまで縮む。そこ
+            // までいったら 2 つ並べるのは諦めて、見える大きさのまま縦に積む。
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final size = math.min(
+                  thumbSize,
+                  math.max(
+                    _minThumbSize,
+                    (constraints.maxWidth - _thumbSpacing) / 2,
                   ),
-                for (final url in videoUrls)
-                  _removable(
-                    url,
-                    _VideoThumb(
-                      url: url,
-                      sequence: sequence,
-                      size: thumbSize,
-                      onOpenExternally: openExternally,
-                    ),
-                  ),
-                for (final video in embedVideos)
-                  _removable(
-                    video.url,
-                    _EmbedThumb(
-                      video: video,
-                      size: thumbSize,
-                      onTap: onTapEmbed == null
-                          ? null
-                          : () => onTapEmbed!(video),
-                    ),
-                  ),
-              ],
+                );
+                return Wrap(
+                  spacing: _thumbSpacing,
+                  runSpacing: _thumbSpacing,
+                  children: [
+                    for (final url in urls)
+                      _removable(
+                        url,
+                        _Thumb(
+                          url: url,
+                          sequence: sequence,
+                          size: size,
+                          blurred: blurImages,
+                          // 入力欄の添付プレビューでは NG の出番が無い。
+                          canNg: onRemove == null,
+                          onOpenExternally: openExternally,
+                        ),
+                      ),
+                    for (final url in videoUrls)
+                      _removable(
+                        url,
+                        _VideoThumb(
+                          url: url,
+                          sequence: sequence,
+                          size: size,
+                          onOpenExternally: openExternally,
+                        ),
+                      ),
+                    for (final video in embedVideos)
+                      _removable(
+                        video.url,
+                        _EmbedThumb(
+                          video: video,
+                          size: size,
+                          onTap: onTapEmbed == null
+                              ? null
+                              : () => onTapEmbed!(video),
+                        ),
+                      ),
+                  ],
+                );
+              },
             ),
           for (var i = 0; i < audioUrls.length; i++)
             Padding(
@@ -380,6 +401,17 @@ class PostImages extends StatelessWidget {
     );
   }
 }
+
+/// サムネイル同士の間。行内の間隔と行送りで同じ値を使う。
+const double _thumbSpacing = 8;
+
+/// 幅から一辺を決めるときの下限。これを下回るくらいなら 1 行に 2 つ並べるのを
+/// やめる。入力欄の添付プレビューと同じ大きさで、「何が写っているか分かる」の
+/// 下限として使っている。
+///
+/// 呼び手が [PostImages.thumbSize] にこれより小さい値を渡したときは、そちらが
+/// 優先される（上限として効くため）。
+const double _minThumbSize = 96;
 
 /// サムネイル右上に重ねる削除ボタン。
 class _RemoveButton extends StatelessWidget {

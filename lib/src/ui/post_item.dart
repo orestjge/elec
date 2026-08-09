@@ -55,8 +55,8 @@ class PostItem extends StatelessWidget {
   /// このレスが同一 ID 内で何番目か（1 始まり）。
   final int idOrdinal;
 
-  /// ID タップ時。同一 ID のレス一覧を出す。ヘッダの ID チップと、本文に貼られた
-  /// `ID:xxx`（他のレスの引用）の両方から呼ぶ。
+  /// ID タップ時。同一 ID のレス一覧を出す。左の柱の identicon と、本文に
+  /// 貼られた `ID:xxx`（他のレスの引用）の両方から呼ぶ。
   final ValueChanged<String>? onTapId;
 
   /// `>>N` タップ時。該当レスへスクロールする。
@@ -189,6 +189,94 @@ class PostItem extends StatelessWidget {
       onTapUrl?.call(url);
     }
 
+    // ヘッダの行に出すものがあるか。名無し・返信なし・スレ主でも自分でもない
+    // レス——実際の板でいちばん多い形——では**何も無い**ので、行ごと省く。
+    // 時刻はヘッダに置いていないので、省いても行き場を失うものはない。
+    final headerName = _headerName(name);
+    final hasHeaderLine =
+        headerName.text.isNotEmpty ||
+        replyCount > 0 ||
+        isThreadOwner ||
+        isOwn ||
+        isReplyToOwn;
+
+    // 本文の最後が箱——リンクのカード・画像・スレ立てコマンドの札——で終わる
+    // レスは、その下の縁と足元の時刻が直に接する。文章で終わるなら行の下に
+    // 余白があるので気にならないが、箱は縁がそのまま当たって窮屈に見える。
+    // 箱で終わるときだけ間を入れる。**箱の側に下マージンを持たせない**のは、
+    // 箱の後ろに本文が続くとき（段落間の 8 がすでに入る）に二重になるため。
+    final endsWithBox = segments.isEmpty
+        ? command != null
+        : segments.last is! PostBodyText;
+
+    final bodyChildren = <Widget>[
+      if (command != null) _ThreadCommandChip(command: command),
+      // 本文は貼られた URL の位置でサムネイルを挟みながら、上から順に
+      // 積む。メディアの区画（PostImages）は自前で上の余白を持つので、
+      // 文章の区画だけ手前に間を入れる。
+      for (var i = 0; i < segments.length; i++)
+        switch (segments[i]) {
+          PostBodyText(:final text) => Padding(
+            padding: EdgeInsets.only(top: i == 0 ? 3 : 8),
+            child: ResBody(
+              text: text,
+              // 本文は一覧のタイトル（14px）寄りに詰めつつ、読む主役
+              // テキストなので 1px 大きい 15px・行高 1.4 に留めて
+              // 読みやすさを確保する。
+              style: theme.textTheme.bodyLarge?.copyWith(
+                fontSize: _bodyFontSize,
+                height: _bodyLineHeight,
+              ),
+              onTapRes: (n) => onTapRes?.call(n),
+              onTapResRange: (numbers) => onTapResRange?.call(numbers),
+              onTapUrl: openUrl,
+              onTapId: onTapId,
+              selectable: bodySelectable,
+              onSelectionActiveChanged: onBodySelectionActiveChanged,
+              highlightQuery: highlightQuery,
+            ),
+          ),
+          PostBodyLink(:final url, :final raw) => Padding(
+            padding: EdgeInsets.only(top: i == 0 ? 3 : 8),
+            child: LinkCard(
+              url: url,
+              raw: raw,
+              onTap: openUrl,
+              // OGP を取りに行くかは設定次第。スレカードはこの値に
+              // 関わらず [LinkCard] 側で出す。
+              enabled: linkPreviews,
+              // 「グロ」注意の付いたレスでは、リンク先の絵まで不意に
+              // 出さない（見出しだけのカードになる）。
+              showImage: !blurImages,
+              linkStyle: theme.textTheme.bodyLarge?.copyWith(
+                fontSize: _bodyFontSize,
+                height: _bodyLineHeight,
+                color: scheme.primary,
+                decoration: TextDecoration.underline,
+                decorationColor: scheme.primary,
+              ),
+            ),
+          ),
+          PostBodyMedia(
+            :final images,
+            :final videos,
+            :final audios,
+            :final embeds,
+          ) =>
+            PostImages(
+              urls: images,
+              videoUrls: videos,
+              audioUrls: audios,
+              embedVideos: embeds,
+              viewerMedia: allMedia,
+              onOpenImageExternally: onTapUrl,
+              onTapEmbed: (video) =>
+                  openEmbedPlayer(context, video, onOpenExternally: onTapUrl),
+              blurImages: blurImages,
+            ),
+        },
+    ];
+
     // 現在ジャンプ中の一致レスは、左のアクセント帯と薄い背景でひと目で分かる
     // ようにする（左パディングを帯の分だけ詰めて本文位置は揃える）。
     final showAccent =
@@ -212,89 +300,55 @@ class PostItem extends StatelessWidget {
             : Border(left: BorderSide(color: scheme.primary, width: 3)),
       ),
       padding: EdgeInsets.fromLTRB(showAccent ? 13 : 16, 6, 16, 6),
-      child: Column(
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _Header(
-            res: res,
-            name: _headerName(name),
-            idCount: idCount,
-            idOrdinal: idOrdinal,
-            onTapId: onTapId,
-            isOwn: isOwn,
-            isThreadOwner: isThreadOwner,
-            isReplyToOwn: isReplyToOwn,
-            replyCount: replyCount,
-            onTapReplies: onTapReplies,
-            highlightQuery: highlightQuery,
+          // 「誰が」を左の柱にまとめる。ヘッダの行と本文の 1 行目にまたがるので、
+          // 絵を大きくしてもレスの高さは増えない。
+          if (res.id != null)
+            _IdGutter(
+              id: res.id!,
+              count: idCount,
+              ordinal: idOrdinal,
+              onTap: onTapId,
+            )
+          else
+            const _NoIdGutter(),
+          const SizedBox(width: _idGutterGap),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (hasHeaderLine)
+                  _Header(
+                    res: res,
+                    name: headerName,
+                    isOwn: isOwn,
+                    isThreadOwner: isThreadOwner,
+                    isReplyToOwn: isReplyToOwn,
+                    replyCount: replyCount,
+                    onTapReplies: onTapReplies,
+                    highlightQuery: highlightQuery,
+                  ),
+                ...bodyChildren,
+                // 時刻はレスの足元、右端。**ヘッダではなくここに置く**のは、
+                // ヘッダに他に出すものが無いレスでも位置が動かないようにする
+                // ため。ヘッダ側に置くと、名前もスレ主印も無いレスでは時刻だけ
+                // の空の行ができるか、本文の横へ逃がすかのどちらかになり、
+                // レスごとに時刻の居場所が変わってしまう。
+                //
+                // 1 行のレスではこの行はほぼタダで付く。左の柱（絵と連投数）が
+                // すでに本文 1 行より高く、行の高さを決めているため。
+                Padding(
+                  padding: EdgeInsets.only(top: endsWithBox ? 6 : 0),
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: _TimeLabel(res: res),
+                  ),
+                ),
+              ],
+            ),
           ),
-          if (command != null) _ThreadCommandChip(command: command),
-          // 本文は貼られた URL の位置でサムネイルを挟みながら、上から順に積む。
-          // メディアの区画（PostImages）は自前で上の余白を持つので、文章の
-          // 区画だけ手前に間を入れる。
-          for (var i = 0; i < segments.length; i++)
-            switch (segments[i]) {
-              PostBodyText(:final text) => Padding(
-                padding: EdgeInsets.only(top: i == 0 ? 3 : 8),
-                child: ResBody(
-                  text: text,
-                  // 本文は一覧のタイトル（14px）寄りに詰めつつ、読む主役テキスト
-                  // なので 1px 大きい 15px・行高 1.4 に留めて読みやすさを確保する。
-                  style: theme.textTheme.bodyLarge?.copyWith(
-                    fontSize: 15,
-                    height: 1.4,
-                  ),
-                  onTapRes: (n) => onTapRes?.call(n),
-                  onTapResRange: (numbers) => onTapResRange?.call(numbers),
-                  onTapUrl: openUrl,
-                  onTapId: onTapId,
-                  selectable: bodySelectable,
-                  onSelectionActiveChanged: onBodySelectionActiveChanged,
-                  highlightQuery: highlightQuery,
-                ),
-              ),
-              PostBodyLink(:final url, :final raw) => Padding(
-                padding: EdgeInsets.only(top: i == 0 ? 3 : 8),
-                child: LinkCard(
-                  url: url,
-                  raw: raw,
-                  onTap: openUrl,
-                  // OGP を取りに行くかは設定次第。スレカードはこの値に関わらず
-                  // [LinkCard] 側で出す。
-                  enabled: linkPreviews,
-                  // 「グロ」注意の付いたレスでは、リンク先の絵まで不意に
-                  // 出さない（見出しだけのカードになる）。
-                  showImage: !blurImages,
-                  linkStyle: theme.textTheme.bodyLarge?.copyWith(
-                    fontSize: 15,
-                    height: 1.4,
-                    color: scheme.primary,
-                    decoration: TextDecoration.underline,
-                    decorationColor: scheme.primary,
-                  ),
-                ),
-              ),
-              PostBodyMedia(
-                :final images,
-                :final videos,
-                :final audios,
-                :final embeds,
-              ) =>
-                PostImages(
-                  urls: images,
-                  videoUrls: videos,
-                  audioUrls: audios,
-                  embedVideos: embeds,
-                  viewerMedia: allMedia,
-                  onOpenImageExternally: onTapUrl,
-                  onTapEmbed: (video) => openEmbedPlayer(
-                    context,
-                    video,
-                    onOpenExternally: onTapUrl,
-                  ),
-                  blurImages: blurImages,
-                ),
-            },
         ],
       ),
     );
@@ -596,7 +650,7 @@ final _nameSuffixRe = RegExp(r'^(.*?)[\s　]*([(（][^()（）]*[)）])$');
 /// 返信件数を押せるときの当たり判定の高さ。文字の高さ（16px）のままだと指には
 /// 狭いので広げる。
 ///
-/// ヘッダの他の要素（ID アイコン 20px・名前と時刻 20px）より数 px 高いので、返信の
+/// ヘッダの他の要素（ID アイコン 22px・名前と時刻 20px）より数 px 高いので、返信の
 /// 付いたレスだけヘッダがわずかに伸びる。返信の付いたレスは元から目立たせている
 /// （件数が左へ張り出す）ので、そこだけ息継ぎが入るのは筋が通る。
 const double _replyCountTapHeight = 26;
@@ -670,9 +724,6 @@ class _Header extends StatelessWidget {
   const _Header({
     required this.res,
     required this.name,
-    required this.idCount,
-    required this.idOrdinal,
-    required this.onTapId,
     required this.isOwn,
     required this.isThreadOwner,
     required this.isReplyToOwn,
@@ -685,9 +736,6 @@ class _Header extends StatelessWidget {
 
   /// ヘッダに出す名前と見せ方（[PostItem._headerName] の結果）。
   final ({String text, bool muted}) name;
-  final int idCount;
-  final int idOrdinal;
-  final ValueChanged<String>? onTapId;
   final int replyCount;
   final ValueChanged<int>? onTapReplies;
   final bool isOwn;
@@ -708,12 +756,11 @@ class _Header extends StatelessWidget {
         : lineHeight;
 
     return Row(
-      // 左グループが 2 行になっても、日時・返信ボタンは 1 行目の高さに揃える。
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // 左グループ（番号・名前・ID・自分）を Expanded で残り幅ごと占有させ、
-        // 日時・返信ボタンを画面幅に関わらず常に右端へ固定する。深いツリーで幅が
-        // 足りないときは、要素を省略せず Wrap で 2 行目へ折り返す。
+        // 左グループ（名前・スレ主・自分）を Expanded で残り幅ごと占有させる。
+        // 幅が足りないときは、要素を省略せず Wrap で 2 行目へ折り返す。
+        // **時刻はここには無い**（レスの足元、[PostItem] 側の行に置いている）。
         Expanded(
           child: LayoutBuilder(
             builder: (context, constraints) => Wrap(
@@ -735,24 +782,14 @@ class _Header extends StatelessWidget {
                       onTap: onTapReplies,
                     ),
                   ),
-                // チップは固定高さのスロットに入れない。狭いときは中身に応じて
-                // 縦に伸び、それでも入らなければ省略する。スロットで 1 行に
-                // 固定すると、折り返したときにチップが潰れる。
-                if (res.id != null)
-                  _IdChip(
-                    id: res.id!,
-                    count: idCount,
-                    ordinal: idOrdinal,
-                    onTap: onTapId,
-                  )
-                else
-                  // ID なしの板。アイコンごと省くと、名無し・返信なしのレスは
-                  // ヘッダが時刻だけになってレスの切れ目が読めなくなる。
-                  const _NoIdChip(),
-                // スレ主の印は ID アイコンのすぐ隣。「誰が」に掛かる情報なので
-                // 人物（アイコン）から離さない。長いコテハンの後ろに置くと、
-                // 折り返したときにアイコンと別の行へ飛んでしまう。★ はスレ主
-                // NG の `[xxxx★]` と同じ、このアプリでのスレ主の記号。
+                // その ID の何本目か（`n/m`）はヘッダに出さない。**連投の多さは
+                // 左の柱の外周リングの色が持っている**ので、ヘッダに数字で足すと
+                // 同じことを二度言うことになる。正確なレス数は ID をタップした
+                // シートの見出しに出る。
+                //
+                // スレ主の印はヘッダの先頭。「誰が」に掛かる情報なので、左の
+                // 柱の identicon から離さない。★ はスレ主 NG の `[xxxx★]` と
+                // 同じ、このアプリでのスレ主の記号。
                 if (isThreadOwner)
                   _OwnChip(
                     color: scheme.tertiary,
@@ -787,11 +824,6 @@ class _Header extends StatelessWidget {
               ],
             ),
           ),
-        ),
-        const SizedBox(width: 8),
-        _HeaderSlot(
-          height: lineHeight,
-          child: _TimeLabel(res: res),
         ),
       ],
     );
@@ -956,6 +988,12 @@ class _TimeLabel extends StatelessWidget {
   const _TimeLabel({required this.res});
   final Res res;
 
+  /// レスの足元に置くときの、字の上下の余白。
+  ///
+  /// **本文にぴったり付ける。** ここが空くと、時刻が本文と次のレスの真ん中に
+  /// 浮いて、どちらのレスのものか読めなくなる。
+  static const _footerVerticalPadding = 0.0;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -968,8 +1006,11 @@ class _TimeLabel extends StatelessWidget {
       when: res.dateTime,
       text: (now) => relativeResTime(res.dateTime, now: now) ?? _short(res),
       builder: (context, text) => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-        child: Text(text, style: style),
+        padding: const EdgeInsets.symmetric(
+          horizontal: 4,
+          vertical: _footerVerticalPadding,
+        ),
+        child: Text(text, style: style?.copyWith(height: 1)),
       ),
     );
     if (full.isEmpty) return label;
@@ -990,38 +1031,51 @@ class _TimeLabel extends StatelessWidget {
   }
 }
 
-/// ID なしの板でのアイコン枠。[_IdChip] と同じ大きさ・同じ位置を占め、
-/// ヘッダの左端とレスの切れ目だけを保つ。
+/// 左の柱に立てる identicon の一辺。
+///
+/// ヘッダの行と本文の 1 行目にまたがって置くので、ここを大きくしてもレスの
+/// 高さは増えない。文字と行を共有していた頃（ヘッダのチップ）は行の高さが
+/// 上限だったが、柱にしたことでその縛りが外れている。
+const double _idGutterSize = 24;
+
+/// 柱と本文の間。
+const double _idGutterGap = 10;
+
+/// 本文の字の大きさと行の高さ。一覧のタイトル（14px）寄りに詰めつつ、読む主役の
+/// テキストなので 1px 大きくして行間を確保する。
+const double _bodyFontSize = 15;
+const double _bodyLineHeight = 1.4;
+
+/// 柱の絵の下に添える連投数（`n/m`）の字の大きさ。
+const double _idGutterCountSize = 10;
+
+/// ID なしの板での柱。[_IdGutter] と同じ幅を占め、本文の左端を揃える。
 ///
 /// 押せない（絞り込む ID が無い）し、輪も色を持たない（連投を数えられない）。
-class _NoIdChip extends StatelessWidget {
-  const _NoIdChip();
+class _NoIdGutter extends StatelessWidget {
+  const _NoIdGutter();
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return Semantics(
       label: 'IDなし',
-      child: Padding(
-        padding: const EdgeInsets.only(right: 2),
-        child: Container(
-          padding: const EdgeInsets.all(1),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(6),
-            border: Border.all(
-              color: scheme.outlineVariant.withValues(alpha: 0.8),
-              width: 1.2,
-            ),
-          ),
-          child: const IdIconPlaceholder(),
-        ),
+      child: const Padding(
+        // ヘッダの文字（行高 20）の中心と絵の中心を合わせる。
+        padding: EdgeInsets.only(top: 2),
+        child: IdIconPlaceholder(size: _idGutterSize),
       ),
     );
   }
 }
 
-class _IdChip extends StatelessWidget {
-  const _IdChip({
+/// レスの左に立てる「誰が」の柱。identicon と、その ID の何レス目かを縦に積む。
+///
+/// ヘッダの文字列（名前・時刻・返信数）と同じ行に並べず、行の外へ出している。
+/// 絵と文字を同じ行に混ぜると、絵の大きさが行の高さに縛られて小さくしか
+/// できず、しかも文字と近い大きさになって「行内の記号」に見えてしまう。柱に
+/// すれば大きさを行から切り離せて、役割の違いも見た目に出る。
+class _IdGutter extends StatelessWidget {
+  const _IdGutter({
     required this.id,
     required this.count,
     required this.ordinal,
@@ -1042,37 +1096,37 @@ class _IdChip extends StatelessWidget {
       button: onTap != null,
       child: InkWell(
         onTap: onTap == null ? null : () => onTap!(id),
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(8),
         child: Padding(
-          // 高さ・幅とも中身に合わせて縮める（Wrap 内で全幅化させない）。
-          // 余白は右にだけ足す。ヘッダの先頭に来るので、左を広げるとアイコンが
-          // 本文の左端からずれる。
-          padding: const EdgeInsets.only(right: 2),
-          child: Row(
+          // ヘッダの文字（行高 20）の中心と絵の中心を合わせる。
+          padding: const EdgeInsets.only(top: 2),
+          child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                padding: const EdgeInsets.all(1),
+                padding: const EdgeInsets.all(1.5),
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(6),
+                  borderRadius: BorderRadius.circular(9),
                   // 外周のリングだけレス数で色を変える。中の絵は ID ごとの
                   // 色なので、そこに連投の多さを混ぜると両方読めなくなる。
                   border: Border.all(
                     color: color.withValues(alpha: 0.75),
-                    width: 1.2,
+                    width: 1.5,
                   ),
                 ),
-                child: IdIcon(id: id),
+                child: IdIcon(id: id, size: _idGutterSize),
               ),
-              if (count > 1) ...[
-                const SizedBox(width: 4),
-                // 上のラベルが「ID:xxx (1/2)」まで読み上げるので、同じことを
+              if (count > 1)
+                // 上のラベルが「ID:xxx (1/15)」まで読み上げるので、同じことを
                 // 言うこの数字は読み上げから外す。見た目の要約でしかない。
                 ExcludeSemantics(
                   child: Text(
                     '$ordinal/$count',
                     style: TextStyle(
-                      fontSize: 11,
+                      fontSize: _idGutterCountSize,
+                      // 行の高さを字の高さちょうどにして、絵との間を詰める。
+                      // ここが空くと柱が本文より高くなり、1 行だけのレスが
+                      // 絵の分だけ間延びする。
                       height: 1,
                       leadingDistribution: TextLeadingDistribution.even,
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -1080,7 +1134,6 @@ class _IdChip extends StatelessWidget {
                     ),
                   ),
                 ),
-              ],
             ],
           ),
         ),
