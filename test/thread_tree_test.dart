@@ -255,9 +255,55 @@ void main() {
     });
   });
 
-  test('flatThreadRows は dat の順のまま深さ 0', () {
-    final res = [post(1, 'OP'), post(2, '>>1 レス')];
-    expect(shape(flatThreadRows(res)), ['1:0', '2:0']);
+  group('layOutFlatRows（番号順表示）', () {
+    /// 新着ライン無し（全部が「開いた時点まで」）で組んだ行。
+    List<String> flat(List<Res> res) =>
+        shape(layOutFlatRows(res, settledCount: res.length).settled);
+
+    test('並べ替えずに dat の順のまま深さ 0', () {
+      final res = [post(1, 'OP'), post(2, 'ふつう'), post(3, '>>1 レス')];
+      expect(flat(res), ['1:0', '2:0', '1:0:引用', '3:0']);
+    });
+
+    test('返信先の引用行を返信レスの手前に挟む', () {
+      final res = [post(1, 'OP'), post(2, 'ふつう'), post(3, '>>1 レス')];
+      final rows = layOutFlatRows(res, settledCount: 3).settled;
+      expect(rows[2].quote, isTrue);
+      expect(rows[2].res.number, 1);
+      expect(rows[3].res.number, 3);
+    });
+
+    test('返信先が直前のレスでも引用する（返信の見た目を揃える）', () {
+      final res = [post(1, 'OP'), post(2, '>>1 レス'), post(3, '>>2 その返信')];
+      expect(flat(res), ['1:0', '1:0:引用', '2:0', '2:0:引用', '3:0']);
+    });
+
+    test('同じ相手への連投でも毎回引用する', () {
+      final res = [
+        post(1, 'OP'),
+        post(2, 'ふつう'),
+        post(3, '>>1 a'),
+        post(4, '>>1 b'),
+      ];
+      expect(flat(res), ['1:0', '2:0', '1:0:引用', '3:0', '1:0:引用', '4:0']);
+    });
+
+    test('複数を指すレスは最初の指し先を引用する', () {
+      final res = [post(1, 'OP'), post(2, 'ふつう'), post(3, '>>2 >>1 まとめて')];
+      expect(flat(res), ['1:0', '2:0', '2:0:引用', '3:0']);
+    });
+
+    test('無い番号・自分より新しい番号を指すレスには引用を付けない', () {
+      final res = [post(1, 'OP'), post(2, '>>5 まだ無い番号')];
+      expect(flat(res), ['1:0', '2:0']);
+    });
+
+    test('新着ラインをまたぐ返信も引用ごと新着側へ入る', () {
+      final res = [post(1, 'OP'), post(2, 'ふつう'), post(3, '>>1 新着')];
+      final layout = layOutFlatRows(res, settledCount: 2);
+      expect(shape(layout.settled), ['1:0', '2:0']);
+      expect(shape(layout.arrivals), ['1:0:引用', '3:0']);
+    });
   });
 
   group('ThreadTreeTier（字下げ帯）', () {

@@ -131,8 +131,17 @@ void main() {
   );
 
   /// ヘッダの ID アイコン（identicon）。タップで同一 ID のレス一覧が出る。
-  Finder idIcons(String id) =>
-      find.byWidgetPredicate((w) => w is IdIcon && w.id == id);
+  ///
+  /// レス本体に絞る。返信先の引用行にも同じ絵が出るが、あちらは押せない再掲
+  /// なので数にも並びにも入れない。
+  Finder idIcons(String id) => find.descendant(
+    of: find.byType(PostItem),
+    matching: find.byWidgetPredicate((w) => w is IdIcon && w.id == id),
+  );
+
+  /// レス本体の中の文字。引用行にも同じ本文の頭が出るので、本体だけを見る。
+  Finder inPost(Finder matching) =>
+      find.descendant(of: find.byType(PostItem), matching: matching);
 
   /// ヘッダ左端の返信数（吹き出し＋件数）。**返信が付いたレスにしか出ない。**
   /// タップで会話ビュー。
@@ -207,8 +216,11 @@ void main() {
     await tester.pumpWidget(app(f));
     await tester.pumpAndSettle();
 
-    expect(find.text('最初のレス'), findsOneWidget);
-    expect(find.textContaining('同じIDの2つ目', findRichText: true), findsOneWidget);
+    expect(inPost(find.text('最初のレス')), findsOneWidget);
+    expect(
+      inPost(find.textContaining('同じIDの2つ目', findRichText: true)),
+      findsOneWidget,
+    );
     // 同一 ID は同じ identicon で出て、横に「このレスが何番目か / 合計レス数」
     // が付く。ID 文字列そのものはアイコンをタップした先のシートで読む。
     expect(idIcons('aaa'), findsNWidgets(2));
@@ -1095,7 +1107,7 @@ void main() {
 
     // 番号横の吹き出しを押し外すとこのメニューが開くので、ここからも同じ
     // 返信一覧へ行けるようにしてある。
-    await tester.longPress(find.text('最初のレス'));
+    await tester.longPress(inPost(find.text('最初のレス')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('返信 2 件を見る'));
     await tester.pumpAndSettle();
@@ -1355,7 +1367,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // 過去ログの本文が出る。
-    expect(find.text('最初のレス'), findsOneWidget);
+    expect(inPost(find.text('最初のレス')), findsOneWidget);
     // dat落ちラベル。
     expect(find.text('2レス ・ dat落ち'), findsOneWidget);
     // 書き込み欄は読み取り専用（停止扱い）。ヒントも停止中に変わる。

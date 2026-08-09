@@ -79,6 +79,21 @@ void main() {
     return [for (final p in placed) p.number];
   }
 
+  /// 画面に上から並んでいる引用行のレス番号（[shownNumbers] と同じく縦位置順）。
+  List<int> shownQuotedNumbers(WidgetTester tester) {
+    final placed = [
+      for (final w in tester.widgetList<QuotedResRow>(
+        find.byType(QuotedResRow),
+      ))
+        (top: tester.getTopLeft(find.byWidget(w)).dy, number: w.res.number),
+    ]..sort((a, b) => a.top.compareTo(b.top));
+    return [for (final p in placed) p.number];
+  }
+
+  PostItem postItemFor(WidgetTester tester, int number) => tester
+      .widgetList<PostItem>(find.byType(PostItem))
+      .firstWhere((w) => w.res.number == number);
+
   testWidgets('未読スレはツリー順で並べる', (tester) async {
     final f = QueueFetcher([
       ok(dat(4, const {2: '>>1 レス1へ', 4: '>>2 レス2へ'})),
@@ -111,6 +126,55 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(shownNumbers(tester), [1, 2, 3, 4]);
+  });
+
+  testWidgets('番号順でも返信レスの手前に返信先を再掲する', (tester) async {
+    final f = QueueFetcher([
+      ok(dat(4, const {4: '>>1 レス1へ'})),
+    ]);
+    await tester.pumpWidget(
+      app(
+        f,
+        history: ReadHistory(MemoryReadHistoryStorage()),
+        view: ThreadViewSettings(MemoryThreadViewSettingsStorage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 並びは dat のまま。4 の指し先（1）は画面のずっと上なので手前に再掲する。
+    expect(shownNumbers(tester), [1, 2, 3, 4]);
+    final quote = tester.widget<QuotedResRow>(find.byType(QuotedResRow));
+    expect(quote.res.number, 1);
+    expect(
+      find.descendant(
+        of: find.byType(QuotedResRow),
+        matching: find.textContaining('レス1'),
+      ),
+      findsOneWidget,
+    );
+    // 引用行は 4 のすぐ上（返信の手前）。
+    expect(
+      tester.getTopLeft(find.byType(QuotedResRow)).dy,
+      lessThan(tester.getTopLeft(find.byWidget(postItemFor(tester, 4))).dy),
+    );
+  });
+
+  testWidgets('番号順では返信先がすぐ上にあっても毎回再掲する', (tester) async {
+    final f = QueueFetcher([
+      ok(dat(4, const {2: '>>1 レス1へ', 3: '>>2 レス2へ'})),
+    ]);
+    await tester.pumpWidget(
+      app(
+        f,
+        history: ReadHistory(MemoryReadHistoryStorage()),
+        view: ThreadViewSettings(MemoryThreadViewSettingsStorage()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 返信レスは 2 と 3 の 2 つ。返信でないレスには引用行が付かない。
+    expect(shownNumbers(tester), [1, 2, 3, 4]);
+    expect(shownQuotedNumbers(tester), [1, 2]);
   });
 
   testWidgets('既読ぶんだけツリーにし、新着は下へ積む', (tester) async {

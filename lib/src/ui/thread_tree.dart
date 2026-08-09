@@ -1,4 +1,6 @@
-/// ツリー表示の行組み。
+/// レス一覧の行組み。番号順表示（[layOutFlatRows]）とツリー表示
+/// （[layOutThreadTree]）の両方をここで組む。どちらも**返信先を薄い引用行として
+/// 手前に再掲する**（[QuotedResRow]）ところは同じで、並べ替えるかどうかが違う。
 ///
 /// **既に読んだところだけをツリーにする。** レスを `>>N` の親子でぶら下げると、
 /// 後から来たレスが古いレスの直下へ挿し込まれる。そうなると自動更新のたびに
@@ -35,31 +37,21 @@ class ThreadTreeRow {
   final bool quote;
 }
 
-/// ツリー表示の行。境界（新着ライン）を挟んで [settled] と [arrivals] に
-/// 分かれる。
+/// 一覧の行。境界（新着ライン）を挟んで [settled] と [arrivals] に分かれる。
 class ThreadTreeLayout {
   const ThreadTreeLayout({required this.settled, required this.arrivals});
 
-  /// 開いた時点までのレス。`>>N` の親子でぶら下げたツリー。
+  /// 開いた時点までのレス。ツリー表示では `>>N` の親子でぶら下げたツリー。
   final List<ThreadTreeRow> settled;
 
-  /// 開いたあとに増えたレス。根は届いた順に並び、新着どうしの返信はその根の
-  /// 下でツリーになる。
+  /// 開いたあとに増えたレス。ツリー表示では根が届いた順に並び、新着どうしの
+  /// 返信はその根の下でツリーになる。
   final List<ThreadTreeRow> arrivals;
 }
 
-/// 番号順表示の行。dat の順にそのまま並べる。
-List<ThreadTreeRow> flatThreadRows(List<Res> res) => [
-  for (final r in res) ThreadTreeRow(res: r),
-];
-
-/// ツリー表示の行を組む。[settledCount] 件目までがツリー、それ以降が新着。
-///
-/// 親は **本文で最初に指している既存の若いレス**（`>>5 >>7` なら 5）。番号が
-/// 若い方へしか繋がないので循環しない。指し先が無い・自分より新しい番号しか
-/// 指していないレスは根になる。
-ThreadTreeLayout layOutThreadTree(List<Res> res, {required int settledCount}) {
-  final byNumber = {for (final r in res) r.number: r};
+/// 返信先の親（本文で最初に指している既存の若いレス。`>>5 >>7` なら 5）を
+/// レス番号ごとに引けるようにする。番号が若い方へしか繋がないので循環しない。
+Map<int, int> _parentsOf(List<Res> res, Map<int, Res> byNumber) {
   final parentOf = <int, int>{};
   for (final r in res) {
     for (final n in referencedResNumbers(r.body)) {
@@ -69,6 +61,49 @@ ThreadTreeLayout layOutThreadTree(List<Res> res, {required int settledCount}) {
       }
     }
   }
+  return parentOf;
+}
+
+/// 番号順表示の行を組む。dat の順にそのまま並べ、**返信レスの手前にその返信先を
+/// 薄い引用行として再掲する**（ツリー表示の新着側と同じ [QuotedResRow]）。
+///
+/// 番号順では返信先が画面のずっと上にあることが多く、`>>N` の番号だけでは何への
+/// 返信か分からない。かといって並べ替える（＝ツリーにする）と読む順が変わるので、
+/// **並びはそのままに、返信先の頭だけを手前に添える**。
+///
+/// **返信レスには必ず添える**。直前のレスへの返信（すぐ上に本体がある）でも、
+/// 同じ相手への連投でも省かない。返信レスの見た目がいつも「引用行＋本体」で
+/// 揃うので、引用行の有無を手掛かりに「これは返信か」を一目で判じられる。
+/// 省く条件を入れると、返信なのに引用が無い行が混ざって、その手掛かりが効かなく
+/// なる。
+///
+/// 境界（新着ライン）は [settledCount] 件目。
+ThreadTreeLayout layOutFlatRows(List<Res> res, {required int settledCount}) {
+  final byNumber = {for (final r in res) r.number: r};
+  final parentOf = _parentsOf(res, byNumber);
+  final count = settledCount.clamp(0, res.length);
+
+  List<ThreadTreeRow> rowsFor(Iterable<Res> part) => [
+    for (final r in part) ...[
+      if (parentOf[r.number] case final parent?)
+        ThreadTreeRow(res: byNumber[parent]!, quote: true),
+      ThreadTreeRow(res: r),
+    ],
+  ];
+
+  return ThreadTreeLayout(
+    settled: rowsFor(res.take(count)),
+    arrivals: rowsFor(res.skip(count)),
+  );
+}
+
+/// ツリー表示の行を組む。[settledCount] 件目までがツリー、それ以降が新着。
+///
+/// 親は **本文で最初に指している既存の若いレス**（`>>5 >>7` なら 5）。指し先が
+/// 無い・自分より新しい番号しか指していないレスは根になる。
+ThreadTreeLayout layOutThreadTree(List<Res> res, {required int settledCount}) {
+  final byNumber = {for (final r in res) r.number: r};
+  final parentOf = _parentsOf(res, byNumber);
 
   final count = settledCount.clamp(0, res.length);
   final settledRes = res.take(count).toList();

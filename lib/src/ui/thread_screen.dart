@@ -2337,24 +2337,16 @@ class _ThreadScreenState extends State<ThreadScreen>
     // 行データを組む（[ThreadTreeRow] か 新着ライン）。インデックス指定
     // スクロールのため Widget ではなくデータで持ち、[_items] に保存する。
     final items = <Object>[];
-    if (_view.layout == ThreadLayout.tree) {
-      // ツリーに固めるのは新着ラインより上（＝開いた時点まで）。新着ラインが
-      // 無ければ全部が対象。あとから来たぶんはツリーへ挿さず下へ積む。
-      final tree = layOutThreadTree(
-        res,
-        settledCount: hasNewArrival ? _openCount : res.length,
-      );
-      items.addAll(tree.settled);
-      if (hasNewArrival) items.add(const _NewArrivalMarker());
-      items.addAll(tree.arrivals);
-    } else {
-      for (var i = 0; i < res.length; i++) {
-        if (hasNewArrival && i == _openCount) {
-          items.add(const _NewArrivalMarker());
-        }
-        items.add(ThreadTreeRow(res: res[i]));
-      }
-    }
+    // ツリーに固めるのは新着ラインより上（＝開いた時点まで）。新着ラインが
+    // 無ければ全部が対象。あとから来たぶんはツリーへ挿さず下へ積む。番号順では
+    // 並びが変わらないので、境界は新着ラインを挟む位置を決めるだけ。
+    final settledCount = hasNewArrival ? _openCount : res.length;
+    final layout = _view.layout == ThreadLayout.tree
+        ? layOutThreadTree(res, settledCount: settledCount)
+        : layOutFlatRows(res, settledCount: settledCount);
+    items.addAll(layout.settled);
+    if (hasNewArrival) items.add(const _NewArrivalMarker());
+    items.addAll(layout.arrivals);
     _items = items;
     // 着地位置は行が組み上がって初めて出せる（ツリーではレス数と行位置が
     // 一致しない）。初回の一度きり。
