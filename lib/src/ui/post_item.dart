@@ -6,6 +6,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../net/thread_command.dart';
 import '../net/thread_link.dart';
 import 'mini_player.dart';
 import 'format.dart';
@@ -153,9 +154,15 @@ class PostItem extends StatelessWidget {
     }
 
     final name = htmlToText(res.name).trim();
+    // スレ立てのコマンド（`!metadent:vv - configured` 等）は板への指示であって
+    // 読む文ではない。本文からは外し、意味だけ札にして下に出す。
+    final rawBody = htmlToText(res.body);
+    final command = parseThreadCommand(rawBody);
     // AA はインデントや上下の余白が絵の一部になるのでそのまま残し、普通のレスは
     // 前後の空白・空行を落として詰める。
-    final body = trimUnlessAsciiArt(htmlToText(res.body));
+    final body = trimUnlessAsciiArt(
+      command == null ? rawBody : stripThreadCommand(rawBody, command),
+    );
     // スレ URL は OGP の設定に関わらずカードにする（中身は掲示板サーバから
     // 取るので、リンク先へ通信が広がらない。詳しくは [ThreadLinks]）。
     final segments = splitPostBody(
@@ -221,6 +228,7 @@ class PostItem extends StatelessWidget {
             onTapReplies: onTapReplies,
             highlightQuery: highlightQuery,
           ),
+          if (command != null) _ThreadCommandChip(command: command),
           // 本文は貼られた URL の位置でサムネイルを挟みながら、上から順に積む。
           // メディアの区画（PostImages）は自前で上の余白を持つので、文章の
           // 区画だけ手前に間を入れる。
@@ -330,6 +338,56 @@ class PostItem extends StatelessWidget {
       }
     }
     return (text: name, muted: false);
+  }
+}
+
+/// スレ立てのコマンドを、読める言葉に置き換えて出す小さな札。
+///
+/// `!metadent:vv - configured` のような綴りは板への指示なので、そのまま出しても
+/// 読む人には意味が取れない。かといって黙って消すと、**そのスレの名前欄に何が
+/// 出るのか**という 1 レス目にしか無い情報まで消える。言葉に置き換えて残す。
+///
+/// 板の設定で強制されたもの（`forced`）はスレ立て人が選んだものではないので、
+/// そう分かるように書き添える。
+class _ThreadCommandChip extends StatelessWidget {
+  const _ThreadCommandChip({required this.command});
+
+  final ThreadCommand command;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest.withValues(alpha: 0.6),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.badge_outlined,
+                size: 13,
+                color: scheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                command.isForced ? '${command.label}（板の設定）' : command.label,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
