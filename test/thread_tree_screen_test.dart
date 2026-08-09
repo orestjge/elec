@@ -207,14 +207,41 @@ void main() {
       ),
       findsNothing,
     );
-    // いつのレスへの返信かも分かるよう、日時を添える（過去の日付なので日付付き）。
+    // 日時は出さない。引用行は 1 行に収める添え物なので、置くものを「誰の・何の
+    // 話か」——ID の絵と本文の頭——に絞る。
     expect(
       find.descendant(
         of: find.byType(QuotedResRow),
         matching: find.text('11/03 02:14'),
       ),
-      findsOneWidget,
+      findsNothing,
     );
+  });
+
+  testWidgets('複数に返しているレスは返信先を全部、間を空けずに重ねて出す', (tester) async {
+    final history = ReadHistory(MemoryReadHistoryStorage());
+    await history.markRead(threadKey, 3);
+    final f = QueueFetcher([
+      ok(dat(4, const {4: '>>1 >>2 まとめて返す'})),
+    ]);
+
+    await tester.pumpWidget(
+      app(f, history: history, view: await treeSettings()),
+    );
+    await tester.pumpAndSettle();
+
+    // 1 つ目だけでは、残りの相手へ何を返したのか読めない。
+    expect(shownQuotedNumbers(tester), [1, 2]);
+
+    // 続く引用行は間を空けずに重ねる。空けると 1 本ずつ別の何かに見える。
+    final rows =
+        [
+          for (final w in tester.widgetList<QuotedResRow>(
+            find.byType(QuotedResRow),
+          ))
+            tester.getRect(find.byWidget(w)),
+        ]..sort((a, b) => a.top.compareTo(b.top));
+    expect(rows[1].top, rows[0].bottom);
   });
 
   testWidgets('開いたあとに来たレスはツリーへ挿さず末尾に積む', (tester) async {

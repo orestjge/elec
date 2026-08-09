@@ -759,10 +759,13 @@ class _ThreadScreenState extends State<ThreadScreen>
     if (!mounted || !_itemScroll.isAttached) return;
     final index = _indexForResNumber(number);
     if (index == null) return;
-    final previous = index > 0 ? _items[index - 1] : null;
-    final target = previous is ThreadTreeRow && previous.quote
-        ? index - 1
-        : index;
+    // 複数に返しているレスは引用行が続けて何本も並ぶので、その手前まで戻る。
+    var target = index;
+    while (target > 0) {
+      final previous = _items[target - 1];
+      if (previous is! ThreadTreeRow || !previous.quote) break;
+      target--;
+    }
     _itemScroll.scrollTo(
       index: target,
       alignment: 0,
@@ -1016,13 +1019,16 @@ class _ThreadScreenState extends State<ThreadScreen>
     );
   }
 
+  /// NG に当たっていて、まだ「見る」を押されていないレスか。
+  bool _isNgHidden(Res res) =>
+      _ng.matches(res) && !_revealedNg.contains(res.number);
+
   /// 入力欄の返信先表示に出すレス。無い番号（まだ来ていない・打ち間違い）なら
   /// null を返して何も出さない。NG のレスは中身を伏せ、番号だけ出す。
   _ReplyTarget? _replyTargetFor(int number) {
     final res = _resByNumber(number);
     if (res == null) return null;
-    final hidden = _ng.matches(res) && !_revealedNg.contains(number);
-    return _ReplyTarget(number, hidden ? '' : resExcerpt(res));
+    return _ReplyTarget(number, _isNgHidden(res) ? '' : resExcerpt(res));
   }
 
   Res? _resByNumber(int number) {
@@ -2383,16 +2389,30 @@ class _ThreadScreenState extends State<ThreadScreen>
                   final row = items[i];
                   if (row is! ThreadTreeRow) return const _NewArrivalLine();
                   final item = row.res;
-                  final ngHidden =
-                      _ng.matches(item) && !_revealedNg.contains(item.number);
+                  final ngHidden = _isNgHidden(item);
                   // 返信先の再掲。NG のレスはここでも出さない（行だけ畳む）。
                   if (row.quote) {
                     if (ngHidden) return const SizedBox.shrink();
-                    return QuotedResRow(
-                      res: item,
-                      onTap: () => _showConversation(
-                        item.number,
-                        focusNumber: item.number,
+                    // 直前も引用行なら詰めて重ねる（複数に返しているレス）。
+                    // NG で畳んだ行の下では詰めない——上に何も無いので、間が
+                    // 空くのではなく前のレスに貼り付いてしまう。
+                    final previous = i > 0 ? items[i - 1] : null;
+                    final joins =
+                        previous is ThreadTreeRow &&
+                        previous.quote &&
+                        !_isNgHidden(previous.res);
+                    // 引用行もそのレスと同じ深さに置く（ツリーの途中に挟まる
+                    // 「親以外の返信先」が、どのレスに付いているかを揃える）。
+                    return ThreadTreeTier(
+                      depth: row.depth,
+                      child: QuotedResRow(
+                        res: item,
+                        joinsPrevious: joins,
+                        onTap: () => _showConversation(
+                          item.number,
+                          focusNumber: item.number,
+                        ),
+                        blurImages: guroMasked.contains(item.number),
                       ),
                     );
                   }
