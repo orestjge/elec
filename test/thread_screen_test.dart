@@ -11,6 +11,7 @@ import 'package:elec/src/ui/post_images.dart';
 import 'package:elec/src/ui/post_item.dart';
 import 'package:elec/src/ui/thread_map.dart';
 import 'package:elec/src/ui/thread_screen.dart';
+import 'package:elec/src/ui/thread_tree.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -973,6 +974,60 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('会話 #1  2件'), findsOneWidget);
+  });
+
+  /// `>>n-1` へ返信し続ける [n] 件の数珠つなぎ。1 は返信していない。
+  List<int> chainDat(int n) => [
+    for (var i = 1; i <= n; i++)
+      ...datLine(
+        '名無し<><>2025/11/03(月) 02:${i.toString().padLeft(2, '0')}:00.000 '
+        'ID:aaa<> ${i == 1 ? '最初のレス' : '>>${i - 1} レス$i'} '
+        '<>${i == 1 ? 'スレタイ' : ''}',
+      ),
+  ];
+
+  /// 返信先の引用行。押すと会話ビューが開く。
+  Finder quoteRowFor(int number) => find.byWidgetPredicate(
+    (w) => w is QuotedResRow && w.res.number == number,
+  );
+
+  testWidgets('会話ビューは返信先をたどって会話の始まりまで載せる', (tester) async {
+    final f = QueueFetcher([ok(chainDat(4))]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    // レス 4 の手前に出ている引用行（返信先＝3）から会話を開く。
+    await tester.tap(quoteRowFor(3));
+    await tester.pumpAndSettle();
+
+    // 3 から返信先をたどって 2・1 まで載る。直接の返信先だけ（2・3・4）だと
+    // 会話の途中から読むことになり、その前を見るのに開き直すはめになる。
+    expect(find.text('会話 #3  4件'), findsOneWidget);
+    expect(find.text('最初のレス'), findsWidgets);
+  });
+
+  testWidgets('遡るのは決めた世代まで（会話ビューが手前のレスで埋まらない）', (tester) async {
+    // 数珠つなぎの末尾まで一度に映るよう、縦に長い画面で見る。
+    tester.view.physicalSize = const Size(800, 3000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final f = QueueFetcher([ok(chainDat(10))]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    await tester.tap(quoteRowFor(9));
+    await tester.pumpAndSettle();
+
+    // 中心は 9。手前は 6 世代ぶん（8〜3）で打ち切り、あとは 9 への返信 10。
+    // 2・1 まで載せると、読みに来た 9 が下へ押し流される。
+    expect(find.text('会話 #9  8件'), findsOneWidget);
+    expect(
+      find.byWidgetPredicate(
+        (w) => w.runtimeType.toString() == '_ConversationPost',
+      ),
+      findsNWidgets(8),
+    );
   });
 
   testWidgets('ヘッダ左端の返信数から会話ビューを出す', (tester) async {

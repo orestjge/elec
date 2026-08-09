@@ -1674,20 +1674,23 @@ class _ThreadScreenState extends State<ThreadScreen>
         centerNumbers.where((n) => byNumber.containsKey(n)).toList()..sort();
     if (centerPosts.isEmpty) return const [];
 
-    final parents = <int>{};
-    for (final n in centerPosts) {
-      parents.addAll(_referencedNumbers(byNumber[n]!));
-    }
-    final parentNumbers =
-        parents
-            .where((n) => byNumber.containsKey(n) && !centers.contains(n))
-            .toList()
-          ..sort();
-    for (final n in parentNumbers) {
+    // 中心レスの手前は、返信先をたどれるだけたどって載せる。直接の返信先だけを
+    // 出すと会話の途中から読み始めることになり、その前が何の話だったのかを見る
+    // のに開き直しを繰り返すことになる。**始まりまで積んでおいて、上へ遡るだけ
+    // で読める**ようにする。
+    final ancestorNumbers = _conversationAncestors(
+      centerPosts,
+      byNumber,
+      centers,
+    );
+    for (final n in ancestorNumbers) {
       add(n, 0);
     }
 
-    final centerDepth = parentNumbers.isEmpty ? 0 : 1;
+    // 手前のレスは何世代さかのぼっても字下げしない。世代のぶんだけ下げると中心
+    // レス——読みに来た当のもの——が右へ押し込まれて本文が潰れる。誰への返信かは
+    // 各レスの返信先の見出し（[_ConversationEntry.refs]）で読める。
+    final centerDepth = ancestorNumbers.isEmpty ? 0 : 1;
     for (final n in centerPosts) {
       add(n, centerDepth);
     }
@@ -1714,6 +1717,40 @@ class _ThreadScreenState extends State<ThreadScreen>
       addReplies(n, centerDepth + 1);
     }
     return entries;
+  }
+
+  /// 会話シートに載せる「中心レスより手前」のレス番号を、返信先をたどって集める。
+  ///
+  /// 近い世代から順に採り、[_maxConversationAncestorLevels] 世代
+  /// ・[_maxConversationAncestors] 件で打ち切る。**複数に返しているレス**を通ると
+  /// 一世代が枝分かれして際限なく広がるので、件数の頭打ちで抑える。近い方から
+  /// 埋まるので、落ちるのは遠い枝＝会話の本筋から外れたところになる。
+  ///
+  /// 返す並びは番号順＝会話の起きた順。
+  List<int> _conversationAncestors(
+    List<int> centerPosts,
+    Map<int, Res> byNumber,
+    Set<int> centers,
+  ) {
+    final found = <int>{};
+    var frontier = centerPosts;
+    for (var level = 0; level < _maxConversationAncestorLevels; level++) {
+      final next = <int>[];
+      for (final n in frontier) {
+        for (final ref in _referencedNumbers(byNumber[n]!)) {
+          if (!byNumber.containsKey(ref)) continue;
+          if (centers.contains(ref)) continue;
+          if (!found.add(ref)) continue;
+          if (found.length >= _maxConversationAncestors) {
+            return found.toList()..sort();
+          }
+          next.add(ref);
+        }
+      }
+      if (next.isEmpty) break;
+      frontier = next;
+    }
+    return found.toList()..sort();
   }
 
   List<int> _referencedNumbers(Res res) {
@@ -3035,6 +3072,16 @@ class _NewArrivalLine extends StatelessWidget {
     );
   }
 }
+
+/// 会話シートで中心レスより手前へ遡る世代の上限。
+///
+/// 会話は長くても数往復で、それより前は話題が変わっていることが多い。際限なく
+/// 遡っても、読みに来た当のレスが下へ押し流されるだけになる。
+const int _maxConversationAncestorLevels = 6;
+
+/// 会話シートに載せる「手前のレス」の件数の上限（[_maxConversationAncestorLevels]
+/// より手前に効く）。枝分かれで膨らんだときの頭打ち。
+const int _maxConversationAncestors = 12;
 
 class _ConversationEntry {
   const _ConversationEntry({
