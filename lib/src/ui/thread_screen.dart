@@ -759,10 +759,13 @@ class _ThreadScreenState extends State<ThreadScreen>
     if (!mounted || !_itemScroll.isAttached) return;
     final index = _indexForResNumber(number);
     if (index == null) return;
-    final previous = index > 0 ? _items[index - 1] : null;
-    final target = previous is ThreadTreeRow && previous.quote
-        ? index - 1
-        : index;
+    // 複数に返しているレスは引用行が続けて何本も並ぶので、その手前まで戻る。
+    var target = index;
+    while (target > 0) {
+      final previous = _items[target - 1];
+      if (previous is! ThreadTreeRow || !previous.quote) break;
+      target--;
+    }
     _itemScroll.scrollTo(
       index: target,
       alignment: 0,
@@ -1016,13 +1019,16 @@ class _ThreadScreenState extends State<ThreadScreen>
     );
   }
 
+  /// NG に当たっていて、まだ「見る」を押されていないレスか。
+  bool _isNgHidden(Res res) =>
+      _ng.matches(res) && !_revealedNg.contains(res.number);
+
   /// 入力欄の返信先表示に出すレス。無い番号（まだ来ていない・打ち間違い）なら
   /// null を返して何も出さない。NG のレスは中身を伏せ、番号だけ出す。
   _ReplyTarget? _replyTargetFor(int number) {
     final res = _resByNumber(number);
     if (res == null) return null;
-    final hidden = _ng.matches(res) && !_revealedNg.contains(number);
-    return _ReplyTarget(number, hidden ? '' : resExcerpt(res));
+    return _ReplyTarget(number, _isNgHidden(res) ? '' : resExcerpt(res));
   }
 
   Res? _resByNumber(int number) {
@@ -1668,20 +1674,23 @@ class _ThreadScreenState extends State<ThreadScreen>
         centerNumbers.where((n) => byNumber.containsKey(n)).toList()..sort();
     if (centerPosts.isEmpty) return const [];
 
-    final parents = <int>{};
-    for (final n in centerPosts) {
-      parents.addAll(_referencedNumbers(byNumber[n]!));
-    }
-    final parentNumbers =
-        parents
-            .where((n) => byNumber.containsKey(n) && !centers.contains(n))
-            .toList()
-          ..sort();
-    for (final n in parentNumbers) {
+    // 中心レスの手前は、返信先をたどれるだけたどって載せる。直接の返信先だけを
+    // 出すと会話の途中から読み始めることになり、その前が何の話だったのかを見る
+    // のに開き直しを繰り返すことになる。**始まりまで積んでおいて、上へ遡るだけ
+    // で読める**ようにする。
+    final ancestorNumbers = _conversationAncestors(
+      centerPosts,
+      byNumber,
+      centers,
+    );
+    for (final n in ancestorNumbers) {
       add(n, 0);
     }
 
-    final centerDepth = parentNumbers.isEmpty ? 0 : 1;
+    // 手前のレスは何世代さかのぼっても字下げしない。世代のぶんだけ下げると中心
+    // レス——読みに来た当のもの——が右へ押し込まれて本文が潰れる。誰への返信かは
+    // 各レスの返信先の見出し（[_ConversationEntry.refs]）で読める。
+    final centerDepth = ancestorNumbers.isEmpty ? 0 : 1;
     for (final n in centerPosts) {
       add(n, centerDepth);
     }
@@ -1708,6 +1717,40 @@ class _ThreadScreenState extends State<ThreadScreen>
       addReplies(n, centerDepth + 1);
     }
     return entries;
+  }
+
+  /// 会話シートに載せる「中心レスより手前」のレス番号を、返信先をたどって集める。
+  ///
+  /// 近い世代から順に採り、[_maxConversationAncestorLevels] 世代
+  /// ・[_maxConversationAncestors] 件で打ち切る。**複数に返しているレス**を通ると
+  /// 一世代が枝分かれして際限なく広がるので、件数の頭打ちで抑える。近い方から
+  /// 埋まるので、落ちるのは遠い枝＝会話の本筋から外れたところになる。
+  ///
+  /// 返す並びは番号順＝会話の起きた順。
+  List<int> _conversationAncestors(
+    List<int> centerPosts,
+    Map<int, Res> byNumber,
+    Set<int> centers,
+  ) {
+    final found = <int>{};
+    var frontier = centerPosts;
+    for (var level = 0; level < _maxConversationAncestorLevels; level++) {
+      final next = <int>[];
+      for (final n in frontier) {
+        for (final ref in _referencedNumbers(byNumber[n]!)) {
+          if (!byNumber.containsKey(ref)) continue;
+          if (centers.contains(ref)) continue;
+          if (!found.add(ref)) continue;
+          if (found.length >= _maxConversationAncestors) {
+            return found.toList()..sort();
+          }
+          next.add(ref);
+        }
+      }
+      if (next.isEmpty) break;
+      frontier = next;
+    }
+    return found.toList()..sort();
   }
 
   List<int> _referencedNumbers(Res res) {
@@ -2337,24 +2380,16 @@ class _ThreadScreenState extends State<ThreadScreen>
     // 行データを組む（[ThreadTreeRow] か 新着ライン）。インデックス指定
     // スクロールのため Widget ではなくデータで持ち、[_items] に保存する。
     final items = <Object>[];
-    if (_view.layout == ThreadLayout.tree) {
-      // ツリーに固めるのは新着ラインより上（＝開いた時点まで）。新着ラインが
-      // 無ければ全部が対象。あとから来たぶんはツリーへ挿さず下へ積む。
-      final tree = layOutThreadTree(
-        res,
-        settledCount: hasNewArrival ? _openCount : res.length,
-      );
-      items.addAll(tree.settled);
-      if (hasNewArrival) items.add(const _NewArrivalMarker());
-      items.addAll(tree.arrivals);
-    } else {
-      for (var i = 0; i < res.length; i++) {
-        if (hasNewArrival && i == _openCount) {
-          items.add(const _NewArrivalMarker());
-        }
-        items.add(ThreadTreeRow(res: res[i]));
-      }
-    }
+    // ツリーに固めるのは新着ラインより上（＝開いた時点まで）。新着ラインが
+    // 無ければ全部が対象。あとから来たぶんはツリーへ挿さず下へ積む。番号順では
+    // 並びが変わらないので、境界は新着ラインを挟む位置を決めるだけ。
+    final settledCount = hasNewArrival ? _openCount : res.length;
+    final layout = _view.layout == ThreadLayout.tree
+        ? layOutThreadTree(res, settledCount: settledCount)
+        : layOutFlatRows(res, settledCount: settledCount);
+    items.addAll(layout.settled);
+    if (hasNewArrival) items.add(const _NewArrivalMarker());
+    items.addAll(layout.arrivals);
     _items = items;
     // 着地位置は行が組み上がって初めて出せる（ツリーではレス数と行位置が
     // 一致しない）。初回の一度きり。
@@ -2391,16 +2426,30 @@ class _ThreadScreenState extends State<ThreadScreen>
                   final row = items[i];
                   if (row is! ThreadTreeRow) return const _NewArrivalLine();
                   final item = row.res;
-                  final ngHidden =
-                      _ng.matches(item) && !_revealedNg.contains(item.number);
+                  final ngHidden = _isNgHidden(item);
                   // 返信先の再掲。NG のレスはここでも出さない（行だけ畳む）。
                   if (row.quote) {
                     if (ngHidden) return const SizedBox.shrink();
-                    return QuotedResRow(
-                      res: item,
-                      onTap: () => _showConversation(
-                        item.number,
-                        focusNumber: item.number,
+                    // 直前も引用行なら詰めて重ねる（複数に返しているレス）。
+                    // NG で畳んだ行の下では詰めない——上に何も無いので、間が
+                    // 空くのではなく前のレスに貼り付いてしまう。
+                    final previous = i > 0 ? items[i - 1] : null;
+                    final joins =
+                        previous is ThreadTreeRow &&
+                        previous.quote &&
+                        !_isNgHidden(previous.res);
+                    // 引用行もそのレスと同じ深さに置く（ツリーの途中に挟まる
+                    // 「親以外の返信先」が、どのレスに付いているかを揃える）。
+                    return ThreadTreeTier(
+                      depth: row.depth,
+                      child: QuotedResRow(
+                        res: item,
+                        joinsPrevious: joins,
+                        onTap: () => _showConversation(
+                          item.number,
+                          focusNumber: item.number,
+                        ),
+                        blurImages: guroMasked.contains(item.number),
                       ),
                     );
                   }
@@ -3023,6 +3072,16 @@ class _NewArrivalLine extends StatelessWidget {
     );
   }
 }
+
+/// 会話シートで中心レスより手前へ遡る世代の上限。
+///
+/// 会話は長くても数往復で、それより前は話題が変わっていることが多い。際限なく
+/// 遡っても、読みに来た当のレスが下へ押し流されるだけになる。
+const int _maxConversationAncestorLevels = 6;
+
+/// 会話シートに載せる「手前のレス」の件数の上限（[_maxConversationAncestorLevels]
+/// より手前に効く）。枝分かれで膨らんだときの頭打ち。
+const int _maxConversationAncestors = 12;
 
 class _ConversationEntry {
   const _ConversationEntry({

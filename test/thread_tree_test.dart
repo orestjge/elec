@@ -46,12 +46,26 @@ void main() {
       ]);
     });
 
-    test('複数を指すレスは最初の指し先にぶら下がる', () {
+    test('複数を指すレスは最初の指し先にぶら下がり、残りは引用で添える', () {
       final res = [post(1, 'OP'), post(2, 'ふつう'), post(3, '>>2 >>1 まとめて')];
+      // 2 の下へ入るのはツリーで表せる 1 人ぶんだけ。1 はどこにも現れないので、
+      // 3 と同じ深さの引用行にして手前へ置く。
       expect(shape(layOutThreadTree(res, settledCount: 3).settled), [
         '1:0',
         '2:0',
+        '1:1:引用',
         '3:1',
+      ]);
+    });
+
+    test('ぶら下げた親は引用しない（すぐ上に本体がある）', () {
+      final res = [post(1, 'OP'), post(2, '>>1 レス'), post(3, '>>2 >>1 両方へ')];
+      // 3 の親は 2。その本体は 1 行上なので引用せず、離れている 1 だけ添える。
+      expect(shape(layOutThreadTree(res, settledCount: 3).settled), [
+        '1:0',
+        '2:1',
+        '1:2:引用',
+        '3:2',
       ]);
     });
 
@@ -150,6 +164,39 @@ void main() {
       expect(shape(layout.arrivals), ['1:0:引用', '3:1', '5:2', '4:1']);
     });
 
+    test('複数を指す新着は指し先の並びが同じものだけまとめる', () {
+      final res = [
+        post(1, 'OP'),
+        post(2, '既読'),
+        post(3, '>>1 >>2 両方へ'),
+        post(4, '>>1 1 だけへ'),
+        post(5, '>>1 >>2 また両方へ'),
+      ];
+      final layout = layOutThreadTree(res, settledCount: 2);
+      // 3 と 5 は指し先がそっくり同じなので 1 つのまとまり。4 を混ぜると
+      // 2 へも返したように読めるので別にする。
+      expect(shape(layout.arrivals), [
+        '1:0:引用',
+        '2:0:引用',
+        '3:1',
+        '5:1',
+        '1:0:引用',
+        '4:1',
+      ]);
+    });
+
+    test('ぶら下がった新着の、親以外の指し先も引用する', () {
+      final res = [
+        post(1, 'OP'),
+        post(2, '既読'),
+        post(3, '新着'),
+        post(4, '>>3 >>2 新着と既読の両方へ'),
+      ];
+      final layout = layOutThreadTree(res, settledCount: 2);
+      // 4 は 3 の下へ入る。ツリーに出てこない 2 は 4 と同じ深さで引用する。
+      expect(shape(layout.arrivals), ['3:0', '2:1:引用', '4:1']);
+    });
+
     test('引用先が違えば別のまとまりになる', () {
       final res = [
         post(1, 'OP'),
@@ -189,75 +236,235 @@ void main() {
     });
   });
 
-  group('quotedResTime（引用行の日時）', () {
-    Res at(String dateText, {DateTime? dateTime}) => Res(
-      number: 1,
-      name: '名無し',
-      mail: '',
-      dateText: dateText,
-      dateTime: dateTime,
-      id: 'x',
-      beId: null,
-      body: '本文',
-      kind: ResKind.normal,
-      threadTitle: null,
-    );
-
-    // JST 2025/11/03 10:00 = UTC 01:00。
-    final now = DateTime.utc(2025, 11, 3, 1);
-
-    test('24 時間以内なら相対表記', () {
-      expect(
-        quotedResTime(
-          at(
-            '2025/11/03(月) 09:55:00.000',
-            dateTime: now.subtract(const Duration(minutes: 5)),
-          ),
-          now: now,
-        ),
-        '5分前',
+  group('quotedResBody（引用行の中身）', () {
+    test('画像 URL は文章から落として画像に回す', () {
+      final body = quotedResBody(
+        post(1, 'これ見て<br>https://example.com/a.jpg<br>どう？'),
       );
-      expect(
-        quotedResTime(
-          at(
-            '2025/11/03(月) 07:00:00.000',
-            dateTime: now.subtract(const Duration(hours: 3)),
-          ),
-          now: now,
-        ),
-        '3時間前',
-      );
+      expect(body.excerpt, 'これ見て どう？');
+      expect(body.images.map((u) => u.toString()), [
+        'https://example.com/a.jpg',
+      ]);
     });
 
-    test('24 時間より前は日付＋時刻に戻す', () {
-      expect(
-        quotedResTime(
-          at(
-            '2025/11/02(日) 09:00:00.000',
-            dateTime: now.subtract(const Duration(hours: 25)),
-          ),
-          now: now,
-        ),
-        '11/02 09:00',
-      );
+    test('画像しか無いレスの文章は空になる', () {
+      final body = quotedResBody(post(1, 'https://example.com/a.jpg'));
+      expect(body.excerpt, '');
+      expect(body.images, hasLength(1));
     });
 
-    test('時刻をパースできなくても dat の表記から日付＋時刻を出す', () {
-      expect(
-        quotedResTime(at('2025/11/02(日) 23:59:00.000'), now: now),
-        '11/02 23:59',
+    test('同じ画像を貼り直しても 1 枚', () {
+      final body = quotedResBody(
+        post(1, 'https://example.com/a.jpg https://example.com/a.jpg'),
       );
+      expect(body.images, hasLength(1));
     });
 
-    test('日時の分からないレスでは空', () {
-      expect(quotedResTime(at(''), now: now), '');
-      expect(quotedResTime(at('Over 1000 Thread'), now: now), '');
+    test('省略表記（ttps://）の画像も拾う', () {
+      final body = quotedResBody(post(1, 'ttps://example.com/a.jpg'));
+      expect(body.images.map((u) => u.toString()), [
+        'https://example.com/a.jpg',
+      ]);
+    });
+
+    test('画像以外のリンクは文章に残す', () {
+      final body = quotedResBody(
+        post(1, 'ソース https://example.com/page.html と https://example.com/v.mp4'),
+      );
+      expect(
+        body.excerpt,
+        'ソース https://example.com/page.html と https://example.com/v.mp4',
+      );
+      expect(body.images, isEmpty);
+    });
+
+    test('あぼーんは文章だけ', () {
+      final abone = Res(
+        number: 1,
+        name: '',
+        mail: '',
+        dateText: '',
+        dateTime: null,
+        id: null,
+        beId: null,
+        body: 'https://example.com/a.jpg',
+        kind: ResKind.abone,
+        threadTitle: null,
+      );
+      final body = quotedResBody(abone);
+      expect(body.excerpt, 'あぼーん');
+      expect(body.images, isEmpty);
     });
   });
 
-  test('flatThreadRows は dat の順のまま深さ 0', () {
-    final res = [post(1, 'OP'), post(2, '>>1 レス')];
-    expect(shape(flatThreadRows(res)), ['1:0', '2:0']);
+  group('QuotedResRow（引用行）', () {
+    testWidgets('画像は URL の文字列ではなく小さなサムネイルで出す', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: QuotedResRow(
+              res: post(1, 'これ見て https://example.com/a.jpg'),
+            ),
+          ),
+        ),
+      );
+
+      expect(find.textContaining('a.jpg'), findsNothing);
+      expect(find.text('これ見て'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(QuotedResRow),
+          matching: find.byType(Image),
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('画像が多いレスは先頭だけ出して残りは枚数で伝える', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: QuotedResRow(
+              res: post(
+                1,
+                'https://example.com/a.jpg https://example.com/b.jpg '
+                'https://example.com/c.jpg https://example.com/d.jpg '
+                'https://example.com/e.jpg',
+              ),
+            ),
+          ),
+        ),
+      );
+
+      expect(find.byType(Image), findsNWidgets(3));
+      expect(find.text('+2'), findsOneWidget);
+    });
+
+    testWidgets('番号・ID の絵・抜粋・サムネイルを 1 行に並べる', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: QuotedResRow(
+              res: post(1, '返信先の本文 https://example.com/a.jpg'),
+            ),
+          ),
+        ),
+      );
+
+      // 番号・抜粋・サムネイルの中心が同じ高さ＝折り返さず横一列に載っている。
+      final number = tester.getCenter(find.text('1')).dy;
+      expect(tester.getCenter(find.text('返信先の本文')).dy, number);
+      expect(tester.getCenter(find.byType(Image)).dy, number);
+    });
+
+    testWidgets('どれだけ本文が長くても引用行は伸びない', (tester) async {
+      // 引用行は「何への返信か」を思い出すための添え物で、そのために一覧の場所を
+      // 食ってはいけない。長い本文は折り返さず 1 行で切る。
+      Widget rowFor(String body) => MaterialApp(
+        home: Scaffold(body: QuotedResRow(res: post(1, body))),
+      );
+
+      await tester.pumpWidget(rowFor('短い'));
+      final plain = tester.getSize(find.byType(QuotedResRow)).height;
+
+      await tester.pumpWidget(
+        rowFor('長めの返信先の本文で、放っておけば二行にも三行にもなるくらいの分量を書いておく'),
+      );
+      expect(tester.getSize(find.byType(QuotedResRow)).height, plain);
+    });
+
+    testWidgets('サムネイルは絵として読める大きさで出す', (tester) async {
+      // 字の高さに揃えると行は静かになるが、何が写っているか分からない絵は
+      // 手掛かりにならない。画像のある行だけは伸ばして、読める大きさを取る。
+      Widget rowFor(String body) => MaterialApp(
+        home: Scaffold(body: QuotedResRow(res: post(1, body))),
+      );
+
+      await tester.pumpWidget(rowFor('返信先の本文'));
+      final plain = tester.getSize(find.byType(QuotedResRow)).height;
+
+      await tester.pumpWidget(rowFor('返信先の本文 https://example.com/a.jpg'));
+      expect(tester.getSize(find.byType(Image)), const Size(32, 32));
+      expect(
+        tester.getSize(find.byType(QuotedResRow)).height,
+        greaterThan(plain),
+      );
+    });
+  });
+
+  group('layOutFlatRows（番号順表示）', () {
+    /// 新着ライン無し（全部が「開いた時点まで」）で組んだ行。
+    List<String> flat(List<Res> res) =>
+        shape(layOutFlatRows(res, settledCount: res.length).settled);
+
+    test('並べ替えずに dat の順のまま深さ 0', () {
+      final res = [post(1, 'OP'), post(2, 'ふつう'), post(3, '>>1 レス')];
+      expect(flat(res), ['1:0', '2:0', '1:0:引用', '3:0']);
+    });
+
+    test('返信先の引用行を返信レスの手前に挟む', () {
+      final res = [post(1, 'OP'), post(2, 'ふつう'), post(3, '>>1 レス')];
+      final rows = layOutFlatRows(res, settledCount: 3).settled;
+      expect(rows[2].quote, isTrue);
+      expect(rows[2].res.number, 1);
+      expect(rows[3].res.number, 3);
+    });
+
+    test('返信先が直前のレスでも引用する（返信の見た目を揃える）', () {
+      final res = [post(1, 'OP'), post(2, '>>1 レス'), post(3, '>>2 その返信')];
+      expect(flat(res), ['1:0', '1:0:引用', '2:0', '2:0:引用', '3:0']);
+    });
+
+    test('同じ相手への連投でも毎回引用する', () {
+      final res = [
+        post(1, 'OP'),
+        post(2, 'ふつう'),
+        post(3, '>>1 a'),
+        post(4, '>>1 b'),
+      ];
+      expect(flat(res), ['1:0', '2:0', '1:0:引用', '3:0', '1:0:引用', '4:0']);
+    });
+
+    test('複数を指すレスは指した順に全部引用する', () {
+      final res = [post(1, 'OP'), post(2, 'ふつう'), post(3, '>>2 >>1 まとめて')];
+      expect(flat(res), ['1:0', '2:0', '2:0:引用', '1:0:引用', '3:0']);
+    });
+
+    test('引用は上限まで。まとめレスで引用ばかりにしない', () {
+      final res = [
+        for (var n = 1; n <= 5; n++) post(n, 'レス$n'),
+        post(6, '>>1 >>2 >>3 >>4 >>5 みんなありがとう'),
+      ];
+      expect(flat(res), [
+        '1:0',
+        '2:0',
+        '3:0',
+        '4:0',
+        '5:0',
+        '1:0:引用',
+        '2:0:引用',
+        '3:0:引用',
+        '6:0',
+      ]);
+      expect(maxQuotedResRows, 3);
+    });
+
+    test('同じ相手を二度指しても引用は 1 つ', () {
+      final res = [post(1, 'OP'), post(2, '>>1 だけど >>1 について')];
+      expect(flat(res), ['1:0', '1:0:引用', '2:0']);
+    });
+
+    test('無い番号・自分より新しい番号を指すレスには引用を付けない', () {
+      final res = [post(1, 'OP'), post(2, '>>5 まだ無い番号')];
+      expect(flat(res), ['1:0', '2:0']);
+    });
+
+    test('新着ラインをまたぐ返信も引用ごと新着側へ入る', () {
+      final res = [post(1, 'OP'), post(2, 'ふつう'), post(3, '>>1 新着')];
+      final layout = layOutFlatRows(res, settledCount: 2);
+      expect(shape(layout.settled), ['1:0', '2:0']);
+      expect(shape(layout.arrivals), ['1:0:引用', '3:0']);
+    });
   });
 
   group('ThreadTreeTier（字下げ帯）', () {

@@ -1,4 +1,6 @@
-/// ツリー表示の行組み。
+/// レス一覧の行組み。番号順表示（[layOutFlatRows]）とツリー表示
+/// （[layOutThreadTree]）の両方をここで組む。どちらも**返信先を薄い引用行として
+/// 手前に再掲する**（[QuotedResRow]）ところは同じで、並べ替えるかどうかが違う。
 ///
 /// **既に読んだところだけをツリーにする。** レスを `>>N` の親子でぶら下げると、
 /// 後から来たレスが古いレスの直下へ挿し込まれる。そうなると自動更新のたびに
@@ -14,12 +16,16 @@
 /// レスはまとめてツリーへ吸収される。
 library;
 
+import 'dart:ui' as ui;
+
 import 'package:edge_core/edge_core.dart';
 import 'package:flutter/material.dart';
 
-import 'format.dart';
+import '../net/ng_store.dart';
 import 'id_icon.dart';
-import 'now_ticker.dart';
+import 'image_urls.dart';
+import 'link_urls.dart';
+import 'remote_image.dart';
 
 /// レス一覧の 1 行。番号順表示では [depth] 0 の行が並ぶだけになる。
 class ThreadTreeRow {
@@ -35,51 +41,117 @@ class ThreadTreeRow {
   final bool quote;
 }
 
-/// ツリー表示の行。境界（新着ライン）を挟んで [settled] と [arrivals] に
-/// 分かれる。
+/// 一覧の行。境界（新着ライン）を挟んで [settled] と [arrivals] に分かれる。
 class ThreadTreeLayout {
   const ThreadTreeLayout({required this.settled, required this.arrivals});
 
-  /// 開いた時点までのレス。`>>N` の親子でぶら下げたツリー。
+  /// 開いた時点までのレス。ツリー表示では `>>N` の親子でぶら下げたツリー。
   final List<ThreadTreeRow> settled;
 
-  /// 開いたあとに増えたレス。根は届いた順に並び、新着どうしの返信はその根の
-  /// 下でツリーになる。
+  /// 開いたあとに増えたレス。ツリー表示では根が届いた順に並び、新着どうしの
+  /// 返信はその根の下でツリーになる。
   final List<ThreadTreeRow> arrivals;
 }
 
-/// 番号順表示の行。dat の順にそのまま並べる。
-List<ThreadTreeRow> flatThreadRows(List<Res> res) => [
-  for (final r in res) ThreadTreeRow(res: r),
-];
+/// 1 レスに添える引用行の上限。
+///
+/// `>>5 >>7 >>9 …` と何人にもまとめて返すレスでは、返信先を全部再掲すると引用
+/// ばかりが積み上がって**返信の本体が画面の外へ押し出される**。溢れたぶんは
+/// 出さない。本文の `>>N` はそのまま残るので、番号は読める。
+const int maxQuotedResRows = 3;
+
+/// 返信先（本文で指している既存の若いレス）を、本文に出てきた順・重複除去で
+/// レス番号ごとに引けるようにする。`>>5 >>7` なら `[5, 7]`。
+///
+/// 番号が若い方へしか繋がないので循環しない。ツリーの親にするのは先頭の 1 つ
+/// （[layOutThreadTree]）で、残りは引用行に回る。
+Map<int, List<int>> _targetsOf(List<Res> res, Map<int, Res> byNumber) {
+  final targetsOf = <int, List<int>>{};
+  for (final r in res) {
+    final targets = [
+      for (final n in referencedResNumbers(r.body))
+        if (n < r.number && byNumber.containsKey(n)) n,
+    ];
+    if (targets.isNotEmpty) targetsOf[r.number] = targets;
+  }
+  return targetsOf;
+}
+
+/// 番号順表示の行を組む。dat の順にそのまま並べ、**返信レスの手前にその返信先を
+/// 薄い引用行として再掲する**（ツリー表示の新着側と同じ [QuotedResRow]）。
+///
+/// 番号順では返信先が画面のずっと上にあることが多く、`>>N` の番号だけでは何への
+/// 返信か分からない。かといって並べ替える（＝ツリーにする）と読む順が変わるので、
+/// **並びはそのままに、返信先の頭だけを手前に添える**。
+///
+/// **返信レスには必ず添える**。直前のレスへの返信（すぐ上に本体がある）でも、
+/// 同じ相手への連投でも省かない。返信レスの見た目がいつも「引用行＋本体」で
+/// 揃うので、引用行の有無を手掛かりに「これは返信か」を一目で判じられる。
+/// 省く条件を入れると、返信なのに引用が無い行が混ざって、その手掛かりが効かなく
+/// なる。
+///
+/// 複数に返しているレス（`>>5 >>7`）は**指した順に全部**添える（[maxQuotedResRows]
+/// まで）。1 つ目だけ出すと、残りの相手へ何を返したのかが読めないうえ、引用が
+/// 1 つしかない見た目から「1 人への返信」と取り違える。
+///
+/// 境界（新着ライン）は [settledCount] 件目。
+ThreadTreeLayout layOutFlatRows(List<Res> res, {required int settledCount}) {
+  final byNumber = {for (final r in res) r.number: r};
+  final targetsOf = _targetsOf(res, byNumber);
+  final count = settledCount.clamp(0, res.length);
+
+  List<ThreadTreeRow> rowsFor(Iterable<Res> part) => [
+    for (final r in part) ...[
+      for (final n in (targetsOf[r.number] ?? const <int>[]).take(
+        maxQuotedResRows,
+      ))
+        ThreadTreeRow(res: byNumber[n]!, quote: true),
+      ThreadTreeRow(res: r),
+    ],
+  ];
+
+  return ThreadTreeLayout(
+    settled: rowsFor(res.take(count)),
+    arrivals: rowsFor(res.skip(count)),
+  );
+}
 
 /// ツリー表示の行を組む。[settledCount] 件目までがツリー、それ以降が新着。
 ///
-/// 親は **本文で最初に指している既存の若いレス**（`>>5 >>7` なら 5）。番号が
-/// 若い方へしか繋がないので循環しない。指し先が無い・自分より新しい番号しか
-/// 指していないレスは根になる。
+/// 親は **本文で最初に指している既存の若いレス**（`>>5 >>7` なら 5）。指し先が
+/// 無い・自分より新しい番号しか指していないレスは根になる。
+///
+/// **ぶら下げられるのは 1 人ぶんだけ**なので、2 つ目以降の返信先（`>>5 >>7` の 7）
+/// はツリーのどこにも現れない。そういう相手は引用行としてそのレスの手前に添える
+/// （[maxQuotedResRows] まで）。ツリーで表している親は引用しない——すぐ上の行が
+/// その本体で、同じものが 2 度出ることになるため。
 ThreadTreeLayout layOutThreadTree(List<Res> res, {required int settledCount}) {
   final byNumber = {for (final r in res) r.number: r};
-  final parentOf = <int, int>{};
-  for (final r in res) {
-    for (final n in referencedResNumbers(r.body)) {
-      if (n < r.number && byNumber.containsKey(n)) {
-        parentOf[r.number] = n;
-        break;
-      }
-    }
-  }
+  final targetsOf = _targetsOf(res, byNumber);
+
+  /// [number] の返信先のうち、行の並びでは表せていないもの。[parent] はツリーで
+  /// ぶら下げた親（根なら null）で、それだけは引用しない。
+  List<int> quotedFor(int number, {int? parent}) => [
+    for (final n in targetsOf[number] ?? const <int>[])
+      if (n != parent) n,
+  ].take(maxQuotedResRows).toList();
 
   final count = settledCount.clamp(0, res.length);
   final settledRes = res.take(count).toList();
   final settledNumbers = {for (final r in settledRes) r.number};
 
+  /// ツリー側でぶら下げる親。先頭の返信先がツリー側にいなければ根になる。
+  int? settledParentOf(Res r) {
+    final parent = targetsOf[r.number]?.first;
+    return parent != null && settledNumbers.contains(parent) ? parent : null;
+  }
+
   // 親ごとの子（レスの並び順＝番号順のまま）と、親を持たない根。
   final children = <int, List<Res>>{};
   final roots = <Res>[];
   for (final r in settledRes) {
-    final parent = parentOf[r.number];
-    if (parent != null && settledNumbers.contains(parent)) {
+    final parent = settledParentOf(r);
+    if (parent != null) {
       (children[parent] ??= <Res>[]).add(r);
     } else {
       roots.add(r);
@@ -93,6 +165,15 @@ ThreadTreeLayout layOutThreadTree(List<Res> res, {required int settledCount}) {
   ];
   while (stack.isNotEmpty) {
     final entry = stack.removeLast();
+    // 親以外の返信先は、そのレスと同じ深さの引用行にして手前へ。
+    for (final n in quotedFor(
+      entry.res.number,
+      parent: settledParentOf(entry.res),
+    )) {
+      settled.add(
+        ThreadTreeRow(res: byNumber[n]!, depth: entry.depth, quote: true),
+      );
+    }
     settled.add(ThreadTreeRow(res: entry.res, depth: entry.depth));
     final kids = children[entry.res.number];
     if (kids == null) continue;
@@ -106,11 +187,18 @@ ThreadTreeLayout layOutThreadTree(List<Res> res, {required int settledCount}) {
   // 引用で手前に再掲する。根の並びは届いた順（＝番号順）のまま。
   final arrivalRes = res.skip(count).toList();
   final arrivalNumbers = {for (final r in arrivalRes) r.number};
+
+  /// 新着側でぶら下げる親。先頭の返信先が新着でなければ（＝ツリー側なら）根。
+  int? arrivalParentOf(Res r) {
+    final parent = targetsOf[r.number]?.first;
+    return parent != null && arrivalNumbers.contains(parent) ? parent : null;
+  }
+
   final arrivalChildren = <int, List<Res>>{};
   final arrivalRoots = <Res>[];
   for (final r in arrivalRes) {
-    final parent = parentOf[r.number];
-    if (parent != null && arrivalNumbers.contains(parent)) {
+    final parent = arrivalParentOf(r);
+    if (parent != null) {
       (arrivalChildren[parent] ??= <Res>[]).add(r);
     } else {
       arrivalRoots.add(r);
@@ -119,32 +207,50 @@ ThreadTreeLayout layOutThreadTree(List<Res> res, {required int settledCount}) {
 
   // 根は引用先ごとにまとめる。同じレスを指した新着は、間に別の新着を挟んでも
   // 先に来たものと同じ引用行の下へ並べる（引用が何度も出てこないし、同じ話題
-  // への返信がばらけない）。指し先の無い根はそれ 1 つでひとまとまり。
-  final groups = <({int? quoted, List<Res> roots})>[];
-  final groupOfQuoted = <int, int>{};
+  // への返信がばらけない）。まとめるのは**指し先の並びがそっくり同じ**ときだけ
+  // で、`>>1` と `>>1 >>3` は別のまとまりになる（後者の下へ入れると 3 へも
+  // 返したように読めてしまう）。指し先の無い根はそれ 1 つでひとまとまり。
+  final groups = <({List<int> quoted, List<Res> roots})>[];
+  final groupOfQuoted = <String, int>{};
   for (final root in arrivalRoots) {
-    // 根の返信先があれば、それはツリー側のレス（新着なら根にならない）。
-    final quoted = parentOf[root.number];
-    final at = quoted == null ? null : groupOfQuoted[quoted];
+    // 根の返信先はどれもツリー側のレス（新着を指していれば根にならない）。
+    final quoted = quotedFor(root.number);
+    if (quoted.isEmpty) {
+      groups.add((quoted: quoted, roots: <Res>[root]));
+      continue;
+    }
+    final key = quoted.join(',');
+    final at = groupOfQuoted[key];
     if (at != null) {
       groups[at].roots.add(root);
       continue;
     }
-    if (quoted != null) groupOfQuoted[quoted] = groups.length;
+    groupOfQuoted[key] = groups.length;
     groups.add((quoted: quoted, roots: <Res>[root]));
   }
 
   final arrivals = <ThreadTreeRow>[];
   for (final group in groups) {
-    final quoted = group.quoted;
-    if (quoted != null) {
-      arrivals.add(ThreadTreeRow(res: byNumber[quoted]!, quote: true));
+    for (final n in group.quoted) {
+      arrivals.add(ThreadTreeRow(res: byNumber[n]!, quote: true));
     }
-    final rootDepth = quoted == null ? 0 : 1;
+    final rootDepth = group.quoted.isEmpty ? 0 : 1;
     for (final root in group.roots) {
       final stack = <({Res res, int depth})>[(res: root, depth: rootDepth)];
       while (stack.isNotEmpty) {
         final entry = stack.removeLast();
+        // 根の返信先は上のまとまりの見出しで出している。ぶら下がった返信だけ、
+        // 親以外の返信先をここで添える。
+        if (entry.depth > rootDepth) {
+          for (final n in quotedFor(
+            entry.res.number,
+            parent: arrivalParentOf(entry.res),
+          )) {
+            arrivals.add(
+              ThreadTreeRow(res: byNumber[n]!, depth: entry.depth, quote: true),
+            );
+          }
+        }
         arrivals.add(ThreadTreeRow(res: entry.res, depth: entry.depth));
         final kids = arrivalChildren[entry.res.number];
         if (kids == null) continue;
@@ -220,45 +326,92 @@ class ThreadTreeTier extends StatelessWidget {
 
 /// レス本文を 1 行に潰した抜粋。引用行と、入力欄の返信先表示で使う。
 /// 改行や連続する空白は 1 つの空白にまとめる（1 行に収めるため）。
-String resExcerpt(Res res) => res.isAbone
-    ? 'あぼーん'
-    : htmlToText(res.body).replaceAll(RegExp(r'\s+'), ' ').trim();
+String resExcerpt(Res res) =>
+    res.isAbone ? 'あぼーん' : _oneLine(htmlToText(res.body));
 
-/// 引用行に添える日時。24 時間以内なら「たった今 / n分前 / n時間前」、それより
-/// 古ければ `MM/DD HH:MM`。日時の分からないレス（あぼーん・1001）では空。
+String _oneLine(String text) => text.replaceAll(RegExp(r'\s+'), ' ').trim();
+
+/// 引用行に出す返信先の中身。文章と、そこに貼られていた画像に分けたもの。
+class QuotedResBody {
+  const QuotedResBody({required this.excerpt, required this.images});
+
+  /// 1 行に潰した本文。画像 URL の文字列は除いてある。
+  final String excerpt;
+
+  /// 本文に貼られていた画像。出現順・重複除去。
+  final List<Uri> images;
+}
+
+/// 返信先の本文を「文章」と「画像」へ分ける。
 ///
-/// 古い側で日付まで出すのはヘッダ（HH:MM だけ）と違う扱いだが、引用先は画面の
-/// ずっと上＝別の日のことも多く、時刻だけでは「いつの話か」が分からないため。
-/// [now] は試験用。
-String quotedResTime(Res res, {DateTime? now}) {
-  final relative = relativeResTime(res.dateTime, now: now);
-  if (relative != null) return relative;
-  final m = RegExp(
-    r'(\d{4})/(\d{2})/(\d{2}).*?(\d{2}:\d{2})',
-  ).firstMatch(res.dateText);
-  if (m == null) return '';
-  return '${m.group(2)}/${m.group(3)} ${m.group(4)}';
+/// 画像 URL は長いうえに、文字列を読んでも何が写っているかは分からない。1 行しか
+/// 無い引用行では URL 1 本で抜粋が埋まってしまい、「何への返信か」を思い出す手掛
+/// かりにならない。**URL の文字列は落として、代わりに小さなサムネイルを出す**。
+/// レス本体で本文中の URL をサムネイルへ置き換えている（[splitPostBody]）のと
+/// 同じ扱いを、引用行でも小さくやる。
+///
+/// 動画・音声・埋め込み（YouTube 等）の URL は文章のまま残す。引用行に置ける
+/// 大きさでは再生の札を出しても潰れるだけで、URL の文字列の方がまだ何のリンクか
+/// が分かる。
+QuotedResBody quotedResBody(Res res) {
+  if (res.isAbone) return const QuotedResBody(excerpt: 'あぼーん', images: []);
+  final text = htmlToText(res.body);
+  final images = <Uri>[];
+  final seen = <String>{};
+  final rest = StringBuffer();
+  var cursor = 0;
+  for (final m in linkUrlRe.allMatches(text)) {
+    final uri = normalizedLinkUri(m.group(0)!);
+    if (uri == null || !isImageUrl(uri)) continue;
+    rest.write(text.substring(cursor, m.start));
+    cursor = m.end;
+    if (seen.add(uri.toString())) images.add(uri);
+  }
+  rest.write(text.substring(cursor));
+  return QuotedResBody(excerpt: _oneLine(rest.toString()), images: images);
 }
 
 /// 新着レスの手前に薄く再掲する返信先。
 ///
 /// 本体はツリー側（画面のずっと上）にあって見えないので、番号と本文の頭だけを
 /// 控えめに出して「何への返信か」を思い出せるようにする。押すと会話を開ける。
+///
+/// **1 行に収める。** 返信先そのものではなく思い出すための手掛かりなので、番号・
+/// ID の絵・抜粋・サムネイルを横一列に置き、抜粋は 1 行で切る。返信の多いスレでは
+/// レスの数だけこの行が挟まるため、2 行取ると一覧が引用で埋まってレス本体が
+/// 追えなくなる。日時も出さない（同じ理由で、行に置ける情報を「誰の・何の話か」
+/// ——ID の絵と本文の頭——に絞る）。
 class QuotedResRow extends StatelessWidget {
-  const QuotedResRow({super.key, required this.res, this.onTap});
+  const QuotedResRow({
+    super.key,
+    required this.res,
+    this.onTap,
+    this.blurImages = false,
+    this.joinsPrevious = false,
+  });
 
   final Res res;
   final VoidCallback? onTap;
+
+  /// 返信先に「グロ」注意が付いており、サムネイルをぼかしたまま出すか。
+  final bool blurImages;
+
+  /// すぐ上の行も引用行か。
+  ///
+  /// **複数に返しているレス**（`>>5 >>7`）では引用行が続けて並ぶ。間を空けると
+  /// 1 本ずつ別の何かに見えるので、続くときは詰めて重ねる。左の縦線も繋がって、
+  /// 「この返信が指している相手たち」がひと塊に読める。
+  final bool joinsPrevious;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final dim = scheme.onSurfaceVariant.withValues(alpha: 0.7);
-    final excerpt = resExcerpt(res);
-    final time = quotedResTime(res);
+    final body = quotedResBody(res);
+    final excerpt = body.excerpt;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+      padding: EdgeInsets.fromLTRB(16, joinsPrevious ? 0 : 10, 16, 0),
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(6),
@@ -272,57 +425,189 @@ class QuotedResRow extends StatelessWidget {
             ),
           ),
           padding: const EdgeInsets.fromLTRB(8, 2, 0, 2),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          child: Row(
             children: [
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // 番号は `>>N` ではなく裸で出す。この行は返信先そのものなので、
-                  // `>>` を付けるとこの行が N への返信に見えてしまう。
-                  Text(
-                    '${res.number}',
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: dim,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  // 返信先が誰かはヘッダのアイコンと見比べて分かればいいので、
-                  // ここも同じ絵を出す。この行の ID は押せないため輪は付けない。
-                  if (res.id != null) ...[
-                    const SizedBox(width: 6),
-                    Semantics(
-                      label: 'ID:${res.id}',
-                      child: IdIcon(id: res.id!, size: 14),
-                    ),
-                  ],
-                  // いつのレスへの返信かは、それが前の日の話かどうかで意味が
-                  // 変わる。引用先は画面のずっと上＝時間も離れていることが多い
-                  // ので、ヘッダの時刻（HH:MM のみ）より情報を足して出す。
-                  if (time.isNotEmpty) ...[
-                    const SizedBox(width: 6),
-                    LiveResTime(
-                      when: res.dateTime,
-                      text: (now) => quotedResTime(res, now: now),
-                      builder: (context, text) => Text(
-                        text,
-                        style: theme.textTheme.labelSmall?.copyWith(color: dim),
-                      ),
-                    ),
-                  ],
-                ],
+              // 番号は `>>N` ではなく裸で出す。この行は返信先そのものなので、
+              // `>>` を付けるとこの行が N への返信に見えてしまう。
+              Text(
+                '${res.number}',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: dim,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-              if (excerpt.isNotEmpty)
-                Text(
-                  excerpt,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall?.copyWith(color: dim),
+              // 返信先が誰かはヘッダのアイコンと見比べて分かればいいので、
+              // ここも同じ絵を出す。この行の ID は押せないため輪は付けない。
+              if (res.id != null) ...[
+                const SizedBox(width: 6),
+                Semantics(
+                  label: 'ID:${res.id}',
+                  child: IdIcon(id: res.id!, size: 14),
+                ),
+              ],
+              if (excerpt.isNotEmpty) ...[
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    excerpt,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(color: dim),
+                  ),
+                ),
+              ],
+              if (body.images.isNotEmpty)
+                _QuoteThumbs(
+                  urls: body.images,
+                  blurred: blurImages,
+                  color: dim,
                 ),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+/// 引用行のサムネイルの一辺。
+///
+/// 字の高さ（16 ほど）に揃えれば画像の有無で行の高さが変わらず一覧は静かになる
+/// が、その大きさでは**何が写っているか分からない**。分からない絵は「何への返信
+/// か」の手掛かりにならず、置く意味が無くなってしまう。**絵として読める方を取り**、
+/// 画像のある引用行だけ 32 まで伸ばす。文章だけの引用行は 1 行のまま。
+const double _quoteThumbSize = 32;
+
+/// 引用行に並べるサムネイルの上限。返信先を思い出すには 1 枚目でだいたい足りる
+/// ので、残りは「+N」で枚数だけ伝えて、抜粋の場所を潰さない。
+const int _quoteThumbLimit = 3;
+
+/// 引用行に添える小さなサムネイルの並び。
+class _QuoteThumbs extends StatelessWidget {
+  const _QuoteThumbs({
+    required this.urls,
+    required this.blurred,
+    required this.color,
+  });
+
+  final List<Uri> urls;
+  final bool blurred;
+
+  /// 「+N」の色。引用行のほかの字と揃える。
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final shown = urls.take(_quoteThumbLimit);
+    final rest = urls.length - _quoteThumbLimit;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        for (final url in shown)
+          Padding(
+            padding: const EdgeInsets.only(left: 6),
+            child: _QuoteThumb(url: url, blurred: blurred),
+          ),
+        if (rest > 0)
+          Padding(
+            padding: const EdgeInsets.only(left: 4),
+            child: Text(
+              '+$rest',
+              style: Theme.of(
+                context,
+              ).textTheme.labelSmall?.copyWith(color: color),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// 引用行のサムネイル 1 枚。
+///
+/// **押せない。** タップは引用行そのもの（会話を開く）に通す。ここで開けるように
+/// すると、返信先を思い出すために置いた小さな絵が、行の中に別の当たり判定を作る
+/// ことになる。絵を大きく見たいときは、行を押して会話を開けばレス本体がある。
+///
+/// 同じ理由で、NG・大きすぎる画像・読み込み失敗はどれも無地の枠に落とす。本体側
+/// にある逃げ道（タップで解除・タップで読み込む）はここでは出せないので、**何かが
+/// 貼られている**ことだけを伝える。
+class _QuoteThumb extends StatelessWidget {
+  const _QuoteThumb({required this.url, required this.blurred});
+
+  final Uri url;
+  final bool blurred;
+
+  @override
+  Widget build(BuildContext context) {
+    // NG 画像の増減で枠に切り替わる（本体側と同じ扱い）。
+    return ListenableBuilder(
+      listenable: NgStore.shared,
+      builder: (context, _) => ClipRRect(
+        borderRadius: BorderRadius.circular(4),
+        child: SizedBox(
+          width: _quoteThumbSize,
+          height: _quoteThumbSize,
+          child: _picture(context),
+        ),
+      ),
+    );
+  }
+
+  Widget _picture(BuildContext context) {
+    if (NgStore.shared.isNgImageUrl(url)) {
+      return const _QuoteThumbFrame(icon: Icons.hide_image_outlined);
+    }
+    // 既に大きすぎると分かっている URL は、通信する前に枠へ落とす。
+    if (ImageLoadPolicy.skipsAutoLoad(url)) {
+      return const _QuoteThumbFrame(icon: Icons.image_outlined);
+    }
+    final image = Image(
+      image: RemoteImage(
+        url,
+        target: Size.square(
+          _quoteThumbSize * MediaQuery.devicePixelRatioOf(context),
+        ),
+        cover: true,
+        maxBytes: ImageLoadPolicy.limitFor(url),
+      ),
+      width: _quoteThumbSize,
+      height: _quoteThumbSize,
+      fit: BoxFit.cover,
+      loadingBuilder: (context, child, progress) =>
+          progress == null ? child : const _QuoteThumbFrame(),
+      errorBuilder: (context, error, stack) => _QuoteThumbFrame(
+        icon: switch (error) {
+          ImageTooLargeException() => Icons.image_outlined,
+          ImageNgException() => Icons.hide_image_outlined,
+          _ => Icons.broken_image_outlined,
+        },
+      ),
+    );
+    if (!blurred) return image;
+    // 「グロ」注意の付いたレスは引用行でも中身を出さない。本体のモザイクと違って
+    // 解除のタップが無い（タップは会話を開く）ので、ぼかしたままにする。
+    return ImageFiltered(
+      imageFilter: ui.ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+      child: image,
+    );
+  }
+}
+
+/// サムネイルの代わりに出す無地の枠。読み込み中は絵記号なしで枠だけ。
+class _QuoteThumbFrame extends StatelessWidget {
+  const _QuoteThumbFrame({this.icon});
+
+  final IconData? icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return ColoredBox(
+      color: scheme.surfaceContainerHighest,
+      child: icon == null
+          ? null
+          : Icon(icon, size: 16, color: scheme.onSurfaceVariant),
     );
   }
 }
