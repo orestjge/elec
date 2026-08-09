@@ -103,6 +103,64 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) setState(() {});
   }
 
+  Future<void> _pickResLayout() async {
+    final picked = await showModalBottomSheet<ResLayout>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        final scheme = Theme.of(sheetContext).colorScheme;
+        final current = _threadView.resLayout;
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+                child: Text(
+                  'レス 1 件の見せ方',
+                  style: Theme.of(sheetContext).textTheme.titleMedium,
+                ),
+              ),
+              for (final layout in ResLayout.values)
+                ListTile(
+                  leading: Icon(
+                    _resLayoutIcon(layout),
+                    color: layout == current ? scheme.primary : null,
+                  ),
+                  title: Text(_resLayoutLabel(layout)),
+                  subtitle: Text(_resLayoutDescription(layout)),
+                  trailing: layout == current
+                      ? Icon(Icons.check, color: scheme.primary)
+                      : null,
+                  onTap: () => Navigator.pop(sheetContext, layout),
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+    if (picked == null) return;
+    await _threadView.setResLayout(picked);
+    if (mounted) setState(() {});
+  }
+
+  static IconData _resLayoutIcon(ResLayout layout) => switch (layout) {
+    ResLayout.gutter => Icons.account_box_outlined,
+    ResLayout.header => Icons.view_headline,
+  };
+
+  static String _resLayoutLabel(ResLayout layout) => switch (layout) {
+    ResLayout.gutter => 'アイコンを左に大きく',
+    ResLayout.header => 'ヘッダにまとめる',
+  };
+
+  static String _resLayoutDescription(ResLayout layout) => switch (layout) {
+    ResLayout.gutter => 'ID の絵をレスの左に立て、時刻はレスの足元。誰が書いたかを追いやすい',
+    ResLayout.header => 'ID の絵を小さくして名前・時刻と 1 行に並べる。1 件あたりが小さい',
+  };
+
   static IconData _layoutIcon(ThreadLayout layout) => switch (layout) {
     ThreadLayout.number => Icons.format_list_numbered,
     ThreadLayout.tree => Icons.account_tree_outlined,
@@ -133,6 +191,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
               '${_layoutDescription(_threadView.layout)}',
             ),
             onTap: _pickThreadLayout,
+          ),
+          const Divider(height: 1),
+          ListTile(
+            key: const ValueKey('settings-res-layout'),
+            leading: Icon(_resLayoutIcon(_threadView.resLayout)),
+            title: const Text('レス 1 件の見せ方'),
+            subtitle: Text(
+              '${_resLayoutLabel(_threadView.resLayout)} ・ '
+              '${_resLayoutDescription(_threadView.resLayout)}',
+            ),
+            onTap: _pickResLayout,
           ),
           const Divider(height: 1),
           SwitchListTile(

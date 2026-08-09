@@ -23,6 +23,7 @@ import 'package:edge_core/edge_core.dart';
 import 'package:elec/src/net/board.dart';
 import 'package:elec/src/net/read_history.dart';
 import 'package:elec/src/net/thread_view_settings.dart';
+import 'package:elec/src/ui/id_icon.dart';
 import 'package:elec/src/ui/thread_screen.dart';
 import 'package:elec/theme.dart';
 import 'package:flutter/material.dart';
@@ -53,14 +54,50 @@ class _StaticFetcher implements HttpFetcher {
 /// [watchoi] を立てると、名前に `</b>(L20 ...)<b>` が付いた板（ワッチョイ有効）の
 /// dat になる。実データと同じ形にしてある（experiment_sample.dat 参照）。
 /// [noId] を立てると ID 表示が無い板の dat になる（日付欄に `ID:` が付かない）。
-List<int> _dat({bool watchoi = false, bool noId = false}) {
+/// [plain] を立てると**ヘッダに出すものが何も無いレス**だけのスレになる：名無し・
+/// コテハンなし・返信なし・全員が単発 ID（連投なし）・本文は 1 行。実際の板で
+/// いちばん多い形で、ヘッダの左側が空になる場面を見るために要る。
+List<int> _dat({bool watchoi = false, bool noId = false, bool plain = false}) {
   const ids = ['aB3xYz9Qw', 'Kd8mN2pLr', 'Qw7vT4sZx', 'Hj5cB1nMe'];
+  const plainBodies = [
+    'まんげいらない',
+    'コンドミほんま人妻やな',
+    'これブラジルミクだろ',
+    '機械のくせに恥じらうなよ',
+    '近藤さんの性癖',
+    '何年前のAIだよ',
+    '扉に謎の蝶番ついてる',
+  ];
   final bytes = <int>[];
   for (var i = 1; i <= 60; i++) {
+    if (plain) {
+      // 単発 ID（`n/m` が出ない）を作るため、レスごとに違う ID を振る。
+      final id = 'p${i.toString().padLeft(2, '0')}Xy7Zw';
+      final at =
+          '2025/11/03(月) 02:${(14 + i ~/ 6).toString().padLeft(2, '0')}'
+          ':${(i % 60).toString().padLeft(2, '0')}.907';
+      bytes.addAll(
+        _datLine(
+          'エッヂの名無し<><>$at ID:$id<> '
+          '${plainBodies[i % plainBodies.length]} '
+          '<>${i == 1 ? 'スレタイ' : ''}',
+        ),
+      );
+      continue;
+    }
     final body = switch (i) {
       1 => '返信なしのレス。番号の色は今までどおり。',
       2 => '返信を5件集めたレス。番号の色が上がる。',
       3 => '返信を12件集めたレス。さらに太くなる。',
+      // 最後がリンクのカードで終わるレス。箱の下端と、レスの足元の時刻との
+      // 間が詰まっていないかを見る。
+      7 => 'リンクで終わるレス。<br>https://example.com/some/page',
+      // 画像を 2 枚貼ったレス。1 行に 2 つ並ぶかを見る（プレビューでは実際の
+      // 画像は取りに行けないので、置かれる枠の大きさと並びだけが分かる）。
+      6 =>
+        '画像を2枚貼ったレス。<br>'
+            'https://example.com/a.jpg<br>'
+            'https://example.com/b.jpg',
       8 => '自分の書き込み。スレマップにも目印が出る。',
       9 => '>>8 自分宛のレス。左に帯が付く。',
       // 他のレスを丸ごと貼った引用。本文の中の ID にも identicon が付く。
@@ -100,8 +137,11 @@ Future<void> _shoot(
   double width = 420,
   bool watchoi = false,
   bool noId = false,
+  bool plain = false,
   ThreadLayout layout = ThreadLayout.number,
   int? lastSeen,
+  bool openIdSheet = false,
+  ResLayout resLayout = ResLayout.gutter,
 }) async {
   tester.view.physicalSize = Size(width * 2, 900 * 2);
   tester.view.devicePixelRatio = 2;
@@ -113,24 +153,28 @@ Future<void> _shoot(
   if (lastSeen != null) await history.markRead('1762103691', lastSeen);
   final view = ThreadViewSettings(MemoryThreadViewSettingsStorage());
   await view.setLayout(layout);
+  await view.setResLayout(resLayout);
 
   await tester.pumpWidget(
     MaterialApp(
       debugShowCheckedModeBanner: false,
       theme: theme,
-      home: RepaintBoundary(
-        key: const ValueKey('shot'),
-        child: ThreadScreen(
-          threadKey: '1762103691',
-          threadTitle: 'スレマップと返信数の見た目を確認するスレ',
-          fetcher: _StaticFetcher(_dat(watchoi: watchoi, noId: noId)),
-          // 撮っている間にポーリングが走らないよう十分長くする。
-          pollInterval: const Duration(hours: 1),
-          readHistory: history,
-          threadViewSettings: view,
-          // 一覧から開いたときと同じに、板の既定名を渡す（名無しの名前が省かれる）。
-          defaultName: Board.eddibb.defaultName,
+      // 撮る枠は Navigator の外側に置く。`home` の中に置くと、ボトムシートや
+      // ダイアログは Navigator のオーバーレイに出るので枠の外になり、写らない。
+      builder: (context, child) =>
+          RepaintBoundary(key: const ValueKey('shot'), child: child!),
+      home: ThreadScreen(
+        threadKey: '1762103691',
+        threadTitle: 'スレマップと返信数の見た目を確認するスレ',
+        fetcher: _StaticFetcher(
+          _dat(watchoi: watchoi, noId: noId, plain: plain),
         ),
+        // 撮っている間にポーリングが走らないよう十分長くする。
+        pollInterval: const Duration(hours: 1),
+        readHistory: history,
+        threadViewSettings: view,
+        // 一覧から開いたときと同じに、板の既定名を渡す（名無しの名前が省かれる）。
+        defaultName: Board.eddibb.defaultName,
       ),
     ),
   );
@@ -139,6 +183,15 @@ Future<void> _shoot(
   await tester.pump();
   await tester.pump(Duration.zero);
   await tester.pump(const Duration(milliseconds: 400));
+
+  if (openIdSheet) {
+    // ヘッダの ID アイコン（本文中の ID にも同じ絵が出るので先頭を取る）を
+    // 押して、同一 ID のレス一覧を開く。
+    await tester.tap(find.byType(IdIcon).first);
+    await tester.pump();
+    // シートのせり上がりが終わるまで進める（pumpAndSettle は使えない）。
+    await tester.pump(const Duration(milliseconds: 500));
+  }
 
   final boundary =
       tester.renderObject(find.byKey(const ValueKey('shot')))
@@ -182,7 +235,12 @@ void main() {
   // ツリー表示（未読スレ）。返信がぶら下がって字下げされる。
   // ID 表示が無い板。identicon を出せないので、代わりの枠でレスの切れ目を保つ。
   testWidgets('no id', (tester) async {
-    await _shoot(tester, ElecTheme.light(), '$dir/thread_no_id.png', noId: true);
+    await _shoot(
+      tester,
+      ElecTheme.light(),
+      '$dir/thread_no_id.png',
+      noId: true,
+    );
   });
 
   testWidgets('tree', (tester) async {
@@ -202,6 +260,49 @@ void main() {
       '$dir/thread_tree_arrivals.png',
       layout: ThreadLayout.tree,
       lastSeen: 10,
+    );
+  });
+
+  // 実際の板でいちばん多い形——名無し・返信なし・単発 ID・1 行のレスばかりの
+  // スレ。ヘッダに出すものが何も無いので、時刻だけの行がどう見えるかを見る。
+  testWidgets('plain', (tester) async {
+    await _shoot(
+      tester,
+      ElecTheme.light(),
+      '$dir/thread_plain.png',
+      plain: true,
+    );
+  });
+
+  // ヘッダにまとめる組み方（設定で選べるもう一方）。ID の絵を小さくして名前・
+  // 時刻と 1 行に並べ、レス 1 件を小さく収める。
+  testWidgets('header layout', (tester) async {
+    await _shoot(
+      tester,
+      ElecTheme.light(),
+      '$dir/thread_header_layout.png',
+      resLayout: ResLayout.header,
+    );
+  });
+
+  testWidgets('header layout plain', (tester) async {
+    await _shoot(
+      tester,
+      ElecTheme.light(),
+      '$dir/thread_header_layout_plain.png',
+      plain: true,
+      resLayout: ResLayout.header,
+    );
+  });
+
+  // ID アイコンを押して出る同一 ID の一覧。見出しの identicon はヘッダのチップと
+  // 同じ絵の拡大版で、「こいつ誰だ」と思って開く場所なので大きく出している。
+  testWidgets('id sheet', (tester) async {
+    await _shoot(
+      tester,
+      ElecTheme.light(),
+      '$dir/thread_id_sheet.png',
+      openIdSheet: true,
     );
   });
 

@@ -14,6 +14,22 @@ enum ThreadLayout {
   tree,
 }
 
+/// レス 1 件の組み方。
+///
+/// どちらが良いかはスレの性格で変わる。identicon が効くのは**同じ人が何度も
+/// 書いているとき**で、単発 ID ばかりのスレでは絵は誰も語らずただ場所を取る。
+/// 逆に数人が言い合っているスレでは、絵があると誰の発言かを追うのが格段に楽に
+/// なる。板やスレによって当たり外れがあるので、選べるようにしてある。
+enum ResLayout {
+  /// identicon をレスの左に柱として立て、ヘッダは中身があるときだけ出し、時刻は
+  /// レスの足元に置く（既定）。絵が大きく、連投を追いやすい。
+  gutter,
+
+  /// identicon を小さくしてヘッダの行に並べ、名前・時刻とまとめて 1 行に収める。
+  /// 絵は小さくなるが、レス 1 件あたりの横幅も高さも節約できる。
+  header,
+}
+
 /// スレ画面の表示設定。
 ///
 /// 並べ方の既定は [ThreadLayout.number]。番号順は「新着が必ず一番下に来る」という
@@ -28,11 +44,15 @@ class ThreadViewSettings extends ChangeNotifier {
 
   final ThreadViewSettingsStorage _storage;
   ThreadLayout _layout = ThreadLayout.number;
+  ResLayout _resLayout = ResLayout.gutter;
   bool _linkPreviews = true;
   bool _loaded = false;
   bool _replySwipeHintSeen = false;
 
   ThreadLayout get layout => _layout;
+
+  /// レス 1 件の組み方。既定は [ResLayout.gutter]。
+  ResLayout get resLayout => _resLayout;
 
   /// 行を単独で占めるリンクの OGP を取りに行き、カードで見せるか。
   ///
@@ -53,6 +73,7 @@ class ThreadViewSettings extends ChangeNotifier {
   Future<void> load() async {
     final values = await _storage.load();
     _layout = _parse(values['layout']) ?? ThreadLayout.number;
+    _resLayout = _parseRes(values['resLayout']) ?? ResLayout.gutter;
     _linkPreviews = switch (values['linkPreviews']) {
       final bool value => value,
       // 古い設定ファイル（この項目が無い）は既定のまま。
@@ -65,6 +86,13 @@ class ThreadViewSettings extends ChangeNotifier {
   Future<void> setLayout(ThreadLayout layout) async {
     if (_layout == layout) return;
     _layout = layout;
+    notifyListeners();
+    await _save();
+  }
+
+  Future<void> setResLayout(ResLayout layout) async {
+    if (_resLayout == layout) return;
+    _resLayout = layout;
     notifyListeners();
     await _save();
   }
@@ -88,6 +116,7 @@ class ThreadViewSettings extends ChangeNotifier {
     try {
       await _storage.save({
         'layout': _layout.name,
+        'resLayout': _resLayout.name,
         'linkPreviews': _linkPreviews,
         'replySwipeHintSeen': _replySwipeHintSeen,
       });
@@ -97,6 +126,13 @@ class ThreadViewSettings extends ChangeNotifier {
   /// 知らない名前（古い/新しい版が書いたもの）は未設定として扱う。
   static ThreadLayout? _parse(Object? name) {
     for (final layout in ThreadLayout.values) {
+      if (layout.name == name) return layout;
+    }
+    return null;
+  }
+
+  static ResLayout? _parseRes(Object? name) {
+    for (final layout in ResLayout.values) {
       if (layout.name == name) return layout;
     }
     return null;

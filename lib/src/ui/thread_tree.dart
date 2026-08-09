@@ -186,7 +186,11 @@ class ThreadTreeTier extends StatelessWidget {
 
   /// 帯と本文の間。**帯の太さと足して一定**にしてあり、目印が付いた行でも本文の
   /// 位置は動かない（[PostItem] が帯の分だけ左パディングを詰めるのと同じ理屈）。
-  static const _barAndGap = 8.0;
+  ///
+  /// ここを広く取る必要はない。この先には [PostItem] 自身の左パディング（16）が
+  /// 続くので、帯から中身までは足し算で空く。深さ 0 の行が画面端から 16 で始まる
+  /// のに対し、字下げした行のほうが余白が広い、という逆転を作らない値にする。
+  static const _barAndGap = 4.0;
 
   @override
   Widget build(BuildContext context) {
