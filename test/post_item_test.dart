@@ -277,4 +277,53 @@ void main() {
 
     expect(tapped, ['aaa']);
   });
+
+  testWidgets('スレ立てコマンドは綴りを消して読める札にする', (tester) async {
+    await tester.pumpWidget(
+      wrap(
+        PostItem(
+          res: postWithBody('!metadent:vv - configured\n本文だよ'),
+          idCount: 1,
+          idOrdinal: 1,
+          onTapId: (_) {},
+        ),
+      ),
+    );
+
+    // 板への指示そのものは読む文ではないので本文から消える。
+    expect(find.textContaining('!metadent', findRichText: true), findsNothing);
+    // 代わりに、名前欄に何が出るスレなのかを言葉で残す。
+    expect(find.text('ワッチョイ'), findsOneWidget);
+    expect(find.textContaining('本文だよ', findRichText: true), findsOneWidget);
+  });
+
+  testWidgets('板が強制したコマンドはそう分かるように出す', (tester) async {
+    await tester.pumpWidget(
+      wrap(
+        PostItem(
+          res: postWithBody('!metadent:v - forced\n本文'),
+          idCount: 1,
+          idOrdinal: 1,
+          onTapId: (_) {},
+        ),
+      ),
+    );
+
+    expect(find.text('レベル（板の設定）'), findsOneWidget);
+  });
+
+  testWidgets('コマンドの無いレスには札を出さない', (tester) async {
+    await tester.pumpWidget(
+      wrap(
+        PostItem(
+          res: postWithBody('ただの本文'),
+          idCount: 1,
+          idOrdinal: 1,
+          onTapId: (_) {},
+        ),
+      ),
+    );
+
+    expect(find.byIcon(Icons.badge_outlined), findsNothing);
+  });
 }

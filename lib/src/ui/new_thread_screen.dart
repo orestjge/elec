@@ -8,6 +8,7 @@ import '../net/auth_launcher.dart';
 import '../net/auth_store.dart';
 import '../net/endpoints.dart';
 import '../net/http_fetcher.dart';
+import '../net/thread_command.dart';
 import 'attachment_uploader.dart';
 import 'compose_style.dart';
 import 'embed_urls.dart';
@@ -191,6 +192,74 @@ class _NewThreadScreenState extends State<NewThreadScreen> {
     _bodyFocus.requestFocus();
   }
 
+  /// この板でスレ立て時にコマンドを書けるなら、その方言。書けない板では
+  /// 名前欄の選択そのものを出さない。
+  ThreadCommandDialect? get _commands => dialectFor(widget.endpoints.kind);
+
+  /// 名前欄に出すものを選び直し、本文のコマンド行を差し替える。
+  Future<void> _pickCommand(ThreadCommandDialect dialect) async {
+    final current = dialect.selected(_body.text);
+    final picked = await showModalBottomSheet<ThreadCommandOption>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (context) {
+        final theme = Theme.of(context);
+        final scheme = theme.colorScheme;
+        return SafeArea(
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('名前欄に出すもの', style: theme.textTheme.titleMedium),
+                      // 後から変えられないので、選ぶ前に言っておく。
+                      Text(
+                        'スレ立てのときだけ決められます。以降のレス全部に効きます',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                for (final option in dialect.options)
+                  ListTile(
+                    title: Text(option.label),
+                    subtitle: Text(option.description),
+                    trailing: option.id == current.id
+                        ? Icon(Icons.check, color: scheme.primary)
+                        : null,
+                    selected: option.id == current.id,
+                    onTap: () => Navigator.pop(context, option),
+                  ),
+                const SizedBox(height: 8),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+    if (picked == null || picked.id == current.id) return;
+    final text = dialect.apply(_body.text, picked);
+    // コマンド行は本文の先頭で増減するので、書きかけの位置は差分だけずらす。
+    // 末尾へ飛ばすと、書いている途中に選び直したときカーソルを見失う。
+    final selection = _body.selection;
+    final shift = text.length - _body.text.length;
+    final offset = selection.isValid
+        ? (selection.baseOffset + shift).clamp(0, text.length)
+        : text.length;
+    _body.value = TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: offset),
+    );
+  }
+
   /// 添付プレビューの × から呼ばれ、本文中の該当 URL を取り除く。
   void _removeUrl(Uri url) {
     final text = _body.text;
@@ -366,6 +435,22 @@ class _NewThreadScreenState extends State<NewThreadScreen> {
                     length: _body.text.characters.length,
                     max: _bodyMax,
                   ),
+                  // 名前欄の指定は本文に書くコマンドそのものなので、入力欄の
+                  // すぐ下に置いて「今どうなっているか」を札の文字で見せる。
+                  if (_commands case final dialect?) ...[
+                    const SizedBox(height: 4),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: ActionChip(
+                        key: const ValueKey('new-thread-command'),
+                        avatar: const Icon(Icons.badge_outlined, size: 18),
+                        label: Text(
+                          '名前欄: ${dialect.selected(_body.text).label}',
+                        ),
+                        onPressed: _busy ? null : () => _pickCommand(dialect),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   _AttachmentPreview(body: _body, onRemove: _removeUrl),
                   const SizedBox(height: 12),

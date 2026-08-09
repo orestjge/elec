@@ -1,6 +1,8 @@
 import 'package:edge_core/edge_core.dart';
 import 'package:elec/src/net/auth_launcher.dart';
 import 'package:elec/src/net/auth_store.dart';
+import 'package:elec/src/net/board.dart';
+import 'package:elec/src/net/endpoints.dart';
 import 'package:elec/src/net/token_storage.dart';
 import 'package:elec/src/ui/new_thread_screen.dart';
 import 'package:elec/src/ui/post_images.dart';
@@ -303,5 +305,101 @@ void main() {
     ]) {
       expect(tester.getRect(f).bottom, lessThanOrEqualTo(keyboardTop));
     }
+  });
+
+  testWidgets('名前欄を選ぶと本文の先頭にコマンドが入り、そのまま投稿される', (tester) async {
+    final poster = RecordingPoster();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NewThreadScreen(
+          fetcher: poster,
+          authStore: AuthStore(MemoryTokenStorage()),
+          authLauncher: FakeLauncher(),
+        ),
+      ),
+    );
+
+    await tester.enterText(find.byType(TextField).at(0), 'テストスレ');
+    await tester.enterText(find.byType(TextField).at(1), '本文だよ');
+    await tester.pump();
+
+    // 既定はコマンド無し。
+    expect(find.text('名前欄: なし'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('new-thread-command')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('ワッチョイ').last);
+    await tester.pumpAndSettle();
+
+    // 書きかけの本文は消えず、コマンドが先頭に足される。
+    final body = tester.widget<TextField>(find.byType(TextField).at(1));
+    expect(body.controller!.text, '!metadent:vv:\n本文だよ');
+    expect(find.text('名前欄: ワッチョイ'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('new-thread-submit')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(
+      poster.lastBody,
+      buildBbsCgiThreadBody(
+        board: 'liveedge',
+        title: 'テストスレ',
+        message: '!metadent:vv:\n本文だよ',
+      ),
+    );
+  });
+
+  testWidgets('選び直してもコマンド行は増えず差し替わる', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NewThreadScreen(
+          fetcher: RecordingPoster(),
+          authStore: AuthStore(MemoryTokenStorage()),
+          authLauncher: FakeLauncher(),
+        ),
+      ),
+    );
+
+    await tester.enterText(find.byType(TextField).at(1), '本文');
+    await tester.pump();
+
+    Future<void> pick(String label) async {
+      await tester.tap(find.byKey(const ValueKey('new-thread-command')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(label).last);
+      await tester.pumpAndSettle();
+    }
+
+    await pick('ワッチョイ');
+    await pick('レベル');
+    final body = tester.widget<TextField>(find.byType(TextField).at(1));
+    expect(body.controller!.text, '!metadent:v:\n本文');
+
+    await pick('なし');
+    expect(
+      tester.widget<TextField>(find.byType(TextField).at(1)).controller!.text,
+      '本文',
+    );
+  });
+
+  testWidgets('コマンドを受け付けない板では名前欄の選択を出さない', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NewThreadScreen(
+          fetcher: RecordingPoster(),
+          authStore: AuthStore(MemoryTokenStorage()),
+          authLauncher: FakeLauncher(),
+          endpoints: const EdgeEndpoints(
+            host: 'nova.5ch.net',
+            boardKey: 'livegalileo',
+            kind: BoardKind.fivech,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.byKey(const ValueKey('new-thread-command')), findsNothing);
   });
 }
