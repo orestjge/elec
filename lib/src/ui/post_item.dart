@@ -382,7 +382,19 @@ class PostItem extends StatelessWidget {
             ? Border(left: BorderSide(color: scheme.tertiary, width: 3))
             : Border(left: BorderSide(color: scheme.primary, width: 3)),
       ),
-      padding: EdgeInsets.fromLTRB(showAccent ? 13 : 16, 6, 16, 6),
+      // ぶら下がった返信の左は詰める。字下げ帯がその行の左端を作っているので、
+      // 画面端からの余白として決めた 16 をそのまま使うと、深さ 0 の行（画面端
+      // から 16）より字下げした行のほうが余白が広い逆転になる。
+      //
+      // アクセント帯を自分で描くときは、その太さ（3）ぶん詰めて中身の位置を
+      // 保つ。字下げされた行では帯は外側（[ThreadTreeTier]）が描くので、この
+      // 調整は掛からない。
+      padding: EdgeInsets.fromLTRB(
+        (nested ? _nestedLeftPadding : _leftPadding) - (showAccent ? 3 : 0),
+        6,
+        _leftPadding,
+        6,
+      ),
       child: column,
     );
 
@@ -1203,6 +1215,13 @@ class _IdChip extends StatelessWidget {
 /// 高さは増えない。文字と行を共有していた頃（ヘッダのチップ）は行の高さが
 /// 上限だったが、柱にしたことでその縛りが外れている。
 const double _idGutterSize = 24;
+
+/// レスの左右の余白。画面端から本文までの距離。
+const double _leftPadding = 16;
+
+/// ぶら下がった返信（[PostItem.nested]）での左の余白。字下げ帯がすぐ左にある
+/// ぶん、画面端から始まる行より詰める。
+const double _nestedLeftPadding = 8;
 
 /// ぶら下がった返信（[PostItem.nested]）での柱の一辺。
 ///
