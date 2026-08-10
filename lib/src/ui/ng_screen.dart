@@ -1,3 +1,4 @@
+import 'package:edge_core/edge_core.dart';
 import 'package:flutter/material.dart';
 
 import '../net/ng_store.dart';
@@ -27,6 +28,7 @@ class NgScreen extends StatelessWidget {
         builder: (context, _) {
           final words = store.words;
           final ids = store.ids;
+          final wacchois = store.wacchois;
           final creators = store.creators;
           final images = store.images;
           return ListView(
@@ -65,6 +67,31 @@ class NgScreen extends StatelessWidget {
                       icon: const Icon(Icons.delete_outline),
                       tooltip: '削除',
                       onPressed: () => store.removeId(id),
+                    ),
+                  ),
+              const Divider(height: 1),
+              _SectionHeader(
+                title: 'NG ワッチョイ',
+                onAdd: () => _addWacchoi(context),
+              ),
+              if (wacchois.isEmpty)
+                const _EmptyHint(
+                  '名前欄のワッチョイで非表示にします。ID は日付が変わると別物に'
+                  'なりますが、ワッチョイは数日変わらないので、スレをまたいで効きます。'
+                  'レスの名前をタップして「ワッチョイをNG」からも追加できます',
+                )
+              else
+                for (final wacchoi in wacchois)
+                  ListTile(
+                    leading: Icon(
+                      Icons.fingerprint,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                    title: Text(wacchoi),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.delete_outline),
+                      tooltip: '削除',
+                      onPressed: () => store.removeWacchoi(wacchoi),
                     ),
                   ),
               const Divider(height: 1),
@@ -121,6 +148,14 @@ class NgScreen extends StatelessWidget {
       builder: (context) => const _AddIdDialog(),
     );
     if (id != null) await store.addId(id);
+  }
+
+  Future<void> _addWacchoi(BuildContext context) async {
+    final wacchoi = await showDialog<String>(
+      context: context,
+      builder: (context) => const _AddWacchoiDialog(),
+    );
+    if (wacchoi != null) await store.addWacchoi(wacchoi);
   }
 
   Future<void> _addCreator(BuildContext context) async {
@@ -350,6 +385,62 @@ class _AddIdDialogState extends State<_AddIdDialog> {
         decoration: InputDecoration(
           hintText: '例: bdwCNFndK',
           prefixText: 'ID:',
+          errorText: _error,
+        ),
+        onChanged: (_) {
+          if (_error != null) setState(() => _error = null);
+        },
+        onSubmitted: (_) => _submit(),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('キャンセル'),
+        ),
+        FilledButton(onPressed: _submit, child: const Text('追加')),
+      ],
+    );
+  }
+}
+
+/// NG ワッチョイ追加ダイアログ。名前欄をそのまま貼っても受け付ける。
+class _AddWacchoiDialog extends StatefulWidget {
+  const _AddWacchoiDialog();
+
+  @override
+  State<_AddWacchoiDialog> createState() => _AddWacchoiDialogState();
+}
+
+class _AddWacchoiDialogState extends State<_AddWacchoiDialog> {
+  final _controller = TextEditingController();
+  String? _error;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    // 名前欄ごと（`エッヂの名無し (L20 ipkW-6PVw)`）貼られても本体だけ取る。
+    final wacchoi = parseWacchoiInput(_controller.text);
+    if (wacchoi == null) {
+      setState(() => _error = 'ワッチョイ（xxxx-yyyy）が見つかりません');
+      return;
+    }
+    Navigator.pop(context, wacchoi);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('NG ワッチョイを追加'),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        decoration: InputDecoration(
+          hintText: '例: ipkW-6PVw',
+          helperText: '名前欄の括弧の中身をそのまま貼っても構いません',
           errorText: _error,
         ),
         onChanged: (_) {

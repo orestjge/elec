@@ -34,6 +34,19 @@ Res post(int number, String id) => Res(
   threadTitle: null,
 );
 
+Res postNamed(String name) => Res(
+  number: 1,
+  name: name,
+  mail: '',
+  dateText: '2025/11/03(月) 02:14:51.907',
+  dateTime: null,
+  id: 'aaa',
+  beId: null,
+  body: '本文',
+  kind: ResKind.normal,
+  threadTitle: null,
+);
+
 Widget wrap(Widget child) => MaterialApp(home: Scaffold(body: child));
 
 void main() {
@@ -351,6 +364,71 @@ void main() {
     await tester.pump();
 
     expect(tapped, ['aaa']);
+  });
+
+  testWidgets('名前のワッチョイをタップすると識別子が返る', (tester) async {
+    final tapped = <String>[];
+    await tester.pumpWidget(
+      wrap(
+        PostItem(
+          res: postNamed('エッヂの名無し </b>(L20 ipkW-6PVw)<b>'),
+          idCount: 1,
+          idOrdinal: 1,
+          onTapId: (_) {},
+          onTapWacchoi: tapped.add,
+          defaultName: 'エッヂの名無し',
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('(L20 ipkW-6PVw)'));
+    await tester.pump();
+
+    // 押して返るのは括弧の中身そのままではなく、人を指す識別子だけ。レベル
+    // （L20）は同じ人でも上がるので、これが混じると同一人物を繋げなくなる。
+    expect(tapped, ['ipkW-6PVw']);
+  });
+
+  testWidgets('コテハンでもワッチョイが付いていれば名前から辿れる', (tester) async {
+    final tapped = <String>[];
+    await tester.pumpWidget(
+      wrap(
+        PostItem(
+          res: postNamed('コテハン◆Ab12 </b>(L20 ZZZZ-1111)<b>'),
+          idCount: 1,
+          idOrdinal: 1,
+          onTapId: (_) {},
+          onTapWacchoi: tapped.add,
+          defaultName: 'エッヂの名無し',
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('コテハン◆Ab12 (L20 ZZZZ-1111)'));
+    await tester.pump();
+
+    expect(tapped, ['ZZZZ-1111']);
+  });
+
+  testWidgets('ワッチョイの無い名前は押しても何も起きない', (tester) async {
+    final tapped = <String>[];
+    await tester.pumpWidget(
+      wrap(
+        PostItem(
+          res: postNamed('コテハン'),
+          idCount: 1,
+          idOrdinal: 1,
+          onTapId: (_) {},
+          onTapWacchoi: tapped.add,
+          defaultName: 'エッヂの名無し',
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('コテハン'));
+    await tester.pump();
+
+    expect(tapped, isEmpty);
   });
 
   testWidgets('スレ立てコマンドは綴りを消して読める札にする', (tester) async {

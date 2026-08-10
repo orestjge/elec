@@ -16,4 +16,5 @@ export 'src/setting_txt.dart';
 export 'src/subject_fetch.dart';
 export 'src/subject_parser.dart';
 export 'src/thread_url.dart';
+export 'src/wacchoi.dart';
 export 'src/write.dart';
