@@ -102,19 +102,48 @@ void main() {
     expect(NgStore.creatorKeyFromId('QPjfqibof'), 'QPjf');
   });
 
+  test('ワッチョイNGは ID が変わっても効く', () async {
+    final ng = NgStore(MemoryNgStorage());
+    await ng.load();
+    await ng.addWacchoi('ipkW-6PVw');
+
+    // 日付が変わって ID だけ別物になった同じ人。
+    expect(
+      ng.matches(
+        _res(name: 'エッヂの名無し </b>(L20 ipkW-6PVw)<b>', id: 'day1'),
+      ),
+      isTrue,
+    );
+    expect(
+      ng.matches(
+        _res(name: 'エッヂの名無し </b>(L21 ipkW-6PVw)<b>', id: 'day2'),
+      ),
+      isTrue,
+    );
+    // 別のワッチョイ、ワッチョイ無しは巻き込まない。
+    expect(ng.matches(_res(name: 'エッヂの名無し </b>(L20 ZZZZ-1111)<b>')), isFalse);
+    expect(ng.matches(_res(name: 'エッヂの名無し')), isFalse);
+
+    await ng.removeWacchoi('ipkW-6PVw');
+    expect(ng.matches(_res(name: 'エッヂの名無し </b>(L20 ipkW-6PVw)<b>')), isFalse);
+  });
+
   test('保存して読み直せる', () async {
     final storage = MemoryNgStorage();
     final ng1 = NgStore(storage);
     await ng1.load();
     await ng1.addWord(const NgWord('x', isRegex: true));
     await ng1.addId('id1');
+    await ng1.addWacchoi('ipkW-6PVw');
     await ng1.addCreator('B3YfDSAP');
 
     final ng2 = NgStore(storage);
     await ng2.load();
     expect(ng2.words, const [NgWord('x', isRegex: true)]);
     expect(ng2.ids, ['id1']);
+    expect(ng2.wacchois, ['ipkW-6PVw']);
     expect(ng2.creators, ['B3YfDSAP']);
+    expect(ng2.isNgWacchoi('ipkW-6PVw'), isTrue);
   });
 
   test('同じ画像・似た画像を NG にできる', () async {

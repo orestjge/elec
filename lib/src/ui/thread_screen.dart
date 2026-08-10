@@ -1072,6 +1072,22 @@ class _ThreadScreenState extends State<ThreadScreen>
     _showPostsSheet('ID:$id  ${posts.length}レス', posts, id: id);
   }
 
+  /// 名前欄のワッチョイタップ。このスレでの同じワッチョイの発言をまとめて出す。
+  ///
+  /// ID は日付が変わると別物になるが、ワッチョイは回線・端末が同じなら数日
+  /// 変わらない。日をまたぐスレでは「ID が違うだけの同じ人」がここで繋がる
+  /// ——ID の一覧では追えない繋がりなので、別の導線として要る。
+  void _showWacchoiPosts(String wacchoi) {
+    final posts = _state.res
+        .where((r) => wacchoiOf(htmlToText(r.name)) == wacchoi)
+        .toList();
+    _showPostsSheet(
+      'ワッチョイ:$wacchoi  ${posts.length}レス',
+      posts,
+      wacchoi: wacchoi,
+    );
+  }
+
   /// NG 設定が変わったら再描画する。以前タップで表示したレスの一時表示は解除して、
   /// 新しいルールで判定し直す。
   void _onNgChanged() {
@@ -1399,9 +1415,16 @@ class _ThreadScreenState extends State<ThreadScreen>
     _composerFocus.requestFocus();
   }
 
-  /// レス群をボトムシートで一覧表示する（同一 ID・返信一覧で共用）。
-  /// [id] を渡すと、必死チェッカー導線と ID コピーの操作行を上部に出す。
-  void _showPostsSheet(String title, List<Res> posts, {String? id}) {
+  /// レス群をボトムシートで一覧表示する（同一 ID・同一ワッチョイ・返信一覧で共用）。
+  ///
+  /// [id] を渡すと、必死チェッカー導線と ID コピー・NG の操作行を上部に出す。
+  /// [wacchoi] を渡すと、ワッチョイのコピー・NG の操作行を出す。
+  void _showPostsSheet(
+    String title,
+    List<Res> posts, {
+    String? id,
+    String? wacchoi,
+  }) {
     final idCounts = _idCounts(_state.res);
     final idOrdinals = _idOrdinals(_state.res);
     final replyCountByNumber = replyCounts(_state.res);
@@ -1431,6 +1454,18 @@ class _ThreadScreenState extends State<ThreadScreen>
                     // タイトルに数字で出ているので、輪で二度言う必要がない。
                     if (id != null) ...[
                       IdIcon(id: id, size: 40),
+                      const SizedBox(width: 12),
+                    ]
+                    // ワッチョイには identicon を出さない。同じ絵の作り方でも
+                    // ID の絵とは別物になるので、並べて見た人が「同じ人なのに
+                    // 絵が違う」と受け取ってしまう。人ではなく回線・端末を指す
+                    // ものなので、指紋の記号に留める。
+                    else if (wacchoi != null) ...[
+                      Icon(
+                        Icons.fingerprint,
+                        size: 32,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
                       const SizedBox(width: 12),
                     ],
                     Expanded(
@@ -1481,6 +1516,46 @@ class _ThreadScreenState extends State<ThreadScreen>
                           },
                           icon: const Icon(Icons.block, size: 18),
                           label: const Text('IDをNG'),
+                        ),
+                    ],
+                  ),
+                ),
+              if (wacchoi != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
+                  child: Wrap(
+                    spacing: 4,
+                    children: [
+                      TextButton.icon(
+                        onPressed: () =>
+                            _copyText(wacchoi, 'ワッチョイをコピーしました'),
+                        icon: const Icon(Icons.copy, size: 18),
+                        label: const Text('ワッチョイをコピー'),
+                      ),
+                      if (_ng.isNgWacchoi(wacchoi))
+                        TextButton.icon(
+                          onPressed: () {
+                            _ng.removeWacchoi(wacchoi);
+                            setSheetState(() {});
+                            _showSnack('ワッチョイのNGを解除しました');
+                          },
+                          icon: const Icon(
+                            Icons.check_circle_outline,
+                            size: 18,
+                          ),
+                          label: const Text('NG解除'),
+                        )
+                      else
+                        TextButton.icon(
+                          onPressed: () {
+                            _ng.addWacchoi(wacchoi);
+                            setSheetState(() {});
+                            // ID の NG と違って日付をまたいでも効き続ける。
+                            // 効き目の違いはここで伝えないと分からない。
+                            _showSnack('ワッチョイをNGにしました（スレをまたいで効きます）');
+                          },
+                          icon: const Icon(Icons.block, size: 18),
+                          label: const Text('ワッチョイをNG'),
                         ),
                     ],
                   ),
@@ -1617,6 +1692,7 @@ class _ThreadScreenState extends State<ThreadScreen>
           linkPreviews: _view.linkPreviews,
           resLayout: _view.resLayout,
           onTapId: _showIdPosts,
+          onTapWacchoi: _showWacchoiPosts,
           onTapRes: (_, target) {
             Navigator.pop(context);
             _showConversation(target, focusNumber: target);
@@ -2491,6 +2567,7 @@ class _ThreadScreenState extends State<ThreadScreen>
                         idCount: idCounts[item.id] ?? 1,
                         idOrdinal: idOrdinals[item.number] ?? 1,
                         onTapId: _showIdPosts,
+                        onTapWacchoi: _showWacchoiPosts,
                         onTapRes: _showResPopup,
                         onTapResRange: _showConversationRange,
                         onTapUrl: _openUrl,
@@ -3109,6 +3186,7 @@ class _ConversationSheet extends StatefulWidget {
     required this.linkPreviews,
     required this.resLayout,
     required this.onTapId,
+    required this.onTapWacchoi,
     required this.onTapRes,
     required this.onTapResRange,
     required this.onTapReplies,
@@ -3143,6 +3221,7 @@ class _ConversationSheet extends StatefulWidget {
   /// レス 1 件の組み方（[PostItem.resLayout]）。
   final ResLayout resLayout;
   final ValueChanged<String> onTapId;
+  final ValueChanged<String> onTapWacchoi;
   final void Function(int source, int target) onTapRes;
   final void Function(int source, List<int> targets) onTapResRange;
   final ValueChanged<int> onTapReplies;
@@ -3293,6 +3372,7 @@ class _ConversationSheetState extends State<_ConversationSheet> {
                               idOrdinal:
                                   widget.idOrdinals[entry.res.number] ?? 1,
                               onTapId: widget.onTapId,
+                              onTapWacchoi: widget.onTapWacchoi,
                               onTapRes: (n) =>
                                   widget.onTapRes(entry.res.number, n),
                               onTapResRange: (numbers) => widget.onTapResRange(

@@ -128,11 +128,15 @@ class NgSnapshot {
   const NgSnapshot({
     this.words = const [],
     this.ids = const {},
+    this.wacchois = const {},
     this.creators = const {},
     this.images = const [],
   });
   final List<NgWord> words;
   final Set<String> ids;
+
+  /// NG にしたワッチョイ（`ipkW-6PVw` の形）。
+  final Set<String> wacchois;
 
   /// NG にしたスレ立て人の metadent（8 文字）。`subject-metadent.txt` の
   /// `[xxx★]` をそのまま持つ。
@@ -167,6 +171,7 @@ class FileNgStorage implements NgStorage {
       if (json is! Map<String, dynamic>) return const NgSnapshot();
       final wordsJson = json['words'];
       final idsJson = json['ids'];
+      final wacchoisJson = json['wacchois'];
       final creatorsJson = json['creators'];
       final imagesJson = json['images'];
       return NgSnapshot(
@@ -177,6 +182,9 @@ class FileNgStorage implements NgStorage {
                   .toList(growable: false)
             : const [],
         ids: idsJson is List ? idsJson.whereType<String>().toSet() : const {},
+        wacchois: wacchoisJson is List
+            ? wacchoisJson.whereType<String>().toSet()
+            : const {},
         creators: creatorsJson is List
             ? creatorsJson.whereType<String>().toSet()
             : const {},
@@ -199,6 +207,7 @@ class FileNgStorage implements NgStorage {
       jsonEncode({
         'words': snapshot.words.map((w) => w.toJson()).toList(),
         'ids': snapshot.ids.toList()..sort(),
+        'wacchois': snapshot.wacchois.toList()..sort(),
         'creators': snapshot.creators.toList()..sort(),
         'images': snapshot.images.map((i) => i.toJson()).toList(),
       }),
@@ -210,14 +219,17 @@ class MemoryNgStorage implements NgStorage {
   MemoryNgStorage([
     List<NgWord>? words,
     Set<String>? ids,
+    Set<String>? wacchois,
     Set<String>? creators,
     List<NgImage>? images,
   ]) : _words = words ?? [],
        _ids = ids ?? {},
+       _wacchois = wacchois ?? {},
        _creators = creators ?? {},
        _images = images ?? [];
   List<NgWord> _words;
   Set<String> _ids;
+  Set<String> _wacchois;
   Set<String> _creators;
   List<NgImage> _images;
 
@@ -225,6 +237,7 @@ class MemoryNgStorage implements NgStorage {
   Future<NgSnapshot> load() async => NgSnapshot(
     words: List.of(_words),
     ids: Set.of(_ids),
+    wacchois: Set.of(_wacchois),
     creators: Set.of(_creators),
     images: List.of(_images),
   );
@@ -233,12 +246,14 @@ class MemoryNgStorage implements NgStorage {
   Future<void> save(NgSnapshot snapshot) async {
     _words = List.of(snapshot.words);
     _ids = Set.of(snapshot.ids);
+    _wacchois = Set.of(snapshot.wacchois);
     _creators = Set.of(snapshot.creators);
     _images = List.of(snapshot.images);
   }
 }
 
-/// NG（あぼーん）設定。ワード（正規表現可）・ユーザー ID・画像で判定する。
+/// NG（あぼーん）設定。ワード（正規表現可）・ユーザー ID・ワッチョイ・画像で
+/// 判定する。
 ///
 /// 変更を [ChangeNotifier] で通知するので、開いているスレ画面へ即時反映できる。
 class NgStore extends ChangeNotifier {
@@ -249,6 +264,7 @@ class NgStore extends ChangeNotifier {
   final NgStorage _storage;
   List<NgWord> _words = [];
   Set<String> _ids = {};
+  Set<String> _wacchois = {};
   Set<String> _creators = {};
   List<NgImage> _images = [];
 
@@ -265,6 +281,7 @@ class NgStore extends ChangeNotifier {
     final snapshot = await _storage.load();
     _words = List.of(snapshot.words);
     _ids = Set.of(snapshot.ids);
+    _wacchois = Set.of(snapshot.wacchois);
     _creators = Set.of(snapshot.creators);
     _images = List.of(snapshot.images);
     _recompile();
@@ -275,6 +292,9 @@ class NgStore extends ChangeNotifier {
 
   /// 登録済み NG の ID（昇順）。
   List<String> get ids => _ids.toList()..sort();
+
+  /// 登録済み NG のワッチョイ（昇順）。
+  List<String> get wacchois => _wacchois.toList()..sort();
 
   /// 登録済み NG のスレ立て人 metadent（昇順）。
   List<String> get creators => _creators.toList()..sort();
@@ -289,6 +309,9 @@ class NgStore extends ChangeNotifier {
   bool get hasImages => _images.isNotEmpty;
 
   bool isNgId(String? id) => id != null && _ids.contains(id);
+
+  bool isNgWacchoi(String? wacchoi) =>
+      wacchoi != null && _wacchois.contains(wacchoi);
 
   /// metadent（8 文字）→ スレ主判定用の 4 文字キー（後半 4 文字）。
   /// = そのスレ主の表示 ID の「先頭 3＋末尾 1」。短すぎるなら null。
@@ -313,11 +336,16 @@ class NgStore extends ChangeNotifier {
     return key != null && _idKeys.contains(key);
   }
 
-  /// [res] が NG に該当するか。ID・名前・本文（整形後）を見る。
+  /// [res] が NG に該当するか。ID・ワッチョイ・名前・本文（整形後）を見る。
   bool matches(Res res) {
     if (res.id != null && _ids.contains(res.id)) return true;
+    // 名前の整形（HTML 剥がし）はここでいちばん多く回る処理なので、ワッチョイも
+    // ワードも登録されていなければ手を付けずに帰る。
+    if (_wacchois.isEmpty && _compiled.isEmpty) return false;
+    final name = htmlToText(res.name);
+    if (_wacchois.isNotEmpty && isNgWacchoi(wacchoiOf(name))) return true;
     if (_compiled.isEmpty) return false;
-    final target = '${htmlToText(res.name)}\n${htmlToText(res.body)}';
+    final target = '$name\n${htmlToText(res.body)}';
     final lower = target.toLowerCase();
     for (final (word, regex) in _compiled) {
       if (regex != null) {
@@ -354,6 +382,20 @@ class NgStore extends ChangeNotifier {
   Future<void> removeId(String id) async {
     if (!_ids.remove(id)) return;
     _recomputeIdKeys();
+    notifyListeners();
+    await _save();
+  }
+
+  /// ワッチョイを NG にする。ID と違い日をまたいでも変わらないので、**スレを
+  /// またいで効く**（ID の NG は日付が変わると空振りになる）。
+  Future<void> addWacchoi(String wacchoi) async {
+    if (wacchoi.isEmpty || !_wacchois.add(wacchoi)) return;
+    notifyListeners();
+    await _save();
+  }
+
+  Future<void> removeWacchoi(String wacchoi) async {
+    if (!_wacchois.remove(wacchoi)) return;
     notifyListeners();
     await _save();
   }
@@ -453,6 +495,7 @@ class NgStore extends ChangeNotifier {
     final snapshot = NgSnapshot(
       words: List.of(_words),
       ids: Set.of(_ids),
+      wacchois: Set.of(_wacchois),
       creators: Set.of(_creators),
       images: List.of(_images),
     );

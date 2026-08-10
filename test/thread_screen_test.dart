@@ -580,6 +580,95 @@ void main() {
     expect(find.text('ID:aaa  2レス'), findsNothing);
   });
 
+  // 日付をまたいで ID が変わった同じ人。ワッチョイ（NKP8-6NV7）だけが 2 つを
+  // 繋いでいる状態で、名前タップの一覧と NG がその繋がりで効くかを見る。
+  final wacchoiRes = [
+    ...datLine(
+      'エッヂの名無し </b>(L20 NKP8-6NV7)<b><><>2025/11/03(月) 05:00:00.000 '
+      'ID:day1<> 1日目の書き込み <>スレタイ',
+    ),
+    ...datLine(
+      'エッヂの名無し </b>(L21 NKP8-6NV7)<b><><>2025/11/04(火) 05:00:00.000 '
+      'ID:day2<> 2日目の書き込み <>',
+    ),
+    ...datLine(
+      'エッヂの名無し </b>(L20 ZZZZ-1111)<b><><>2025/11/04(火) 06:00:00.000 '
+      'ID:other<> 別人の書き込み <>',
+    ),
+  ];
+
+  testWidgets('ワッチョイタップで、ID が違っても同じ人のレスが並ぶ', (tester) async {
+    final f = QueueFetcher([ok(wacchoiRes)]);
+    await tester.pumpWidget(app(f, defaultName: 'エッヂの名無し'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('(L20 NKP8-6NV7)'));
+    await tester.pumpAndSettle();
+
+    // ID:day1 と ID:day2 の 2 レス。レベルが上がっていても同じ人として繋がる。
+    expect(find.text('ワッチョイ:NKP8-6NV7  2レス'), findsOneWidget);
+    final sheet = find.byType(BottomSheet);
+    expect(
+      find.descendant(
+        of: sheet,
+        matching: find.textContaining('1日目の書き込み', findRichText: true),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: sheet,
+        matching: find.textContaining('2日目の書き込み', findRichText: true),
+      ),
+      findsOneWidget,
+    );
+    // 別のワッチョイは混ざらない。
+    expect(
+      find.descendant(
+        of: sheet,
+        matching: find.textContaining('別人の書き込み', findRichText: true),
+      ),
+      findsNothing,
+    );
+  });
+
+  testWidgets('ワッチョイシートからそのワッチョイを NG にできる', (tester) async {
+    final ng = NgStore(MemoryNgStorage());
+    await ng.load();
+
+    final f = QueueFetcher([ok(wacchoiRes)]);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadScreen(
+          threadKey: '1762103691',
+          threadTitle: 'テストスレ',
+          fetcher: f,
+          pollInterval: const Duration(seconds: 5),
+          readHistory: ReadHistory(MemoryReadHistoryStorage()),
+          ngStore: ng,
+          defaultName: 'エッヂの名無し',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('(L20 NKP8-6NV7)'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('ワッチョイをNG'));
+    await tester.pumpAndSettle();
+
+    expect(ng.isNgWacchoi('NKP8-6NV7'), isTrue);
+    // ID が違う 2 レスとも消える（ID の NG では day2 が残ってしまう）。
+    expect(
+      find.descendant(
+        of: find.byType(BottomSheet),
+        matching: find.text('NG（タップで表示）'),
+      ),
+      findsNWidgets(2),
+    );
+    expect(find.text('NG解除'), findsOneWidget);
+  });
+
   testWidgets('NGワードに該当するレスは非表示になりタップで表示する', (tester) async {
     final ng = NgStore(MemoryNgStorage());
     await ng.load();

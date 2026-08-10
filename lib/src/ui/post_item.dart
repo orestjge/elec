@@ -29,6 +29,7 @@ class PostItem extends StatelessWidget {
     required this.idCount,
     required this.idOrdinal,
     required this.onTapId,
+    this.onTapWacchoi,
     this.resLayout = ResLayout.gutter,
     this.nested = false,
     this.onTapRes,
@@ -61,6 +62,10 @@ class PostItem extends StatelessWidget {
   /// ID タップ時。同一 ID のレス一覧を出す。左の柱の identicon と、本文に
   /// 貼られた `ID:xxx`（他のレスの引用）の両方から呼ぶ。
   final ValueChanged<String>? onTapId;
+
+  /// 名前欄のワッチョイ（`(L20 ipkW-6PVw)` の `ipkW-6PVw`）タップ時。同じ
+  /// ワッチョイのレス一覧を出す。ワッチョイの無い板・名前では押せない。
+  final ValueChanged<String>? onTapWacchoi;
 
   /// レス 1 件の組み方（[ThreadViewSettings.resLayout]）。
   ///
@@ -310,10 +315,12 @@ class PostItem extends StatelessWidget {
           _Header(
             res: res,
             name: headerName,
+            wacchoi: wacchoiOf(name),
             resLayout: resLayout,
             idCount: idCount,
             idOrdinal: idOrdinal,
             onTapId: onTapId,
+            onTapWacchoi: onTapWacchoi,
             isOwn: isOwn,
             isThreadOwner: isThreadOwner,
             isReplyToOwn: isReplyToOwn,
@@ -769,10 +776,12 @@ class _Header extends StatelessWidget {
   const _Header({
     required this.res,
     required this.name,
+    required this.wacchoi,
     required this.resLayout,
     required this.idCount,
     required this.idOrdinal,
     required this.onTapId,
+    required this.onTapWacchoi,
     required this.isOwn,
     required this.isThreadOwner,
     required this.isReplyToOwn,
@@ -786,12 +795,16 @@ class _Header extends StatelessWidget {
   /// ヘッダに出す名前と見せ方（[PostItem._headerName] の結果）。
   final ({String text, bool muted}) name;
 
+  /// 名前から切り出したワッチョイ（[wacchoiOf]）。無ければ null。
+  final String? wacchoi;
+
   /// レスの組み方（[PostItem.resLayout]）。[ResLayout.header] のときだけ、この
   /// 行が ID の絵と時刻も抱える。柱の組み方ではどちらも行の外にある。
   final ResLayout resLayout;
   final int idCount;
   final int idOrdinal;
   final ValueChanged<String>? onTapId;
+  final ValueChanged<String>? onTapWacchoi;
   final int replyCount;
   final ValueChanged<int>? onTapReplies;
   final bool isOwn;
@@ -879,6 +892,8 @@ class _Header extends StatelessWidget {
                         name: name.text,
                         muted: name.muted,
                         highlightQuery: highlightQuery,
+                        wacchoi: wacchoi,
+                        onTapWacchoi: onTapWacchoi,
                       ),
                     ),
                   ),
@@ -940,6 +955,8 @@ class _NameLabel extends StatelessWidget {
     required this.name,
     this.muted = false,
     this.highlightQuery = '',
+    this.wacchoi,
+    this.onTapWacchoi,
   });
   final String name;
 
@@ -948,9 +965,16 @@ class _NameLabel extends StatelessWidget {
   final bool muted;
   final String highlightQuery;
 
+  /// この名前に含まれるワッチョイ（[PostItem.onTapWacchoi] と両方揃うと押せる）。
+  final String? wacchoi;
+  final ValueChanged<String>? onTapWacchoi;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final wacchoi = this.wacchoi;
+    final onTapWacchoi = this.onTapWacchoi;
+    final tappable = wacchoi != null && onTapWacchoi != null;
     final base = muted
         ? theme.textTheme.labelMedium
         : theme.textTheme.labelLarge;
@@ -960,6 +984,13 @@ class _NameLabel extends StatelessWidget {
           : theme.colorScheme.onSurface,
       fontWeight: muted ? FontWeight.w400 : FontWeight.w600,
       leadingDistribution: TextLeadingDistribution.even,
+      // 押せる名前は点線の下線で示す。実線にすると本文中のリンクと同じ強さに
+      // なってヘッダが騒がしくなるし、何も出さないと押せることに気付けない。
+      decoration: tappable ? TextDecoration.underline : null,
+      decorationStyle: TextDecorationStyle.dotted,
+      decorationColor: theme.colorScheme.onSurfaceVariant.withValues(
+        alpha: 0.6,
+      ),
     );
     final queryLower = highlightQuery.trim().toLowerCase();
     final Widget label;
@@ -985,6 +1016,21 @@ class _NameLabel extends StatelessWidget {
       );
     }
     if (name.isEmpty) return label;
+    if (tappable) {
+      // 押せるときは長押しの吹き出し（省略された名前の全文）を出さない。同じ
+      // 「名前を押す」がタップとで別のものに繋がると、どちらが起きるか読めない。
+      // 名前の全文はワッチョイのシートの見出しに出る。
+      return Semantics(
+        button: true,
+        label: 'ワッチョイ:$wacchoi $name',
+        excludeSemantics: true,
+        child: InkWell(
+          onTap: () => onTapWacchoi(wacchoi),
+          borderRadius: BorderRadius.circular(4),
+          child: label,
+        ),
+      );
+    }
     return Tooltip(
       message: name,
       triggerMode: TooltipTriggerMode.tap,
