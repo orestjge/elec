@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 
 import '../net/auth_launcher.dart';
 import '../net/image_fingerprint.dart';
+import '../net/image_header.dart';
 import '../net/ng_store.dart';
 import 'audio_player_widget.dart';
 import 'device_gestures.dart';
@@ -438,9 +439,16 @@ class PostImages extends StatelessWidget {
                     (constraints.maxWidth - _thumbSpacing) / 2,
                   ),
                 );
+                // 元の形で出すかどうかは**この行に並ぶ総数**で決める
+                // （[thumbBox]）。絵だけ数えると、絵 1 枚＋動画 1 本のレスで
+                // 絵が幅いっぱいに伸び、動画が次の行へ落ちる。
+                final thumbCount =
+                    urls.length + videoUrls.length + embedVideos.length;
                 return Wrap(
                   spacing: _thumbSpacing,
                   runSpacing: _thumbSpacing,
+                  // 絵ごとに高さが違い得るので、行の中では上を揃える。
+                  crossAxisAlignment: WrapCrossAlignment.start,
                   children: [
                     for (final url in urls)
                       _removable(
@@ -449,6 +457,8 @@ class PostImages extends StatelessWidget {
                           url: url,
                           sequence: sequence,
                           size: size,
+                          maxWidth: constraints.maxWidth,
+                          count: thumbCount,
                           blurred: blurImages,
                           // 入力欄の添付プレビューでは NG の出番が無い。
                           canNg: onRemove == null,
@@ -462,6 +472,8 @@ class PostImages extends StatelessWidget {
                           url: url,
                           sequence: sequence,
                           size: size,
+                          maxWidth: constraints.maxWidth,
+                          count: thumbCount,
                           onOpenExternally: openExternally,
                         ),
                       ),
@@ -510,6 +522,100 @@ const double _thumbSpacing = 8;
 /// 優先される（上限として効くため）。
 const double _minThumbSize = 96;
 
+/// 元の絵の形で出す枚数の上限。これを超えたら正方形の升目に落とす。
+///
+/// 枚数が増えるほど、形のばらつきより**揃って並んでいること**の方が読みやすさに
+/// 効く（縦長と横長が混じった 5 枚は、行の下がギザギザになって数えづらい）。
+/// 4 枚なら 2 行に収まるので、ばらついてもまだ「並び」として読める。
+const int _naturalThumbMaxCount = 4;
+
+/// 縦長をどこまで伸ばすか。升目の一辺に対する高さの倍率で、4/3 は **3:4** の絵。
+///
+/// ここが「読み込みで下のレスがどれだけ動くか」を直接決める。3:4 なら一辺 160
+/// に対して +53dp——1 行ぶんくらいの動きに収まる。スマホのスクショ（9:19）まで
+/// そのまま出すと +178dp になり、読んでいる途中でも分かるほど飛ぶ。
+const double _tallestThumb = 4 / 3;
+
+/// 横長をどこまで薄くするか。升目の一辺に対する高さの倍率。
+///
+/// 横長は幅を伸ばして見せるが、本文の幅で頭打ちになった後は高さを削って形を
+/// 保つ（[thumbBox]）。無制限に薄くすると帯状の絵が線になってしまうので、
+/// ここで底を打って、以降は左右を切る。
+const double _shortestThumb = 1 / 2;
+
+/// ここまで横長なら、隣に並べず**1 行に 1 つ**として幅を伸ばす。
+///
+/// 1 行に 2 つ並べると、横長は幅が升目で頭打ちになるぶん高さが削られる——16:9
+/// なら 160×90 で、写っているものが分からないくらい小さい。それくらいなら
+/// 1 行を明け渡して 284×160 で出した方がいい。
+///
+/// 代わりに**行が増えるので、読み込みで下のレスが動く量は増える**（横に並んで
+/// いたものが縦に積まれるため）。境目をここより上げれば動きは減り、下げれば
+/// 横長がよく見えるようになる。4:3 はカメラで撮った写真がちょうど入る線。
+const double _ownRowThumbRatio = 4 / 3;
+
+/// サムネイル 1 枚の大きさを決める。
+///
+/// [cell] は升目の一辺、[maxWidth] は本文の幅、[ratio] は絵の縦横比（幅 ÷
+/// 高さ）で**まだ読めていなければ null**、[count] はそのレスに貼られた枚数。
+///
+/// 考え方は「短い辺を升目の一辺に合わせ、長い辺だけ伸ばす」。とくに**横長は
+/// 高さを変えずに幅を伸ばす**ので、絵が届いても行の高さが変わらない＝下のレス
+/// が動かない。動くのは縦長のときだけで、それも [_tallestThumb] までに収まる。
+Size thumbBox({
+  required double cell,
+  required double maxWidth,
+  required double? ratio,
+  required int count,
+}) {
+  // 比率が分からない間（読み込み中・初めて見る URL）は正方形で場所を取る。
+  if (ratio == null || ratio <= 0) return Size.square(cell);
+  if (count > _naturalThumbMaxCount) return Size.square(cell);
+  // 縦長。幅は升目のまま、高さだけ伸ばす。
+  if (ratio <= 1) {
+    return Size(cell, math.min(cell / ratio, cell * _tallestThumb));
+  }
+  // 少しだけ横長なものが 2 枚以上。まだ 1 行に 2 つ並べた方が読みやすいので、
+  // 幅は升目のまま高さを削る。
+  if (count > 1 && ratio < _ownRowThumbRatio) {
+    return Size(cell, math.max(cell / ratio, cell * _shortestThumb));
+  }
+  // 1 行を丸ごと使う横長。高さは升目のまま幅を本文の幅まで伸ばせる。伸ばし
+  // きれなかったぶんは高さを削って形を保つ。
+  //
+  // 隣に並べないので、[Wrap] は自然とこれを 1 行に 1 つとして送る（幅が升目
+  // より広く、2 つ目が入らないため）。
+  final width = math.min(maxWidth, cell * ratio);
+  return Size(
+    width,
+    math.max(cell * _shortestThumb, math.min(cell, width / ratio)),
+  );
+}
+
+/// [thumbBox] に収まりきらなかった絵を、**切るか・縮めて全部見せるか**。
+///
+/// ふだんは切る（[BoxFit.cover]）。枠いっぱいに絵が乗るので、並べたときに
+/// 気持ちよく、たいていの写真は端が少し落ちても困らない。
+///
+/// ただし**枠と形が離れすぎると、切った結果が何なのか分からなくなる**。
+/// 1 行だけ写したスクリーンショットのような極端に横長のものを正方形へ cover で
+/// 敷くと、真ん中の数文字だけが残って絵柄も文字も読めない。半分以上が落ちる
+/// ようならそこで切るのをやめ、全部を縮めて見せる（[BoxFit.contain]）。
+BoxFit thumbFit({required double? ratio, required Size box}) {
+  if (ratio == null || ratio <= 0) return BoxFit.cover;
+  if (box.isEmpty) return BoxFit.cover;
+  final boxRatio = box.width / box.height;
+  // cover で敷いたとき、元の絵のどれだけが枠に残るか（1 なら丸ごと）。
+  final kept = math.min(boxRatio / ratio, ratio / boxRatio);
+  return kept < _thumbCropLimit ? BoxFit.contain : BoxFit.cover;
+}
+
+/// 切るのをやめる境目。元の絵のこれだけ残らないなら全部見せる（[thumbFit]）。
+///
+/// 0.5 は「半分より多く落ちるなら切らない」。16:9 を正方形へ敷くと 0.56 残る
+/// ので、よくある横長の写真はこれまでどおり枠いっぱいに切って出る。
+const double _thumbCropLimit = 0.5;
+
 /// サムネイル右上に重ねる削除ボタン。
 class _RemoveButton extends StatelessWidget {
   const _RemoveButton({required this.onTap});
@@ -537,6 +643,8 @@ class _Thumb extends StatefulWidget {
     required this.url,
     required this.sequence,
     this.size = 160,
+    this.maxWidth = double.infinity,
+    this.count = 1,
     this.blurred = false,
     this.canNg = true,
     this.onOpenExternally,
@@ -545,7 +653,15 @@ class _Thumb extends StatefulWidget {
 
   /// タップで開く全画面ビューアの並び（[PostImages.viewerMedia] 参照）。
   final List<ViewerMedia> sequence;
+
+  /// 升目の一辺。比率が分からない間はこの正方形で場所を取る。
   final double size;
+
+  /// 本文の幅。横長 1 枚をどこまで広げられるかの上限（[thumbBox]）。
+  final double maxWidth;
+
+  /// このレスに貼られた枚数。3 枚以上は升目に落とす（[thumbBox]）。
+  final int count;
 
   /// 「グロ」注意が付いた画像で、初期表示をモザイクにするか。
   final bool blurred;
@@ -628,14 +744,26 @@ class _ThumbState extends State<_Thumb> {
   @override
   Widget build(BuildContext context) {
     // NG 画像の増減で伏せ札に切り替わる（ビューア側で NG にした直後も含む）。
+    // 縦横比は絵が届いて初めて分かるので、分かった時点でも組み直す
+    // （[ImageAspect]）。
     return ListenableBuilder(
-      listenable: NgStore.shared,
+      listenable: Listenable.merge([NgStore.shared, ImageAspect.shared]),
       builder: (context, _) => _buildThumb(context),
     );
   }
 
   Widget _buildThumb(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final ratio = ImageAspect.shared.ratioOf(_url);
+    // 元の絵の形。まだ読めていなければ正方形。
+    final box = thumbBox(
+      cell: widget.size,
+      maxWidth: widget.maxWidth,
+      ratio: ratio,
+      count: widget.count,
+    );
+    // 枠から大きくはみ出す絵は、切らずに縮めて全部見せる。
+    final fit = thumbFit(ratio: ratio, box: box);
     // 指紋を覚えている URL なら、通信も描画もせずに伏せ札を出す。
     if (NgStore.shared.isNgImageUrl(_url)) {
       return _NgThumb(size: widget.size, url: _url);
@@ -659,58 +787,16 @@ class _ThumbState extends State<_Thumb> {
                   bytes: ImageLoadPolicy.knownBytes(_url),
                   onLoad: _load,
                 )
+              // 縮めて全部見せるとき（[thumbFit]）は枠の中に余りが出る。
+              // 透けたままだとレスの地に直接絵が浮いて見えるので、読み込み中の
+              // プレースホルダと同じ地色を敷いて 1 枚の札に見せる。
+              else if (fit == BoxFit.contain)
+                ColoredBox(
+                  color: scheme.surfaceContainerHighest,
+                  child: _image(context, box: box, fit: fit, scheme: scheme),
+                )
               else
-                Image(
-                  image: RemoteImage(
-                    _url,
-                    // サムネイルは一辺 [size] の正方形に cover で敷く。物理ピクセル
-                    // に直した分だけデコードすれば足りる。
-                    target: Size.square(
-                      widget.size * MediaQuery.devicePixelRatioOf(context),
-                    ),
-                    cover: true,
-                    maxBytes: ImageLoadPolicy.limitFor(_url),
-                  ),
-                  height: widget.size,
-                  width: widget.size,
-                  fit: BoxFit.cover,
-                  loadingBuilder: (context, child, progress) {
-                    if (progress == null) return child;
-                    return _Placeholder(
-                      size: widget.size,
-                      color: scheme.surfaceContainerHighest,
-                      // 何割まで来たかが分かると、止まっているのか進んでいるのか
-                      // が読める。バイト数はサムネイルが小さいときは出さない。
-                      child: _LoadProgress(
-                        progress: progress,
-                        showBytes: widget.size >= 120,
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    );
-                  },
-                  errorBuilder: (context, error, stack) {
-                    if (error is ImageTooLargeException) {
-                      return _TooLargeThumb(
-                        size: widget.size,
-                        bytes: error.bytes,
-                        onLoad: _load,
-                      );
-                    }
-                    // 中身を見て初めて NG と分かった。デコード前に弾いているので、
-                    // 絵は一度も出ていない。
-                    if (error is ImageNgException) {
-                      return _NgThumb(size: widget.size, url: _url);
-                    }
-                    return _Placeholder(
-                      size: widget.size,
-                      color: scheme.surfaceContainerHighest,
-                      child: Icon(
-                        Icons.broken_image_outlined,
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    );
-                  },
-                ),
+                _image(context, box: box, fit: fit, scheme: scheme),
               if (masked) const Positioned.fill(child: _GuroMask()),
               // 押している間の陰り。絵柄は明るいものも暗いものもあるので、
               // 縮むだけでなく暗くして、どちらでも沈んだと分かるようにする。
@@ -730,6 +816,73 @@ class _ThumbState extends State<_Thumb> {
           ),
         ),
       ),
+    );
+  }
+
+  /// サムネイルの絵そのもの。[box] の大きさで [fit] のとおりに敷く。
+  Widget _image(
+    BuildContext context, {
+    required Size box,
+    required BoxFit fit,
+    required ColorScheme scheme,
+  }) {
+    return Image(
+      image: RemoteImage(
+        _url,
+        // 目標は [box] ではなく**升目の正方形のまま**にする。
+        //
+        // ここは `RemoteImage` の同一性（＝キャッシュの鍵）に入って
+        // いる。比率が分かった瞬間に目標まで変えると鍵が変わり、
+        // 同じ絵をもう一度デコードすることになる。
+        //
+        // 正方形を cover で覆う大きさは、[thumbBox] が返すどの形
+        // よりも大きい（短い辺を一辺に合わせて長い辺を伸ばすので）
+        // ——粗くはならない。
+        target: Size.square(
+          widget.size * MediaQuery.devicePixelRatioOf(context),
+        ),
+        cover: true,
+        maxBytes: ImageLoadPolicy.limitFor(_url),
+      ),
+      height: box.height,
+      width: box.width,
+      fit: fit,
+      loadingBuilder: (context, child, progress) {
+        if (progress == null) return child;
+        return _Placeholder(
+          box: box,
+          color: scheme.surfaceContainerHighest,
+          // 何割まで来たかが分かると、止まっているのか進んでいるのか
+          // が読める。バイト数はサムネイルが小さいときは出さない。
+          child: _LoadProgress(
+            progress: progress,
+            showBytes: widget.size >= 120,
+            color: scheme.onSurfaceVariant,
+          ),
+        );
+      },
+      errorBuilder: (context, error, stack) {
+        if (error is ImageTooLargeException) {
+          return _TooLargeThumb(
+            size: widget.size,
+            bytes: error.bytes,
+            onLoad: _load,
+          );
+        }
+        // 中身を見て初めて NG と分かった。デコード前に弾いているので、
+        // 絵は一度も出ていない。
+        if (error is ImageNgException) {
+          return _NgThumb(size: widget.size, url: _url);
+        }
+        return _Placeholder(
+          box: box,
+          color: scheme.surfaceContainerHighest,
+          child: Icon(
+            Icons.broken_image_outlined,
+            color: scheme.onSurfaceVariant,
+          ),
+        );
+      },
     );
   }
 
@@ -808,7 +961,7 @@ class _TooLargeThumb extends StatelessWidget {
       // 親（全画面を開く）へは渡さない。まず読み込むかどうかの選択が先。
       onTap: onLoad,
       child: _Placeholder(
-        size: size,
+        box: Size.square(size),
         color: scheme.surfaceContainerHighest,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 6),
@@ -856,7 +1009,7 @@ class _NgThumb extends StatelessWidget {
       // 全画面には開かない。伏せている画像を開けてしまっては意味がない。
       onTap: () => unawaited(confirmRemoveNgImage(context, url)),
       child: _Placeholder(
-        size: size,
+        box: Size.square(size),
         color: scheme.surfaceContainerHighest,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 6),
@@ -936,6 +1089,8 @@ class _VideoThumb extends StatelessWidget {
     required this.sequence,
     required this.onOpenExternally,
     this.size = 160,
+    this.maxWidth = double.infinity,
+    this.count = 1,
   });
   final Uri url;
 
@@ -944,7 +1099,15 @@ class _VideoThumb extends StatelessWidget {
 
   /// プレーヤー側の「ブラウザで開く」に渡すハンドラ。
   final ValueChanged<Uri>? onOpenExternally;
+
+  /// 升目の一辺。フレームがまだ取れていない間はこの正方形で場所を取る。
   final double size;
+
+  /// 本文の幅（[thumbBox]）。
+  final double maxWidth;
+
+  /// このレスに並ぶサムネイルの総数（[thumbBox]）。
+  final int count;
 
   /// アプリ内の全画面ビューアを開く。ブラウザへは飛ばさない。
   void _open(BuildContext context) =>
@@ -963,12 +1126,24 @@ class _VideoThumb extends StatelessWidget {
 
   Widget _card(BuildContext context, {required Uint8List? frame}) {
     final scheme = Theme.of(context).colorScheme;
+    // 映像の形はフレームの**ヘッダを読むだけ**で分かる（`image_header.dart`）。
+    // デコードを待つと組み立ての後になり、そのぶん形が決まるのが遅れて下のレスが
+    // 動く。ここなら取れたその場で正しい大きさに置ける。
+    final frameSize = frame == null ? null : imageSizeFromHeader(frame);
+    final box = thumbBox(
+      cell: size,
+      maxWidth: maxWidth,
+      ratio: frameSize == null || frameSize.height <= 0
+          ? null
+          : frameSize.width / frameSize.height,
+      count: count,
+    );
     return InkWell(
       onTap: () => _open(context),
       borderRadius: BorderRadius.circular(10),
       child: Container(
-        height: size,
-        width: size,
+        height: box.height,
+        width: box.width,
         decoration: BoxDecoration(
           color: scheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(10),
@@ -983,7 +1158,10 @@ class _VideoThumb extends StatelessWidget {
             if (frame != null)
               Image.memory(
                 frame,
-                fit: BoxFit.cover,
+                fit: thumbFit(
+                  ratio: box.height <= 0 ? null : box.width / box.height,
+                  box: box,
+                ),
                 errorBuilder: (context, error, stack) => const SizedBox(),
               ),
             Positioned(
@@ -1206,17 +1384,20 @@ class _Placeholder extends StatelessWidget {
   const _Placeholder({
     required this.color,
     required this.child,
-    this.size = 160,
+    this.box = const Size.square(160),
   });
   final Color color;
   final Widget child;
-  final double size;
+
+  /// 取っておく場所。**絵が出た後と同じ大きさ**にする（[thumbBox]）。比率を
+  /// 既に覚えている絵なら、読み込みが済んでも行の高さが変わらない。
+  final Size box;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: size,
-      width: size,
+      height: box.height,
+      width: box.width,
       color: color,
       alignment: Alignment.center,
       child: child,

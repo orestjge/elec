@@ -160,6 +160,14 @@ class _ThreadScreenState extends State<ThreadScreen>
 
   /// NG 判定されたが、タップで一時的に表示したレス番号。
   final _revealedNg = <int>{};
+
+  /// 長すぎて畳んだあと、「続きを読む」で伸ばしたレス番号（`collapsible.dart`）。
+  ///
+  /// **一覧の行は画面外へ出ると捨てられる**ので、開いたかどうかを行に持たせる
+  /// と、スクロールで離れて戻るたびに畳み直される。ここで覚えて開きっぱなしに
+  /// する。再読み込みでも消さない——レス番号は増えるだけで、指すものが変わら
+  /// ないため。
+  final _expandedPosts = <int>{};
   final _itemScroll = ItemScrollController();
   final _scrollOffset = ScrollOffsetController();
   final _positions = ItemPositionsListener.create();
@@ -2593,6 +2601,12 @@ class _ThreadScreenState extends State<ThreadScreen>
                         highlightQuery: searchQuery,
                         isCurrentMatch: item.number == currentMatchNumber,
                         defaultName: widget.defaultName,
+                        // 長いレスを畳むのは一覧だけ。会話シートや同一 ID の
+                        // 一覧は、そのレスを見たくて開いた場所なので畳まない。
+                        collapseLongBody: true,
+                        bodyExpanded: _expandedPosts.contains(item.number),
+                        onExpandBody: () =>
+                            setState(() => _expandedPosts.add(item.number)),
                       ),
                     ),
                   );
