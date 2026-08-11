@@ -10,6 +10,7 @@ import '../net/auth_launcher.dart';
 import '../net/image_fingerprint.dart';
 import '../net/ng_store.dart';
 import 'audio_player_widget.dart';
+import 'device_gestures.dart';
 import 'embed_urls.dart';
 import 'format.dart';
 import 'image_urls.dart';
@@ -749,6 +750,8 @@ class _ThumbState extends State<_Thumb> {
       child: child,
     );
     if (!widget.canNg) return pressable;
+    // 指が動いて長押しが外れる距離は端末に合わせる（`device_gestures.dart`）。
+    final gestures = deviceGesturesOf(context);
     // 指の動きは長押しの判定を待たずに自分で見る（レスと同じ。[_pressMove]）。
     return Listener(
       onPointerMove: (event) => _pressMove(event.localPosition),
@@ -761,6 +764,7 @@ class _ThumbState extends State<_Thumb> {
                   debugOwner: this,
                 ),
                 (recognizer) {
+                  recognizer.gestureSettings = gestures;
                   recognizer.onLongPressDown = (details) =>
                       _pressDown(details.localPosition);
                   recognizer.onLongPressCancel = _pressRelease;
