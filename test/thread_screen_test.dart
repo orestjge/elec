@@ -5,6 +5,7 @@ import 'package:elec/src/net/board.dart';
 import 'package:elec/src/net/ng_store.dart';
 import 'package:elec/src/net/read_history.dart';
 import 'package:elec/src/net/thread_link.dart';
+import 'package:elec/src/net/thread_view_settings.dart';
 import 'package:elec/src/ui/compose_style.dart';
 import 'package:elec/src/ui/id_icon.dart';
 import 'package:elec/src/ui/mini_player.dart';
@@ -98,6 +99,15 @@ void main() {
   // 開きっぱなしを次のテストへ持ち越さない。
   tearDown(MiniPlayerController.shared.debugReset);
 
+  /// この画面のテストは dat の順（＋返信先を手前に再掲する引用行）を前提に書いて
+  /// あるので、既定がツリーでも番号順で見る。ツリーの並びは
+  /// `thread_tree_screen_test.dart` の担当。
+  late ThreadViewSettings numberOrder;
+  setUp(() async {
+    numberOrder = ThreadViewSettings(MemoryThreadViewSettingsStorage());
+    await numberOrder.setLayout(ThreadLayout.number);
+  });
+
   final res1 = datLine(
     '名無し<><>2025/11/03(月) 02:14:51.907 ID:aaa<> 最初のレス <>スレタイ',
   );
@@ -119,6 +129,7 @@ void main() {
       fetcher: f,
       pollInterval: const Duration(seconds: 5),
       readHistory: ReadHistory(MemoryReadHistoryStorage()),
+      threadViewSettings: numberOrder,
       defaultName: defaultName,
     ),
   );
@@ -130,6 +141,7 @@ void main() {
       fetcher: f,
       pollInterval: const Duration(seconds: 5),
       readHistory: history,
+      threadViewSettings: numberOrder,
     ),
   );
 

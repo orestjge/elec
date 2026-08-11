@@ -6,11 +6,11 @@ import 'package:path_provider/path_provider.dart';
 
 /// スレ画面でのレスの並べ方。
 enum ThreadLayout {
-  /// 番号順。dat の順にそのまま並べる（既定）。
+  /// 番号順。dat の順にそのまま並べる。
   number,
 
   /// ツリー。開いた時点までのレスを `>>N` でぶら下げ、その後に増えたレスは
-  /// ツリーへ挿し込まず下へ足していく。詳細は `thread_tree.dart`。
+  /// ツリーへ挿し込まず下へ足していく（既定）。詳細は `thread_tree.dart`。
   tree,
 }
 
@@ -22,19 +22,19 @@ enum ThreadLayout {
 /// なる。板やスレによって当たり外れがあるので、選べるようにしてある。
 enum ResLayout {
   /// identicon をレスの左に柱として立て、ヘッダは中身があるときだけ出し、時刻は
-  /// レスの足元に置く（既定）。絵が大きく、連投を追いやすい。
+  /// レスの足元に置く。絵が大きく、連投を追いやすい。
   gutter,
 
-  /// identicon を小さくしてヘッダの行に並べ、名前・時刻とまとめて 1 行に収める。
-  /// 絵は小さくなるが、レス 1 件あたりの横幅も高さも節約できる。
+  /// identicon を小さくしてヘッダの行に並べ、名前・時刻とまとめて 1 行に収める
+  /// （既定）。絵は小さくなるが、レス 1 件あたりの横幅も高さも節約できる。
   header,
 }
 
 /// スレ画面の表示設定。
 ///
-/// 並べ方の既定は [ThreadLayout.number]。番号順は「新着が必ず一番下に来る」という
-/// 掲示板の素の読み方で、実況にも強い。ツリーは返信の筋を追いやすい代わりに
-/// レスが番号順に並ばないので、選んだ人にだけ出す。
+/// 並べ方の既定は [ThreadLayout.tree]。返信の筋を追えるほうが読みやすいスレが
+/// 多いため。番号順は「新着が必ず一番下に来る」という掲示板の素の読み方で、
+/// 実況には強いので、そちらが良い人は設定で戻せる。
 class ThreadViewSettings extends ChangeNotifier {
   ThreadViewSettings(this._storage);
 
@@ -43,15 +43,15 @@ class ThreadViewSettings extends ChangeNotifier {
   );
 
   final ThreadViewSettingsStorage _storage;
-  ThreadLayout _layout = ThreadLayout.number;
-  ResLayout _resLayout = ResLayout.gutter;
+  ThreadLayout _layout = ThreadLayout.tree;
+  ResLayout _resLayout = ResLayout.header;
   bool _linkPreviews = true;
   bool _loaded = false;
   bool _replySwipeHintSeen = false;
 
   ThreadLayout get layout => _layout;
 
-  /// レス 1 件の組み方。既定は [ResLayout.gutter]。
+  /// レス 1 件の組み方。既定は [ResLayout.header]。
   ResLayout get resLayout => _resLayout;
 
   /// 行を単独で占めるリンクの OGP を取りに行き、カードで見せるか。
@@ -72,8 +72,8 @@ class ThreadViewSettings extends ChangeNotifier {
 
   Future<void> load() async {
     final values = await _storage.load();
-    _layout = _parse(values['layout']) ?? ThreadLayout.number;
-    _resLayout = _parseRes(values['resLayout']) ?? ResLayout.gutter;
+    _layout = _parse(values['layout']) ?? ThreadLayout.tree;
+    _resLayout = _parseRes(values['resLayout']) ?? ResLayout.header;
     _linkPreviews = switch (values['linkPreviews']) {
       final bool value => value,
       // 古い設定ファイル（この項目が無い）は既定のまま。
