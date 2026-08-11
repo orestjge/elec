@@ -3,6 +3,8 @@ import 'dart:math' as math;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
+import 'device_gestures.dart';
+
 /// 右へのスワイプで前の画面へ戻れるページ遷移。
 ///
 /// 戻る操作は指に追従する（[BackSwipe] がこのルートの遷移アニメーションを直接
@@ -166,6 +168,8 @@ class _BackSwipeState extends State<BackSwipe> {
     // 戻れないところ（一覧の中に置かれている等）ではジェスチャを組み立てない。
     // 何もしない認識器が横スワイプを取ってしまうと、外側の横移動が効かなくなる。
     if (_swipeBackRoute == null) return widget.child;
+    // 内側のスクロールと同じ距離でドラッグを成立させる（`device_gestures.dart`）。
+    final gestures = deviceGesturesOf(context);
     return RawGestureDetector(
       // 縦スクロールや内側の横スクロールと競り合わせたいので、当たり判定は
       // 子に任せる（この領域自体は塞がない）。
@@ -177,6 +181,7 @@ class _BackSwipeState extends State<BackSwipe> {
             >(() => HorizontalDragGestureRecognizer(debugOwner: this), (
               recognizer,
             ) {
+              recognizer.gestureSettings = gestures;
               // 指を置いた位置から数える。既定（start）だと、ドラッグと判定
               // されるまでに動いた数十 px ぶんページが指から遅れてしまう。
               recognizer.dragStartBehavior = DragStartBehavior.down;

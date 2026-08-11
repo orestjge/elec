@@ -10,6 +10,7 @@ import '../net/thread_command.dart';
 import '../net/thread_view_settings.dart';
 import '../net/thread_link.dart';
 import 'mini_player.dart';
+import 'device_gestures.dart';
 import 'format.dart';
 import 'id_color.dart';
 import 'now_ticker.dart';
@@ -601,6 +602,7 @@ class _PressableResState extends State<_PressableRes>
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final gestures = deviceGesturesOf(context);
     // 指の動きは長押しの判定を待たずに自分で見る（[_move] 参照）。スクロールに
     // 取られた後もこのレスへ届くので、途中で引っ込める判断ができる。
     return NotificationListener<LongPressClaimed>(
@@ -615,6 +617,8 @@ class _PressableResState extends State<_PressableRes>
           behavior: HitTestBehavior.opaque,
           gestures: <Type, GestureRecognizerFactory>{
             // 長押しの長さを変えたいので GestureDetector ではなく直接組み立てる。
+            // 指が動いて長押しが外れる距離も端末に合わせる
+            // （`device_gestures.dart`）。
             LongPressGestureRecognizer:
                 GestureRecognizerFactoryWithHandlers<
                   LongPressGestureRecognizer
@@ -624,6 +628,7 @@ class _PressableResState extends State<_PressableRes>
                     debugOwner: this,
                   ),
                   (recognizer) {
+                    recognizer.gestureSettings = gestures;
                     recognizer.onLongPressDown = (details) =>
                         _press(details.localPosition);
                     recognizer.onLongPressCancel = _release;

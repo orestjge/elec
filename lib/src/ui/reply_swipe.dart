@@ -4,6 +4,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'device_gestures.dart';
 import 'post_item.dart';
 import 'thread_tree.dart';
 
@@ -22,8 +23,11 @@ const double _swipeDamping = 36;
 /// 右へこれだけ動いたら、この行は横ドラッグから降りる
 /// （[_LeftDragGestureRecognizer]）。
 ///
-/// ドラッグが成立する距離（`kTouchSlop` = 18px）より十分手前にして、外側の
-/// 「一覧へ戻る」が競り合いに勝てるようにする。指の細かい揺れでは降りない程度。
+/// ドラッグが成立する距離より手前にして、外側の「一覧へ戻る」が競り合いに勝てる
+/// ようにする。指の細かい揺れでは降りない程度。
+///
+/// 成立する距離は端末が決める（`device_gestures.dart`）。iOS・macOS は既定の 18px、
+/// Android は端末の値で多くは 8px なので、**狭い方より手前**である必要がある。
 const double _swipeGiveUpDx = 4;
 
 /// 指を離してから元の位置へ戻りきるまでの時間。
@@ -144,6 +148,9 @@ class _SwipeToReplyState extends State<SwipeToReply>
 
   @override
   Widget build(BuildContext context) {
+    // 外側のスクロールと同じ距離でドラッグを成立させる（`device_gestures.dart`）。
+    // 渡さないと Android では外側が先に成立し、この認識器は永久に負ける。
+    final gestures = deviceGesturesOf(context);
     return RawGestureDetector(
       // 縦スクロールや外側の横移動と競り合わせたいので、当たり判定は子に任せる。
       behavior: HitTestBehavior.translucent,
@@ -152,6 +159,7 @@ class _SwipeToReplyState extends State<SwipeToReply>
             GestureRecognizerFactoryWithHandlers<_LeftDragGestureRecognizer>(
               () => _LeftDragGestureRecognizer(debugOwner: this),
               (recognizer) {
+                recognizer.gestureSettings = gestures;
                 recognizer.onStart = _start;
                 recognizer.onUpdate = _update;
                 recognizer.onEnd = _end;
