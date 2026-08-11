@@ -17,6 +17,7 @@ import 'now_ticker.dart';
 import 'id_icon.dart';
 import 'link_card.dart';
 import 'long_press.dart';
+import 'collapsible.dart';
 import 'post_body_segments.dart';
 import 'post_images.dart';
 import 'reply_tier.dart';
@@ -50,6 +51,9 @@ class PostItem extends StatelessWidget {
     this.highlightQuery = '',
     this.isCurrentMatch = false,
     this.defaultName,
+    this.collapseLongBody = false,
+    this.bodyExpanded = false,
+    this.onExpandBody,
   });
 
   final Res res;
@@ -159,6 +163,21 @@ class PostItem extends StatelessWidget {
   /// 板から取れていない（null）ときは省略しない。名無しかどうか判断できない
   /// 名前を勝手に消すと、コテハンを消す事故になるため。
   final String? defaultName;
+
+  /// 長いレスを途中で畳み、「続きを読む」で伸ばせるようにするか。
+  ///
+  /// **スレ一覧でだけ真にする。** 会話シートや同一 ID の一覧は、そのレスを
+  /// 見たくて開いた場所なので、そこで畳むと開き直す手間が増えるだけになる。
+  final bool collapseLongBody;
+
+  /// 既に「続きを読む」が押されているか（[collapseLongBody] のときだけ効く）。
+  ///
+  /// **一覧の行は画面外へ出ると捨てられる**ので、開いたかどうかは画面側が
+  /// 覚える。ここで持つと、スクロールで離れて戻るたびに畳み直される。
+  final bool bodyExpanded;
+
+  /// 「続きを読む」を押したとき。画面側が [bodyExpanded] を立て直す。
+  final VoidCallback? onExpandBody;
 
   @override
   Widget build(BuildContext context) {
@@ -305,6 +324,15 @@ class PostItem extends StatelessWidget {
         },
     ];
 
+    // AA は途中で切ると絵として成立しない（顔の下半分が消えたものを見せられて
+    // も、開くかどうかの判断すらできない）。長くても畳まない。
+    final hasAsciiArt = segments.any(
+      (segment) => segment is PostBodyText && looksLikeAsciiArt(segment.text),
+    );
+    // 隠れるのが文章だけなら「あと◯行ほど」と量を言える。絵や札が混じる
+    // レスでは行数に意味が無いので、ただの「続きを読む」にする。
+    final textOnly = segments.every((segment) => segment is PostBodyText);
+
     // 現在ジャンプ中の一致レスは、左のアクセント帯と薄い背景でひと目で分かる
     // ようにする（左パディングを帯の分だけ詰めて本文位置は揃える）。
     final showAccent =
@@ -330,7 +358,19 @@ class PostItem extends StatelessWidget {
             onTapReplies: onTapReplies,
             highlightQuery: highlightQuery,
           ),
-        ...bodyChildren,
+        if (!collapseLongBody || hasAsciiArt)
+          ...bodyChildren
+        else
+          CollapsingBody(
+            expanded: bodyExpanded,
+            onExpand: () => onExpandBody?.call(),
+            showLineCount: textOnly,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: bodyChildren,
+            ),
+          ),
         // 時刻はレスの足元、右端。**ヘッダではなくここに置く**のは、ヘッダに
         // 他に出すものが無いレスでも位置が動かないようにするため。ヘッダ側に
         // 置くと、名前もスレ主印も無いレスでは時刻だけの空の行ができるか、
