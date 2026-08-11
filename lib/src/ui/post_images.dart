@@ -1280,6 +1280,25 @@ class _MediaViewerViewState extends State<MediaViewerView> {
   /// 直近に見た拡大中かどうか。切り替わったときだけ組み直す。
   bool _wasZoomed = false;
 
+  /// 表示中の画像を、画面ぴったりの何倍まで細かくデコードするか。
+  ///
+  /// [InteractiveViewer] は出来上がった絵を拡げるだけなので、画面ぴったりに
+  /// 縮めた 1 枚を 5 倍にすると、そのまま 5 倍に粗い。倍率が上がったら、その分
+  /// だけ細かく取り直す（原寸を超えては取らないし、[imageMaxPixels] も効いた
+  /// ままなので、元より綺麗にはならないし際限なく太りもしない）。
+  double _detail = 1;
+
+  /// 刻みは粗く持つ。指の動きに合わせて連続に取り直すと、拡げている最中ずっと
+  /// デコードし直すことになる。最後の段は [InteractiveViewer] の `maxScale`。
+  static const _detailSteps = [1.0, 2.0, 3.0, 5.0];
+
+  /// 倍率 [scale] に要る細かさ。**上の段へ丸める**——下へ丸めると、1.6 倍で見て
+  /// いるのに等倍ぶんしか持っていない、という粗いままの状態が残ってしまう。
+  static double _detailFor(double scale) => _detailSteps.firstWhere(
+    (step) => step >= scale - 0.01,
+    orElse: () => _detailSteps.last,
+  );
+
   Duration? _dragStartTime;
   double _dragDx = 0;
   double _dragDy = 0;
@@ -1407,18 +1426,24 @@ class _MediaViewerViewState extends State<MediaViewerView> {
   /// これが動かないことで「もうずらせない」と分かる。
   double get _imageX => MatrixUtils.transformPoint(_view.value, Offset.zero).dx;
 
-  /// 見え方が変わった。等倍かどうかが切り替わったときだけ組み直す（左右スワイプの
-  /// 行き先を PageView と画像のパンで入れ替えるため）。端に着いたかどうかは
-  /// ドラッグ中に読むだけなので、組み直しは要らない。
+  /// 見え方が変わった。等倍かどうかが切り替わったとき（左右スワイプの行き先を
+  /// PageView と画像のパンで入れ替えるため）と、デコードの細かさの段が変わった
+  /// ときだけ組み直す。端に着いたかどうかはドラッグ中に読むだけなので、組み直し
+  /// は要らない。
   void _onViewChanged() {
-    if (_zoomed == _wasZoomed) return;
-    setState(() => _wasZoomed = _zoomed);
+    final detail = _detailFor(_view.value.getMaxScaleOnAxis());
+    if (_zoomed == _wasZoomed && detail == _detail) return;
+    setState(() {
+      _wasZoomed = _zoomed;
+      _detail = detail;
+    });
   }
 
   /// ページが変わった。次の画像は等倍から見せる。
   void _onPageChanged(int page) {
     setState(() {
       _view.value = Matrix4.identity();
+      _detail = 1;
       _index = page;
     });
     widget.onIndexChanged(page);
@@ -1618,6 +1643,9 @@ class _MediaViewerViewState extends State<MediaViewerView> {
     return switch (item) {
       ViewerImageMedia() => _ViewerImage(
         url: item.url,
+        // 細かく取り直すのは見ているページだけ。拡大の変換は PageView ごと
+        // 掛かっているが、隣のページは画面の外なので細かさは要らない。
+        detail: i == _index ? _detail : 1,
         onDismiss: _close,
         onTap: _toggleChrome,
       ),
@@ -1807,10 +1835,14 @@ String _mediaFileName(Uri url) =>
 class _ViewerImage extends StatefulWidget {
   const _ViewerImage({
     required this.url,
+    required this.detail,
     required this.onDismiss,
     required this.onTap,
   });
   final Uri url;
+
+  /// 画面ぴったりの何倍まで細かくデコードするか（拡大の倍率に合わせて親が上げる）。
+  final double detail;
 
   /// 絵の外側（余白）をタップした。閉じる。
   final VoidCallback onDismiss;
@@ -1837,6 +1869,13 @@ class _ViewerImageState extends State<_ViewerImage> {
     _updateProvider();
   }
 
+  @override
+  void didUpdateWidget(covariant _ViewerImage old) {
+    super.didUpdateWidget(old);
+    // 拡大されて細かさの段が上がった（あるいは等倍へ戻った）。取り直す。
+    if (widget.url != old.url || widget.detail != old.detail) _updateProvider();
+  }
+
   /// 「読み込む」を選んだ。以後この URL は上限を上げて読む。
   void _load() {
     ImageLoadPolicy.allow(widget.url);
@@ -1844,8 +1883,8 @@ class _ViewerImageState extends State<_ViewerImage> {
     _updateProvider();
   }
 
-  /// 画面いっぱいの表示に必要な分だけデコードする provider を組み直し、
-  /// 原寸の縦横比を取りに行く（余白タップで閉じる判定に使う）。
+  /// 今の見え方（画面いっぱい × 拡大の倍率）に必要な分だけデコードする provider
+  /// を組み直し、原寸の縦横比を取りに行く（余白タップで閉じる判定に使う）。
   ///
   /// 表示に使う provider と同じものを見るのが要点。標準の [NetworkImage] を
   /// 別に resolve すると、原寸デコードがもう 1 枚メモリに載ってしまう。
@@ -1855,7 +1894,7 @@ class _ViewerImageState extends State<_ViewerImage> {
       return;
     }
     final media = MediaQuery.of(context);
-    final target = media.size * media.devicePixelRatio;
+    final target = media.size * media.devicePixelRatio * widget.detail;
     final provider = RemoteImage(
       widget.url,
       target: target,
@@ -1944,6 +1983,9 @@ class _ViewerImageState extends State<_ViewerImage> {
             Image(
               image: _provider!,
               fit: BoxFit.contain,
+              // 拡大して取り直す間は、粗いままの前の 1 枚を出しておく。細かい方が
+              // 出来上がるまで絵が消えると、拡げた指の下で一瞬空白になる。
+              gaplessPlayback: true,
               loadingBuilder: (context, child, progress) => progress == null
                   ? child
                   : Center(
