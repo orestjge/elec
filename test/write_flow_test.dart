@@ -292,6 +292,29 @@ void main() {
     expect(find.text('自分'), findsOneWidget);
   });
 
+  testWidgets('送り終えたら入力欄は焦点を手放して 1 段へ戻る', (tester) async {
+    // 送った直後は書く用が済んだところ。キーボードと 2 段の欄が場所を取り
+    // 続ける理由が無いので、欄は空のまま 1 段（ボタンが横並び）へ戻す。
+    final client = LongThreadClient();
+    await tester.pumpWidget(
+      longThreadApp(client, ReadHistory(MemoryReadHistoryStorage())),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byType(TextField));
+    await tester.pump();
+    await post(tester);
+
+    final field = find.byType(TextField);
+    expect(tester.widget<TextField>(field).controller!.text, isEmpty);
+    expect(tester.widget<TextField>(field).focusNode!.hasFocus, isFalse);
+    // 1 段＝ボタンが欄と横に揃う。
+    expect(
+      tester.getRect(find.widgetWithIcon(IconButton, Icons.send)).top,
+      tester.getRect(field).top,
+    );
+  });
+
   testWidgets('ツリー表示で自分のレスが末尾に来ないときは知らせから飛べる', (tester) async {
     final view = ThreadViewSettings(MemoryThreadViewSettingsStorage());
     await view.setLayout(ThreadLayout.tree);

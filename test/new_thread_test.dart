@@ -103,6 +103,42 @@ void main() {
     );
   });
 
+  testWidgets('本文に AA を書くと、AA の字で・幅に収めて見せる', (tester) async {
+    // レス入力欄と同じ扱い（[composeAsciiArtFit]）。書いている最中から絵として
+    // 見えないと、スレ立ての 1 レス目に何を置いたのか確かめられない。
+    final poster = RecordingPoster();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NewThreadScreen(
+          fetcher: poster,
+          authStore: AuthStore(MemoryTokenStorage()),
+          authLauncher: FakeLauncher(),
+        ),
+      ),
+    );
+
+    const aa = '''
+　　 ∧＿∧　　　　＿＿＿＿＿＿＿
+　　（　´∀｀）　＜　横に長い AA
+　　（　　　　）　￣￣￣￣￣￣￣''';
+
+    final body = find.byType(TextField).at(1);
+    await tester.enterText(body, aa);
+    await tester.pump();
+
+    final art = tester.widget<TextField>(body);
+    expect(art.style?.fontFamily, 'Monapo');
+    expect(art.maxLines, greaterThan(24));
+
+    await tester.enterText(body, 'ふつうの本文です');
+    await tester.pump();
+
+    final plain = tester.widget<TextField>(body);
+    expect(plain.style?.fontFamily, isNot('Monapo'));
+    expect(plain.maxLines, 24);
+  });
+
   testWidgets('画像を添付すると本文へ URL が入りプレビューが出る', (tester) async {
     final poster = RecordingPoster();
 

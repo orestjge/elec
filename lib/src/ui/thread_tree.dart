@@ -385,12 +385,12 @@ QuotedResBody quotedResBody(Res res) {
   return QuotedResBody(
     excerpt: _oneLine(body),
     images: images,
-    asciiArt: looksLikeAsciiArt(body) ? _trimBlankLines(body) : null,
+    asciiArt: looksLikeAsciiArt(body) ? trimBlankLines(body) : null,
   );
 }
 
 /// 前後の空行だけを落とす。行頭の空白は絵の一部なので触らない。
-String _trimBlankLines(String text) {
+String trimBlankLines(String text) {
   final lines = text.split('\n');
   var start = 0;
   var end = lines.length;

@@ -18,6 +18,50 @@ String trimUnlessAsciiArt(String text) =>
 TextStyle asciiArtStyle(TextStyle base) =>
     base.copyWith(fontFamily: 'Monapo', height: 1.15, letterSpacing: 0);
 
+/// 画面に収めるために AA を縮めるとき、字の大きさをここまでは下げてよいという
+/// 下限（論理ピクセル）。
+///
+/// AA は PC の画面幅を前提に組まれていて、1 行が全角 40 字を超えるものも珍しく
+/// ない。本文の 15px のままスマホ（本文の幅がおよそ 340）に出すと半分ほどが枠の
+/// 外に出て、横へ振らないと絵にならない。かといって収まるまで際限なく縮めると、
+/// 今度は形が潰れて何の絵か分からなくなる。
+///
+/// 8px は「字は読めないが、輪郭は追える」あたり。ここで縮小を止めて、はみ出す
+/// 分はこれまでどおり横スクロールに任せる（[ResBody]）。
+const double minAsciiArtFontSize = 8;
+
+/// AA を幅 [maxWidth] に収めるための縮小率。
+///
+/// 元の幅 [naturalWidth] が収まっていれば 1。**元より大きくはしない**——小さい
+/// AA は本文と同じ大きさのまま出る。はみ出すときは縦横同率で縮め、字が
+/// [minFontSize] を割るところで止める（それ以上は横スクロールで見せる）。
+double asciiArtFitScale({
+  required double naturalWidth,
+  required double maxWidth,
+  required double fontSize,
+  double minFontSize = minAsciiArtFontSize,
+}) {
+  if (naturalWidth <= 0 || fontSize <= 0) return 1;
+  if (!maxWidth.isFinite || maxWidth <= 0) return 1;
+  if (naturalWidth <= maxWidth) return 1;
+  final floor = fontSize <= minFontSize ? 1.0 : minFontSize / fontSize;
+  return (maxWidth / naturalWidth).clamp(floor, 1.0);
+}
+
+/// 折り返さずに組んだとき、[text] が要る幅（いちばん長い行の幅）。
+///
+/// リンクや ID の装飾は幅を変えないので、素の文字列のまま測ってよい。
+double asciiArtNaturalWidth(BuildContext context, String text, TextStyle style) {
+  final painter = TextPainter(
+    text: TextSpan(text: text, style: style),
+    textDirection: Directionality.of(context),
+    textScaler: MediaQuery.textScalerOf(context),
+  )..layout();
+  final width = painter.width;
+  painter.dispose();
+  return width;
+}
+
 /// AA（アスキーアート）らしい本文だけ、MS Pゴシック互換寄りの同梱フォントで
 /// 表示する。単発の顔文字まで巻き込まないよう、AA 記号を含む行数を見る。
 bool looksLikeAsciiArt(String text) {
@@ -426,25 +470,123 @@ class _ResBodyState extends State<ResBody> {
       addPlain(text.substring(last));
     }
 
-    final rootSpan = TextSpan(style: effectiveStyle, children: spans);
-    final body = widget.selectable
-        ? SelectableText.rich(
-            rootSpan,
-            focusNode: _focusNode,
-            onSelectionChanged: (selection, cause) {
-              _setSelectionActive(!selection.isCollapsed);
-            },
-          )
-        : Text.rich(rootSpan);
-    if (!isAsciiArt) return body;
+    // 字の大きさは AA のときだけ後から決まる（幅に合わせて縮める）ので、本文の
+    // 組み立てだけを渡して、根の style は呼ぶ側に決めさせる。
+    Widget buildBody(TextStyle? style) {
+      final rootSpan = TextSpan(style: style, children: spans);
+      return widget.selectable
+          ? SelectableText.rich(
+              rootSpan,
+              focusNode: _focusNode,
+              onSelectionChanged: (selection, cause) {
+                _setSelectionActive(!selection.isCollapsed);
+              },
+            )
+          : Text.rich(rootSpan);
+    }
 
-    return SingleChildScrollView(scrollDirection: Axis.horizontal, child: body);
+    if (!isAsciiArt) return buildBody(effectiveStyle);
+
+    return _FittedAsciiArt(
+      text: text,
+      style: effectiveStyle!,
+      builder: buildBody,
+    );
   }
 
   TextStyle _asciiArtStyle(BuildContext context, TextStyle? style) {
     final baseStyle = style ?? Theme.of(context).textTheme.bodyLarge;
     return asciiArtStyle(baseStyle ?? const TextStyle(fontSize: 16));
   }
+}
+
+/// AA の本文を、置ける幅に合わせて縮めて出す。
+///
+/// AA は折り返せない（折り返した時点で絵が崩れる）ので、これまでは元の大きさの
+/// まま横スクロールに載せていた。PC 前提で組まれた AA はスマホの幅に収まらない
+/// ものが多く、絵の右半分を見るのに毎回横へ振ることになる。
+///
+/// そこで、**まず幅に合わせて字を小さくし、それでも収まらない分だけ横スクロール**
+/// に回す。縮めるのは字の大きさそのもの（[FittedBox] のような拡大縮小ではない）で、
+/// 行間・字送りも同じ率で付いてくるため形は保たれ、小さくしても字は潰れずに出る。
+/// 下限は [minAsciiArtFontSize]。
+class _FittedAsciiArt extends StatefulWidget {
+  const _FittedAsciiArt({
+    required this.text,
+    required this.style,
+    required this.builder,
+  });
+
+  /// 幅を測るための本文。リンクや ID の装飾は幅を変えないので、素の文字列で測る。
+  final String text;
+
+  /// 縮める前の字（[asciiArtStyle] を通したもの）。
+  final TextStyle style;
+
+  /// 縮めた後の字で本文を組み立てる。
+  final Widget Function(TextStyle style) builder;
+
+  @override
+  State<_FittedAsciiArt> createState() => _FittedAsciiArtState();
+}
+
+class _FittedAsciiArtState extends State<_FittedAsciiArt> {
+  /// 縮める前に必要な幅。文字列と字が変わらない限り同じなので測り直さない。
+  double _naturalWidth = 0;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _measure();
+  }
+
+  @override
+  void didUpdateWidget(covariant _FittedAsciiArt old) {
+    super.didUpdateWidget(old);
+    if (old.text != widget.text || old.style != widget.style) _measure();
+  }
+
+  void _measure() {
+    _naturalWidth = asciiArtNaturalWidth(context, widget.text, widget.style);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final fontSize = widget.style.fontSize ?? 15;
+        final scale = asciiArtFitScale(
+          naturalWidth: _naturalWidth,
+          maxWidth: constraints.maxWidth,
+          fontSize: fontSize,
+        );
+        final style = scale == 1
+            ? widget.style
+            : widget.style.copyWith(fontSize: fontSize * scale);
+        return _BodyTextScale(
+          scale: scale,
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: widget.builder(style),
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// 本文の字を縮めた率。本文に混じる ID の絵（[_InlineId]）も同じ率で小さくして、
+/// 絵だけが行から飛び出さないようにする。
+class _BodyTextScale extends InheritedWidget {
+  const _BodyTextScale({required this.scale, required super.child});
+
+  final double scale;
+
+  static double of(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<_BodyTextScale>()?.scale ?? 1;
+
+  @override
+  bool updateShouldNotify(_BodyTextScale old) => old.scale != scale;
 }
 
 /// 本文の文字列に混ぜる ID。レスの左に立つ柱（`PostItem` の identicon）と同じ絵に
@@ -477,6 +619,11 @@ class _InlineId extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    // AA が幅に合わせて縮んでいるなら、絵と字も同じ率で小さくする。
+    final scale = _BodyTextScale.of(context);
+    final style = scale == 1
+        ? this.style
+        : this.style.copyWith(fontSize: (this.style.fontSize ?? 15) * scale);
     return Semantics(
       label: 'ID:$id',
       button: onTap != null,
@@ -486,7 +633,7 @@ class _InlineId extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            IdIcon(id: id, size: iconSize),
+            IdIcon(id: id, size: iconSize * scale),
             const SizedBox(width: 2),
             Text(
               label,

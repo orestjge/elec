@@ -92,6 +92,17 @@ String? _flutterRoot() {
   return i < 0 ? null : exe.substring(0, i);
 }
 
+/// AA 表示に使う同梱フォント（Monapo）を登録する。
+///
+/// [loadPreviewFonts] には含めない。素の日本語フォントで撮りたい画面まで AA の
+/// 字幅になってしまうため、AA の出る画面を撮るときだけ足す。`setUpAll` から呼ぶ。
+Future<void> loadAsciiArtFont() async {
+  final bytes = ByteData.sublistView(
+    Uint8List.fromList(File('assets/fonts/monapo.ttf').readAsBytesSync()),
+  );
+  await (FontLoader('Monapo')..addFont(Future.value(bytes))).load();
+}
+
 /// スクリーンショット確認に必要なフォントを一式読み込む。`setUpAll` から呼ぶ。
 Future<void> loadPreviewFonts() async {
   await loadJapaneseTestFont();

@@ -416,20 +416,33 @@ class _NewThreadScreenState extends State<NewThreadScreen> {
                     max: _titleMax,
                   ),
                   const SizedBox(height: 12),
-                  TextField(
-                    controller: _body,
-                    focusNode: _bodyFocus,
-                    maxLength: _bodyMax,
-                    minLines: 10,
-                    maxLines: 24,
-                    textInputAction: TextInputAction.newline,
-                    // 本文はレス入力欄と同じ組み方（15px・行高 1.4）。
-                    style: bodyStyle,
-                    decoration: composeFieldDecoration(
-                      scheme: scheme,
-                      hintText: '本文を書く',
-                      textStyle: bodyStyle,
-                    ),
+                  // AA を書いているときは字を組み替えるので、置ける幅を知る。
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      // 欄の幅から左右の padding（14×2）とカーソルのぶんを引く。
+                      final fit = composeAsciiArtFit(
+                        context,
+                        base: bodyStyle,
+                        text: _body.text,
+                        maxWidth: constraints.maxWidth - 28 - 2,
+                      );
+                      return TextField(
+                        controller: _body,
+                        focusNode: _bodyFocus,
+                        maxLength: _bodyMax,
+                        // AA は字が小さいぶん行数を増やす（欄の高さは変わらない）。
+                        minLines: fit?.lines(10) ?? 10,
+                        maxLines: fit?.lines(24) ?? 24,
+                        textInputAction: TextInputAction.newline,
+                        // 本文はレス入力欄と同じ組み方（15px・行高 1.4）。
+                        style: fit?.style ?? bodyStyle,
+                        decoration: composeFieldDecoration(
+                          scheme: scheme,
+                          hintText: '本文を書く',
+                          textStyle: bodyStyle,
+                        ),
+                      );
+                    },
                   ),
                   _CharCount(
                     length: _body.text.characters.length,
