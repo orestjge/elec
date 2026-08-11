@@ -20,6 +20,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jis0208/jis0208.dart';
+import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
 final _win31j = Windows31JCodec();
 List<int> datLine(String s) => [..._win31j.encode(s), 0x0A];
@@ -168,6 +169,24 @@ void main() {
   /// 必要なら `.last` でシート側を選ぶ。
   Finder posts(int n) =>
       find.byWidgetPredicate((w) => w is PostItem && w.res.number == n);
+
+  /// いま組まれているレスの番号を上から順に。
+  List<int> visibleResNumbers(WidgetTester tester) => tester
+      .widgetList<PostItem>(find.byType(PostItem))
+      .map((w) => w.res.number)
+      .toList();
+
+  /// 一覧そのもののスクロール位置（[ScrollablePositionedList] の内側）。
+  ScrollPosition listScrollPosition(WidgetTester tester) => tester
+      .state<ScrollableState>(
+        find
+            .descendant(
+              of: find.byType(ScrollablePositionedList),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      )
+      .position;
 
   /// レスを左へ引いて返信する。返信の入り口はこのスワイプだけで、ヘッダに常時
   /// ボタンは置いていない。しきい値（56px）を確実に越える距離を引く。
@@ -2231,6 +2250,42 @@ void main() {
       ThreadMapMarker(2, ThreadMapMarkerKind.own),
       ThreadMapMarker(10, ThreadMapMarkerKind.newArrival),
     ]);
+  });
+
+  testWidgets('スクロール位置の基準を読んでいる行へ移し、0 に戻されても飛ばない', (tester) async {
+    // 一覧の位置は「基準の行から何ピクセルか」で持たれていて、このピクセルは
+    // 内側のスクロールが作り直されたときなどに 0 へ戻る。基準が初回の着地
+    // （新着ライン）のままだと、そこまで引き戻される。
+    final history = ReadHistory(MemoryReadHistoryStorage());
+    await history.markRead('1762103691', 30);
+    final f = QueueFetcher([ok(manyResWithBodies(60, const {}))]);
+
+    await tester.pumpWidget(appWithHistory(f, history));
+    await tester.pumpAndSettle();
+    // 着地は新着ライン（レス 30 の直後）の少し手前。
+    expect(visibleResNumbers(tester).first, 28);
+
+    // 指で末尾の方まで送る。
+    for (var i = 0; i < 30; i++) {
+      await tester.drag(
+        find.byType(PostItem).at(2),
+        const Offset(0, -400),
+        warnIfMissed: false, // 末尾まで来ると掴む行が画面から外れる
+      );
+      await tester.pump();
+    }
+    await tester.pumpAndSettle();
+    final read = visibleResNumbers(tester);
+    expect(read.first, greaterThan(40));
+
+    // 基準からの距離が溜まっていないこと（＝基準が今いる行に移っている）。
+    final position = listScrollPosition(tester);
+    expect(position.pixels.abs(), lessThan(200));
+
+    // 0 に戻されても読んでいた場所のまま。
+    position.jumpTo(0);
+    await tester.pumpAndSettle();
+    expect(visibleResNumbers(tester), read);
   });
 
   testWidgets('返信数に応じて件数の色と太さを変える', (tester) async {

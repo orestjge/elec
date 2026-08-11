@@ -194,6 +194,18 @@ class _ThreadScreenState extends State<ThreadScreen>
   int _initialIndex = 0;
   bool _landingResolved = false;
 
+  /// いまスクロール位置の基準にしている行（[_reanchor]）。
+  int _anchorIndex = 0;
+
+  /// 指で送っている最中か（こちらから頼んだスクロールと区別する）。
+  bool _userScrolling = false;
+
+  /// 基準の置き直し中。置き直しが自分で出すスクロール通知で二重に走らせない。
+  bool _reanchoring = false;
+
+  /// 置き直しの予約済み。フレームの終わりに一度だけ走らせる。
+  bool _reanchorScheduled = false;
+
   /// 末尾（最新レス）が画面に見えているか。新着の自動追従に使う。
   bool _atBottomNow = false;
 
@@ -558,12 +570,17 @@ class _ThreadScreenState extends State<ThreadScreen>
     await _poll(force: true);
     if (!mounted) return;
     final lastSeen = _history.lastSeen(widget.threadKey);
+    // 新着ラインが動く＝行の並びが変わる。**読んでいた場所を控えてから**組み
+    // 直す。控えないと、同じインデックスが別のレスを指すぶんだけずれる
+    // （新着ラインが下がった／消えたぶん、まるごと 1 行ずれて戻ってくる）。
+    final anchor = _topVisibleAnchor();
     setState(() {
       _openCount = _entryPositions(_state.res.length, lastSeen).openCount;
       _furthestRead = lastSeen ?? _furthestRead;
     });
     // 新着ラインが動く＝ツリーの並びも組み替わるので、数え直しにする。
     _passedRowIndex = -1;
+    if (anchor != null) _restoreAnchor(anchor);
   }
 
   Future<void> _poll({bool force = false}) async {
@@ -845,11 +862,75 @@ class _ThreadScreenState extends State<ThreadScreen>
   bool _onListMetrics(Notification notification) {
     if (notification is ScrollNotification && notification.depth == 0) {
       _listMetrics = notification.metrics;
+      // 指で送ったぶんだけ、止まったところで基準を置き直す（[_reanchor]）。
+      //
+      // **こちらから頼んだスクロールでは触らない。** 行を指して運ぶ最中の
+      // [ScrollablePositionedList] は 2 枚の一覧を重ねて渡しており、その途中で
+      // 基準を触ると渡しかけのまま元の一覧へ引き戻される。指した先へ着けば
+      // 基準はあちらが移してくれるので、そもそも出番が無い。
+      if (notification is ScrollStartNotification) {
+        _userScrolling = notification.dragDetails != null;
+      } else if (notification is ScrollEndNotification && _userScrolling) {
+        _userScrolling = false;
+        _scheduleReanchor();
+      }
     } else if (notification is ScrollMetricsNotification &&
         notification.depth == 0) {
       _listMetrics = notification.metrics;
     }
     return false;
+  }
+
+  /// 置き直しはフレームの終わりに回す。通知はレイアウトの途中でも飛んでくる
+  /// ので、その場で組み直しに入ると build 中の setState になる。
+  void _scheduleReanchor() {
+    if (_reanchorScheduled) return;
+    _reanchorScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _reanchorScheduled = false;
+      _reanchor();
+    });
+  }
+
+  /// スクロール位置の**基準**を、いま画面のいちばん上に見えている行へ置き直す。
+  ///
+  /// [ScrollablePositionedList] の位置は「基準の行から何ピクセルか」で持たれて
+  /// いて、基準が動くのは行を指して運んだとき（[ItemScrollController]）だけ。
+  /// 指で送っているあいだはピクセルだけが増えるので、初回の着地（新着ライン）を
+  /// 基準にしたまま何千ピクセルも離れることになる。
+  ///
+  /// **このピクセルは何かの拍子に 0 へ戻る。** 内側のスクロールが作り直されたり、
+  /// まだ組んでいない行から見積もった下端が縮んで丸められたりしたときで、戻り先は
+  /// 基準の行——読んでいた場所ではなく新着ラインへ引き戻される。長押しメニューや
+  /// 画像を開いたあとに新着の境界へ飛ばされていたのはこれ。
+  ///
+  /// 基準を今いる行へ置き直しておけば、離れるピクセルが溜まらない＝戻されても
+  /// その場に戻る。置き直しても見た目は変わらない——同じ行を今と同じ高さへ
+  /// 置き直すだけ。
+  void _reanchor() {
+    if (!mounted || _reanchoring || !_itemScroll.isAttached) return;
+    if (_items.isEmpty) return;
+    final top = _topVisiblePosition();
+    // 同じ行が基準のままなら触らない。行の中で少し動いただけの置き直しは、
+    // 得るもの（ピクセルの差はせいぜい 1 行ぶん）より組み直しの方が高い。
+    if (top == null || top.index == _anchorIndex) return;
+    _anchorIndex = top.index;
+    _reanchoring = true;
+    try {
+      _itemScroll.jumpTo(index: top.index, alignment: top.itemLeadingEdge);
+    } finally {
+      _reanchoring = false;
+    }
+  }
+
+  /// いま画面のいちばん上に見えている行。どれも見えていなければ null。
+  ItemPosition? _topVisiblePosition() {
+    ItemPosition? top;
+    for (final p in _positions.itemPositions.value) {
+      if (p.itemTrailingEdge <= 0 || p.itemLeadingEdge >= 1) continue;
+      if (top == null || p.index < top.index) top = p;
+    }
+    return top;
   }
 
   /// 末尾までの残り（ピクセル）。分からなければ null。
@@ -1142,33 +1223,48 @@ class _ThreadScreenState extends State<ThreadScreen>
   /// 見失うのを避ける。
   void _onViewSettingsChanged() {
     if (!mounted) return;
-    final anchor = _topVisibleResNumber();
+    final anchor = _topVisibleAnchor();
     // 並べ方が変われば行の並びも変わる。通り過ぎた行の数え直しから始める。
     _passedRowIndex = -1;
     setState(() {});
-    if (anchor == null) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_itemScroll.isAttached) return;
-      final index = _indexForResNumber(anchor);
-      if (index != null) _itemScroll.jumpTo(index: index, alignment: 0);
-    });
+    if (anchor != null) _restoreAnchor(anchor);
   }
 
-  /// いま画面の一番上に見えているレスの番号（引用行・新着ラインは飛ばす）。
-  int? _topVisibleResNumber() {
-    final positions = _positions.itemPositions.value;
-    if (positions.isEmpty || _items.isEmpty) return null;
-    int? topIndex;
-    for (final p in positions) {
-      if (p.itemTrailingEdge <= 0 || p.itemLeadingEdge >= 1) continue;
-      if (topIndex == null || p.index < topIndex) topIndex = p.index;
-    }
-    if (topIndex == null) return null;
-    for (var i = topIndex; i < _items.length; i++) {
+  /// 行を組み直しても同じ場所へ戻れるよう、いま上に見えているレスとその置き場所
+  /// を控える。
+  ///
+  /// **行のインデックスではなくレス番号で覚える。** 新着ラインの位置や並べ方が
+  /// 変われば行の順番ごと変わるので、インデックスは組み直したあと別のレスを
+  /// 指してしまう。
+  ({int number, double alignment})? _topVisibleAnchor() {
+    if (_items.isEmpty) return null;
+    final top = _topVisiblePosition();
+    if (top == null) return null;
+    // 引用行（返信先の再掲）と新着ラインは組み直すと消えたり動いたりするので
+    // 目印にならない。そこから下の最初のレス本体を目印にする。
+    for (var i = top.index; i < _items.length; i++) {
       final item = _items[i];
-      if (item is ThreadTreeRow && !item.quote) return item.res.number;
+      if (item is! ThreadTreeRow || item.quote) continue;
+      // 目印が上端の行そのものなら、高さまで揃えて戻せる。飛ばした先の行に
+      // 上端の高さを移すと、飛ばしたぶんだけずれる。
+      return (
+        number: item.res.number,
+        alignment: i == top.index ? top.itemLeadingEdge : 0,
+      );
     }
     return null;
+  }
+
+  /// 行を組み直したあと、[anchor] のレスを元の高さへ戻す。行が組み上がるのは
+  /// 次のフレームなので、そこまで待ってから指す。
+  void _restoreAnchor(({int number, double alignment}) anchor) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_itemScroll.isAttached) return;
+      final index = _indexForResNumber(anchor.number);
+      if (index == null) return;
+      _anchorIndex = index;
+      _itemScroll.jumpTo(index: index, alignment: anchor.alignment);
+    });
   }
 
   /// NG ワード追加ダイアログを出し、追加されたら反映する。
@@ -2486,6 +2582,7 @@ class _ThreadScreenState extends State<ThreadScreen>
     if (!_landingResolved) {
       _landingResolved = true;
       _initialIndex = _landingIndex(items);
+      _anchorIndex = _initialIndex; // 一覧が始まる基準（[_reanchor]）
     }
 
     // スレ内検索中は一致箇所をハイライトし、今ジャンプ先の一致レスを強調する。
