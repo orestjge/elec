@@ -7,6 +7,7 @@ import 'package:elec/src/ui/media_url_panel.dart';
 import 'package:elec/src/ui/mini_player.dart';
 import 'package:elec/src/ui/nico_thumbnail.dart';
 import 'package:elec/src/ui/post_images.dart';
+import 'package:elec/src/ui/remote_image.dart';
 import 'package:elec/src/ui/video_player_view.dart';
 import 'package:elec/src/ui/video_thumbnail.dart';
 import 'package:flutter/material.dart';
@@ -83,6 +84,14 @@ double _viewerScale(WidgetTester tester) => tester
     .transformationController!
     .value
     .getMaxScaleOnAxis();
+
+/// 全画面ビューアが今どれだけの大きさでデコードしようとしているか（物理ピクセル）。
+Size _viewerDecodeTarget(WidgetTester tester) {
+  final image = tester.widget<Image>(
+    find.descendant(of: find.byType(PageView), matching: find.byType(Image)),
+  );
+  return (image.image as RemoteImage).target;
+}
 
 /// 2本指スクロール（デスクトップではドラッグの代わりにこれが来る）を送る。
 /// [kind] を mouse にするとホイール相当。
@@ -491,6 +500,33 @@ void main() {
     await tester.drag(find.byType(PageView), const Offset(0, 140));
     await tester.pumpAndSettle();
     expect(find.text('a.jpg'), findsOneWidget);
+  });
+
+  testWidgets('拡大するとその分だけ細かくデコードし直し、戻せば元に戻る', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: _host,
+        home: Scaffold(
+          body: PostImages(urls: [Uri.parse('https://example.com/a.jpg')]),
+        ),
+      ),
+    );
+
+    await _openViewer(tester);
+
+    final fit = _viewerDecodeTarget(tester);
+    await _pinchZoom(tester);
+    expect(_viewerScale(tester), greaterThan(1.01));
+    // 画面ぴったりの 1 枚を拡げるだけでは粗くなる。倍率のぶん細かく取り直す。
+    expect(_viewerDecodeTarget(tester).width, greaterThan(fit.width));
+
+    // 等倍へ戻したら細かさも戻す（見えない分をメモリに抱えたままにしない）。
+    tester
+        .widget<InteractiveViewer>(find.byType(InteractiveViewer))
+        .transformationController!
+        .value = Matrix4.identity();
+    await tester.pumpAndSettle();
+    expect(_viewerDecodeTarget(tester), fit);
   });
 
   testWidgets('拡大中の左右ドラッグは端まで画像を送り、はみ出したら隣の画像へ', (tester) async {
