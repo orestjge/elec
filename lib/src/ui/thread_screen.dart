@@ -239,7 +239,6 @@ class _ThreadScreenState extends State<ThreadScreen>
   /// 末尾に居るときだけ追従する既定の動きでは、ツリー表示で自分のレスが末尾に
   /// 来ない並びのときに送ったレスを見失う。[_noticeOwnPostAfter] を参照。
   int? _ownPostToShow;
-  final _selectedBodyResNumbers = <int>{};
   static const int _postRefreshAttempts = 4;
   static const Duration _postRefreshRetryDelay = Duration(milliseconds: 700);
 
@@ -1239,6 +1238,9 @@ class _ThreadScreenState extends State<ThreadScreen>
                       _showConversationRange(numbers);
                     },
                     onTapUrl: _openUrl,
+                    // 本文を選べるのはここだけ。返信スワイプの掛かっていない
+                    // 場所なので、なぞる操作を選択に使い切れる。
+                    bodySelectable: true,
                     isOwn: _history.isOwnPost(widget.threadKey, res.number),
                     isThreadOwner: _isThreadOwnerPost(
                       res,
@@ -2175,24 +2177,6 @@ class _ThreadScreenState extends State<ThreadScreen>
     );
   }
 
-  // 本文以外（名前欄・ヘッダー・余白など）をタップしたとき、選択中なら解除する。
-  // onTap は本文・リンク・ボタン等が拾ったタップには発火しないので、
-  // 誰も拾わなかったタップだけを対象にできる。
-  void _handleBackgroundTap() {
-    if (_bodySelectionActive) FocusManager.instance.primaryFocus?.unfocus();
-  }
-
-  bool get _bodySelectionActive => _selectedBodyResNumbers.isNotEmpty;
-
-  void _handleBodySelectionActiveChanged(int resNumber, bool active) {
-    final changed = active
-        ? _selectedBodyResNumbers.add(resNumber)
-        : _selectedBodyResNumbers.remove(resNumber);
-    if (!changed) return;
-    // 選択中は戻るスワイプを止める（横に引く操作が選択範囲の変更になるため）。
-    setState(() {});
-  }
-
   /// スレ画面の通知は入力欄や末尾レスに重ならないよう、上部へ出す。
   void _showSnack(String message) {
     _showTopSnack(message);
@@ -2453,32 +2437,26 @@ class _ThreadScreenState extends State<ThreadScreen>
           ),
         ),
       ),
-      body: GestureDetector(
-        behavior: HitTestBehavior.translucent,
-        onTap: _handleBackgroundTap,
-        child: Column(
-          children: [
-            // 戻るスワイプは一覧側でだけ受ける。入力欄の上の横ドラッグはカーソル
-            // 移動・文字選択なので、そちらへ触らない。
-            Expanded(
-              child: BackSwipe(enabled: !_bodySelectionActive, child: _body()),
-            ),
-            _Composer(
-              key: _composerKey,
-              controller: _composer,
-              focusNode: _composerFocus,
-              onSend: _submit,
-              onPickAndUploadImages: _pickAndUploadImages,
-              onPickAndUploadFile: _pickAndUploadFile,
-              enabled: _canWrite,
-              replyTargetFor: _replyTargetFor,
-              onTapReplyTarget: (number) {
-                final target = _resByNumber(number);
-                if (target != null) _showResActions(target);
-              },
-            ),
-          ],
-        ),
+      body: Column(
+        children: [
+          // 戻るスワイプは一覧側でだけ受ける。入力欄の上の横ドラッグはカーソル
+          // 移動・文字選択なので、そちらへ触らない。
+          Expanded(child: BackSwipe(child: _body())),
+          _Composer(
+            key: _composerKey,
+            controller: _composer,
+            focusNode: _composerFocus,
+            onSend: _submit,
+            onPickAndUploadImages: _pickAndUploadImages,
+            onPickAndUploadFile: _pickAndUploadFile,
+            enabled: _canWrite,
+            replyTargetFor: _replyTargetFor,
+            onTapReplyTarget: (number) {
+              final target = _resByNumber(number);
+              if (target != null) _showResActions(target);
+            },
+          ),
+        ],
       ),
     );
   }
@@ -2623,13 +2601,7 @@ class _ThreadScreenState extends State<ThreadScreen>
                         onTapUrl: _openUrl,
                         replyCount: replies[item.number] ?? 0,
                         onTapReplies: _showReplies,
-                        onBodySelectionActiveChanged: (active) =>
-                            _handleBodySelectionActiveChanged(
-                              item.number,
-                              active,
-                            ),
                         onLongPress: () => _showResActions(item),
-                        bodySelectable: false,
                         isOwn: _history.isOwnPost(
                           widget.threadKey,
                           item.number,

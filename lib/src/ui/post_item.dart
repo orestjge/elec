@@ -37,9 +37,8 @@ class PostItem extends StatelessWidget {
     this.onTapUrl,
     this.replyCount = 0,
     this.onTapReplies,
-    this.onBodySelectionActiveChanged,
     this.onLongPress,
-    this.bodySelectable = true,
+    this.bodySelectable = false,
     this.isOwn = false,
     this.isThreadOwner = false,
     this.isReplyToOwn = false,
@@ -96,9 +95,6 @@ class PostItem extends StatelessWidget {
   /// 返信数タップ時。このレスへの返信一覧を出す。
   final ValueChanged<int>? onTapReplies;
 
-  /// 本文の文字選択状態が変わったとき。
-  final ValueChanged<bool>? onBodySelectionActiveChanged;
-
   /// レスを長押ししたとき。レス全体のコピーや ID 操作のメニューを出す。
   ///
   /// タップでは開かない。本文の `>>N` や URL を狙って触れただけ、スクロールを
@@ -106,7 +102,12 @@ class PostItem extends StatelessWidget {
   /// 位置から沈み込みが広がって、離す前に「今どのレスを掴んでいるか」が分かる。
   final VoidCallback? onLongPress;
 
-  /// 本文を範囲選択できるようにするか。通常一覧では false、メニュー内では true。
+  /// 本文を範囲選択できるようにするか。**既定は false。**
+  ///
+  /// レスを並べる場所（一覧・会話シート・同一 ID 一覧）では、レスは横スワイプで
+  /// 返信、縦スクロールで移動と、指の操作をすでに使い切っている。本文が選択でき
+  /// ると、なぞった指が選択範囲の伸縮に持っていかれて返信スワイプが出ない。
+  /// 選択したいときはレスを長押ししてメニューを開けば、その中のレスで選べる。
   final bool bodySelectable;
 
   /// このアプリから投稿したレスか。
@@ -258,7 +259,6 @@ class PostItem extends StatelessWidget {
               onTapUrl: openUrl,
               onTapId: onTapId,
               selectable: bodySelectable,
-              onSelectionActiveChanged: onBodySelectionActiveChanged,
               highlightQuery: highlightQuery,
             ),
           ),

@@ -1445,8 +1445,9 @@ void main() {
   });
 
   // 本文の選択は一覧上ではなくレスメニューの中で行う（一覧側は bodySelectable:
-  // false）。その選択中に横へ引いても一覧に戻らないことを見る。
-  testWidgets('レスメニューで本文を選択中は右ドラッグで一覧に戻らない', (tester) async {
+  // false）。選択のために本文をなぞる操作が、下の一覧の戻るスワイプへ抜けて
+  // いかないことを見る。
+  testWidgets('レスメニューの本文を横になぞっても一覧に戻らない', (tester) async {
     final fetcher = QueueFetcher([
       subjectOk('1.dat<>選択中スレ (1)\n', 'LM1'),
       datOk(datLine('名無し<><>2025/11/03(月) 02:14:51.907 ID:aaa<> 本文 <>選択中スレ')),
@@ -1474,12 +1475,7 @@ void main() {
           widget is SelectableText &&
           widget.textSpan?.toPlainText().contains('本文') == true,
     );
-    final body = tester.widget<SelectableText>(bodyFinder);
-    body.onSelectionChanged?.call(
-      const TextSelection(baseOffset: 0, extentOffset: 2),
-      SelectionChangedCause.longPress,
-    );
-    await tester.pump();
+    expect(bodyFinder, findsOneWidget);
 
     await tester.drag(bodyFinder, const Offset(500, 0));
     await tester.pumpAndSettle();
