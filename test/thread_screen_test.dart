@@ -1897,6 +1897,93 @@ void main() {
     expect(tester.widget<AppBar>(find.byType(AppBar)).toolbarHeight, 80);
   });
 
+  group('端末幅に収まらないスレタイ', () {
+    /// 幅 [width] の端末で [title] のスレを開き、AppBar のスレタイの
+    /// （文字サイズ, 行数, 描かれた高さ）を返す。
+    Future<(double, int, double)> titleFit(
+      WidgetTester tester,
+      String title, {
+      double width = 390,
+    }) async {
+      tester.view.physicalSize = Size(width, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ThreadScreen(
+            threadKey: '1762103691',
+            threadTitle: title,
+            fetcher: QueueFetcher([ok(res1)]),
+            pollInterval: const Duration(seconds: 5),
+            readHistory: ReadHistory(MemoryReadHistoryStorage()),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final text = tester.widget<Text>(find.text(title));
+      return (
+        text.style!.fontSize!,
+        text.maxLines!,
+        tester.getSize(find.text(title)).height,
+      );
+    }
+
+    testWidgets('入りきるスレタイはそのままの大きさで 2 行', (tester) async {
+      final (size, lines, _) = await titleFit(tester, '短いスレタイ');
+      expect(size, 15);
+      expect(lines, 2);
+    });
+
+    testWidgets('長いスレタイは字を落として 3 行まで使う', (tester) async {
+      // テスト用フォントは 1 文字＝文字サイズぶんの幅なので、幅 390 で
+      // 15px なら 3 行で 72 字までしか入らない。それを超える 78 字を渡す。
+      final (size, lines, height) = await titleFit(tester, 'ここは長いスレタイの見出し' * 6);
+      expect(size, lessThan(15));
+      expect(lines, 3);
+      // AppBar（toolbarHeight 80）から溢れない。
+      expect(height, lessThan(80 - 8));
+    });
+
+    testWidgets('押せる範囲は画面の端まで届かない', (tester) async {
+      // 端まで折り返す長さのスレタイでも、タップの反応が出る枠は端の手前で
+      // 止まる（余白は枠の外側にある）。
+      final title = 'ここは長いスレタイの見出し' * 6;
+      await titleFit(tester, title);
+
+      final ink = find
+          .ancestor(of: find.text(title), matching: find.byType(InkWell))
+          .first;
+      final rect = tester.getRect(ink);
+      expect(rect.right, lessThanOrEqualTo(390 - 8));
+      // 上も同じく、AppBar の上端には触れない。
+      expect(rect.top, greaterThanOrEqualTo(3));
+      // AppBar（80）からはみ出さない。title の高さは制約で縛られないので、
+      // ここを見ておかないと 3 行のスレタイが上下に削れる。
+      expect(rect.bottom, lessThanOrEqualTo(80));
+    });
+
+    testWidgets('3 行でも入らないスレタイは末尾を省く', (tester) async {
+      const title =
+          'これはとてもとても長いスレッドタイトルでどれだけ字を小さくしても'
+          'AppBar の中には収まりきらないので末尾は省略されるほかない長さのもので'
+          'あり、実際の板でもこれほど長いスレタイはめったに立たないはずのものです';
+      final (size, lines, height) = await titleFit(tester, title);
+      expect(size, 13);
+      expect(lines, 3);
+      expect(height, lessThan(80 - 8));
+      expect(
+        tester.widget<Text>(find.text(title)).overflow,
+        TextOverflow.ellipsis,
+      );
+      // 省かれたぶんはタップで開くシートに全文が残っている。
+      await tester.tap(find.text(title));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(SelectableText, title), findsOneWidget);
+    });
+  });
+
   testWidgets('1001 行があれば完走表示を出す', (tester) async {
     final f = QueueFetcher([
       ok([...res1, ...res2, ...over1000]),

@@ -135,6 +135,7 @@ Future<void> _shoot(
   ThemeData theme,
   String out, {
   double width = 420,
+  String title = 'スレマップと返信数の見た目を確認するスレ',
   bool watchoi = false,
   bool noId = false,
   bool plain = false,
@@ -168,7 +169,9 @@ Future<void> _shoot(
           RepaintBoundary(key: const ValueKey('shot'), child: child!),
       home: ThreadScreen(
         threadKey: '1762103691',
-        threadTitle: 'スレマップと返信数の見た目を確認するスレ',
+        threadTitle: title,
+        // 一覧から開いたときと同じに戻るを出す（スレタイの左の余白を見る）。
+        onClose: () {},
         fetcher: _StaticFetcher(
           _dat(watchoi: watchoi, noId: noId, plain: plain),
         ),
@@ -404,6 +407,30 @@ void main() {
       '$dir/thread_conversation_composer.png',
       draft: '>>6 これいいね',
       openConversation: true,
+    );
+  });
+
+  // 長いスレタイ。AppBar に入る大きさまで字を落とし、3 行目まで使う。
+  // 実況板でよくある長さ（40〜60 字）と、それでも入りきらない極端な長さ。
+  testWidgets('long title', (tester) async {
+    await _shoot(
+      tester,
+      ElecTheme.light(),
+      '$dir/thread_long_title.png',
+      width: 390,
+      title: '【朗報】このアプリのスレタイ表示、入りきらないときは字を小さくして3行まで使うように改善されるらしい',
+    );
+  });
+
+  testWidgets('longest title', (tester) async {
+    await _shoot(
+      tester,
+      ElecTheme.light(),
+      '$dir/thread_longest_title.png',
+      width: 390,
+      title:
+          '【超速報】どれだけ字を小さくしても AppBar には収まりきらないほど長いスレタイを立てる人が'
+          '現れたのでここで末尾が省かれる様子を見ておくスレ その2【末尾は省略】',
     );
   });
 
