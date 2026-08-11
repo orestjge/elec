@@ -15,6 +15,7 @@ import 'id_color.dart';
 import 'now_ticker.dart';
 import 'id_icon.dart';
 import 'link_card.dart';
+import 'long_press.dart';
 import 'post_body_segments.dart';
 import 'post_images.dart';
 import 'reply_tier.dart';
@@ -497,32 +498,13 @@ class _ThreadCommandChip extends StatelessWidget {
   }
 }
 
-/// 長押しがメニューに繋がるまでの時間。既定の 500ms は「押しているのに何も
-/// 起きない」と感じる長さなので短くする。タップの判定（100ms）とは十分離れて
-/// いるので、触れただけでメニューが出ることはない。
-const _resLongPressDuration = Duration(milliseconds: 400);
-
-/// 触れてから沈み込みを広げ始めるまでの待ち時間。スクロールを始めるときの一瞬の
-/// 接触で行がチカチカしないよう、指を止めている間だけ広げる。
-///
-/// スクロールが確定するのは指が 18px 動いてからで、そこまでの時間は引き方次第。
-/// この待ち時間だけでは防ぎきれないので、指が動いたかどうかも併せて見る（[_move]）。
-const _pressSpreadDelay = Duration(milliseconds: 150);
-
 /// 指の位置からレスの端まで広がりきるまでの時間。ゆっくり見せたいので
-/// [_resLongPressDuration] より長いが、easeOutCubic の出足が速いぶん、メニューが
+/// [menuLongPressDuration] より長いが、easeOutCubic の出足が速いぶん、メニューが
 /// 出る頃には端まで届いて見える。
 const _pressSpreadDuration = Duration(milliseconds: 450);
 
 /// 指を離してから沈み込みが消えるまでの時間。
 const _pressFadeOutDuration = Duration(milliseconds: 140);
-
-/// 指がこれだけ動いたらスワイプとみなして沈み込みを止める距離。
-///
-/// 長押しの判定が外れる距離（`kTouchSlop` = 18px）を待つと、スクロールを始めた
-/// 指の下で一瞬広がってしまうので、その手前で引く。指の細かい揺れでは消えない
-/// 程度には残す。
-const _pressMoveSlop = 8.0;
 
 /// レスを長押しでメニューへ繋ぐラッパ。押している間は指の位置から沈み込みが
 /// 広がり、離す前にどのレスを掴んでいるかが分かる（[PostItem.onLongPress] 参照）。
@@ -554,8 +536,11 @@ class _PressableResState extends State<_PressableRes>
   Timer? _timer;
   Offset? _origin;
 
-  /// 指を置いた位置。ここから [_pressMoveSlop] 離れたらスワイプとみなす。
+  /// 指を置いた位置。ここから [pressMoveSlop] 離れたらスワイプとみなす。
   Offset? _downAt;
+
+  /// この押しを内側（レスの中のサムネイル）が引き受けたか。
+  bool _claimed = false;
 
   @override
   void dispose() {
@@ -565,10 +550,24 @@ class _PressableResState extends State<_PressableRes>
     super.dispose();
   }
 
+  /// 内側が引き受けた・手放した（[LongPressClaimed]）。
+  ///
+  /// 引き受けられている間はレスを広げない。開くのはサムネイルのメニューなので、
+  /// レス全体が沈み込むと的が違って見える。合図は押し始めに来るので、たいていは
+  /// 広げる前に降りられる（間に合わなかったときのために、出ていれば消す）。
+  void _claim(bool pressed) {
+    _claimed = pressed;
+    if (!pressed) return;
+    _timer?.cancel();
+    _downAt = null;
+    _fade.value = 0;
+  }
+
   void _press(Offset position) {
+    if (_claimed) return;
     _timer?.cancel();
     _downAt = position;
-    _timer = Timer(_pressSpreadDelay, () {
+    _timer = Timer(pressFeedbackDelay, () {
       setState(() => _origin = position);
       _fade.value = 1;
       _spread.forward(from: 0);
@@ -585,7 +584,7 @@ class _PressableResState extends State<_PressableRes>
   void _move(Offset position) {
     final downAt = _downAt;
     if (downAt == null) return;
-    if ((position - downAt).distance <= _pressMoveSlop) return;
+    if ((position - downAt).distance <= pressMoveSlop) return;
     _timer?.cancel();
     _downAt = null;
     _fade.value = 0;
@@ -595,6 +594,7 @@ class _PressableResState extends State<_PressableRes>
   void _release() {
     _timer?.cancel();
     _downAt = null;
+    _claimed = false;
     if (_origin != null) _fade.reverse();
   }
 
@@ -603,41 +603,50 @@ class _PressableResState extends State<_PressableRes>
     final scheme = Theme.of(context).colorScheme;
     // 指の動きは長押しの判定を待たずに自分で見る（[_move] 参照）。スクロールに
     // 取られた後もこのレスへ届くので、途中で引っ込める判断ができる。
-    return Listener(
-      onPointerMove: (event) => _move(event.localPosition),
-      child: RawGestureDetector(
-        behavior: HitTestBehavior.opaque,
-        gestures: <Type, GestureRecognizerFactory>{
-          // 長押しの長さを変えたいので GestureDetector ではなく直接組み立てる。
-          LongPressGestureRecognizer:
-              GestureRecognizerFactoryWithHandlers<LongPressGestureRecognizer>(
-                () => LongPressGestureRecognizer(
-                  duration: _resLongPressDuration,
-                  debugOwner: this,
+    return NotificationListener<LongPressClaimed>(
+      // レスの中のレスは無いので、ここで受け止めて上へは流さない。
+      onNotification: (notification) {
+        _claim(notification.pressed);
+        return true;
+      },
+      child: Listener(
+        onPointerMove: (event) => _move(event.localPosition),
+        child: RawGestureDetector(
+          behavior: HitTestBehavior.opaque,
+          gestures: <Type, GestureRecognizerFactory>{
+            // 長押しの長さを変えたいので GestureDetector ではなく直接組み立てる。
+            LongPressGestureRecognizer:
+                GestureRecognizerFactoryWithHandlers<
+                  LongPressGestureRecognizer
+                >(
+                  () => LongPressGestureRecognizer(
+                    duration: menuLongPressDuration,
+                    debugOwner: this,
+                  ),
+                  (recognizer) {
+                    recognizer.onLongPressDown = (details) =>
+                        _press(details.localPosition);
+                    recognizer.onLongPressCancel = _release;
+                    recognizer.onLongPressUp = _release;
+                    recognizer.onLongPress = () {
+                      // 長押しが通った合図。指を離す前にメニューが出ると分かる。
+                      HapticFeedback.mediumImpact();
+                      widget.onLongPress();
+                    };
+                  },
                 ),
-                (recognizer) {
-                  recognizer.onLongPressDown = (details) =>
-                      _press(details.localPosition);
-                  recognizer.onLongPressCancel = _release;
-                  recognizer.onLongPressUp = _release;
-                  recognizer.onLongPress = () {
-                    // 長押しが通った合図。指を離す前にメニューが出ると分かる。
-                    HapticFeedback.mediumImpact();
-                    widget.onLongPress();
-                  };
-                },
-              ),
-        },
-        child: CustomPaint(
-          painter: _PressSpread(
-            origin: _origin,
-            spread: _spread,
-            fade: _fade,
-            // レス自身の背景（自分・自分宛・検索一致）はどれも半透明なので、
-            // 後ろに敷いた沈み込みが透けて出る。本文へ被せないぶん文字が濁らない。
-            color: scheme.onSurface.withValues(alpha: 0.09),
+          },
+          child: CustomPaint(
+            painter: _PressSpread(
+              origin: _origin,
+              spread: _spread,
+              fade: _fade,
+              // レス自身の背景（自分・自分宛・検索一致）はどれも半透明なので、
+              // 後ろに敷いた沈み込みが透けて出る。本文へ被せないぶん文字が濁らない。
+              color: scheme.onSurface.withValues(alpha: 0.09),
+            ),
+            child: widget.child,
           ),
-          child: widget.child,
         ),
       ),
     );

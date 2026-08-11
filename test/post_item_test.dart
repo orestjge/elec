@@ -273,6 +273,88 @@ void main() {
     expect(find.textContaining('どう？', findRichText: true), findsOneWidget);
   });
 
+  testWidgets('サムネイルの長押しは、レスの長押しに吸われない', (tester) async {
+    // レスもサムネイルも長押しでメニューを出す。どちらが出るかは長押しの長さで
+    // 決まるので（`long_press.dart`）、内側のサムネイルが勝つことを縛る。
+    var resMenu = 0;
+    await tester.pumpWidget(
+      wrap(
+        PostItem(
+          res: postWithBody('これ見て<br>https://example.com/a.jpg'),
+          idCount: 1,
+          idOrdinal: 1,
+          onTapId: (_) {},
+          onLongPress: () => resMenu += 1,
+        ),
+      ),
+    );
+
+    await tester.longPress(find.byType(PostImages));
+    await tester.pumpAndSettle();
+
+    expect(find.text('この画像をNG'), findsOneWidget);
+    expect(resMenu, 0);
+
+    // レスの本文側は今まで通りレスのメニューへ繋ぐ。
+    await tester.tapAt(const Offset(4, 4));
+    await tester.pumpAndSettle();
+    await tester.longPress(find.byType(ResBody).first);
+    await tester.pumpAndSettle();
+    expect(resMenu, 1);
+  });
+
+  testWidgets('サムネイルを押している間はレスではなく絵が沈む', (tester) async {
+    // 開くのは絵のメニューなので、レス全体が広がると的が違って見える。
+    await tester.pumpWidget(
+      wrap(
+        PostItem(
+          res: postWithBody('これ見て<br>https://example.com/a.jpg'),
+          idCount: 1,
+          idOrdinal: 1,
+          onTapId: (_) {},
+          onLongPress: () {},
+        ),
+      ),
+    );
+
+    // レスの沈み込みを描く層。
+    final spread = find.byWidgetPredicate(
+      (w) => w is CustomPaint && '${w.painter.runtimeType}'.contains('Spread'),
+      description: 'レスの沈み込み',
+    );
+    final thumbScale = find.descendant(
+      of: find.byType(PostImages),
+      matching: find.byType(AnimatedScale),
+    );
+
+    // 本文を押せば、これまで通りレスが沈む。
+    var press = await tester.startGesture(
+      tester.getCenter(find.byType(ResBody).first),
+    );
+    // 1 回目で手応えが始まり、2 回目でその動きが進む。
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(spread, paints..circle());
+    await press.up();
+    await tester.pumpAndSettle();
+
+    // サムネイルを押したときはレスを広げず、絵だけを沈める。
+    press = await tester.startGesture(
+      tester.getCenter(find.byType(PostImages)),
+    );
+    // 1 回目で手応えが始まり、2 回目でその動きが進む。
+    await tester.pump(const Duration(milliseconds: 200));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(spread, isNot(paints..circle()));
+    expect(tester.widget<AnimatedScale>(thumbScale).scale, lessThan(1));
+
+    // 指が離れれば元に戻る（ここでは離さずに取り消す。長押しに届く前に離すと
+    // タップ扱いになり、ビューアが開いてサムネイルごと画面から消えるため）。
+    await press.cancel();
+    await tester.pumpAndSettle();
+    expect(tester.widget<AnimatedScale>(thumbScale).scale, 1);
+  });
+
   testWidgets('サムネイルにできないリンクは本文に残す', (tester) async {
     await tester.pumpWidget(
       wrap(

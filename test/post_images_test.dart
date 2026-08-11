@@ -52,6 +52,17 @@ Future<void> _openViewer(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
+/// [finder] が指の届くところ（重なりのいちばん上）に出ているか。
+///
+/// 見えていること（`findsOneWidget`）だけでは足りない場面のための物差し。
+/// 別の層に隠れていても組み立て自体はされるので、当たり判定まで見ないと
+/// 「出ているのに押せない」を取り逃がす。
+bool _isTappable(WidgetTester tester, Finder finder) {
+  final render = tester.renderObject(finder);
+  final hits = tester.hitTestOnBinding(tester.getCenter(finder));
+  return hits.path.any((entry) => identical(entry.target, render));
+}
+
 /// 全画面ビューアの表示中の画像を2本指のピンチで拡大する。
 Future<void> _pinchZoom(WidgetTester tester) async {
   final center = tester.getCenter(find.byType(PageView));
@@ -322,6 +333,134 @@ void main() {
 
     expect(find.text('a.jpg'), findsNothing);
     expect(MiniPlayerController.shared.media, isNull);
+  });
+
+  testWidgets('ビューアのNGは確認を絵より上に出す', (tester) async {
+    // ビューアは Navigator の外に載っている。確認を Navigator 側へ出すと絵の
+    // 下へ潜り、絵を閉じるまで気づけない（押した手応えが無い）。
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: _host,
+        home: Scaffold(
+          body: PostImages(urls: [Uri.parse('https://example.com/a.jpg')]),
+        ),
+      ),
+    );
+
+    await _openViewer(tester);
+    await tester.tap(find.byIcon(Icons.hide_image_outlined));
+    await tester.pumpAndSettle();
+
+    expect(find.text('この画像をNG'), findsOneWidget);
+    expect(
+      _isTappable(tester, find.widgetWithText(FilledButton, 'NGにする')),
+      isTrue,
+    );
+
+    // 暗幕を押せば取り消せる。ビューアは開いたまま。
+    await tester.tapAt(const Offset(4, 4));
+    await tester.pumpAndSettle();
+    expect(find.text('この画像をNG'), findsNothing);
+    expect(MiniPlayerController.shared.media, isNotNull);
+  });
+
+  testWidgets('ビューアを閉じるとNGの確認も片付ける', (tester) async {
+    // 「戻る」はビューア（の下敷きルート）に届く。絵が消えたあとに問いだけ
+    // 残ると、何に対する問いなのか分からなくなる。
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: _host,
+        home: Scaffold(
+          body: PostImages(urls: [Uri.parse('https://example.com/a.jpg')]),
+        ),
+      ),
+    );
+
+    await _openViewer(tester);
+    await tester.tap(find.byIcon(Icons.hide_image_outlined));
+    await tester.pumpAndSettle();
+    expect(find.text('この画像をNG'), findsOneWidget);
+
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+
+    expect(MiniPlayerController.shared.media, isNull);
+    expect(find.text('この画像をNG'), findsNothing);
+  });
+
+  testWidgets('サムネの長押しは、拡大せずにNGまで行ける', (tester) async {
+    // 伏せたい画像ほど大きくは見たくない。ビューアを開かずに済ませる道を残す。
+    final url = Uri.parse('https://example.com/a.jpg');
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: _host,
+        home: Scaffold(body: PostImages(urls: [url])),
+      ),
+    );
+
+    await tester.longPress(find.byType(GestureDetector).first);
+    await tester.pumpAndSettle();
+    expect(find.text('ブラウザで開く'), findsOneWidget);
+    expect(find.text('URLをコピー'), findsOneWidget);
+    // 一覧を出しただけでは絵は開かない。
+    expect(MiniPlayerController.shared.media, isNull);
+
+    await tester.tap(find.text('この画像をNG'));
+    await tester.pumpAndSettle();
+    // 確認はアプリ側（Navigator）へ出す。ビューアは出ていない。
+    expect(find.text('同じ画像は、次から別の URL で貼られても隠します。貼り直しで多少変わった画像も隠します。'), findsOneWidget);
+    expect(
+      _isTappable(tester, find.widgetWithText(FilledButton, 'NGにする')),
+      isTrue,
+    );
+
+    await tester.tap(find.widgetWithText(TextButton, 'キャンセル'));
+    await tester.pumpAndSettle();
+    expect(find.text('この画像をNG'), findsNothing);
+  });
+
+  testWidgets('サムネの長押しからブラウザとURLコピーへ回せる', (tester) async {
+    final url = Uri.parse('https://img.example.com/2026/08/a.jpg?size=large');
+    final opened = <Uri>[];
+    final copied = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied.add((call.arguments as Map)['text'] as String);
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: _host,
+        home: Scaffold(
+          body: PostImages(urls: [url], onOpenImageExternally: opened.add),
+        ),
+      ),
+    );
+
+    await tester.longPress(find.byType(GestureDetector).first);
+    await tester.pumpAndSettle();
+    // 行き先は札にも出す（ファイル名だけでは素性が分からない）。
+    expect(find.text(url.toString()), findsOneWidget);
+    await tester.tap(find.text('URLをコピー'));
+    await tester.pumpAndSettle();
+    expect(copied, [url.toString()]);
+
+    await tester.longPress(find.byType(GestureDetector).first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('ブラウザで開く'));
+    await tester.pumpAndSettle();
+    expect(opened, [url]);
   });
 
   testWidgets('拡大中の上下ドラッグは閉じずに画像のパンへ回す', (tester) async {
