@@ -457,7 +457,7 @@ class QuotedResRow extends StatelessWidget {
                 ),
               ],
               if (body.images.isNotEmpty)
-                _QuoteThumbs(
+                QuoteThumbs(
                   urls: body.images,
                   blurred: blurImages,
                   color: dim,
@@ -483,8 +483,12 @@ const double _quoteThumbSize = 32;
 const int _quoteThumbLimit = 3;
 
 /// 引用行に添える小さなサムネイルの並び。
-class _QuoteThumbs extends StatelessWidget {
-  const _QuoteThumbs({
+///
+/// 入力欄の上に出る返信先の帯でも同じものを使う。どちらも「何への返信か」を
+/// 1 行で思い出すための添え物なので、同じ大きさ・同じ枚数で揃える。
+class QuoteThumbs extends StatelessWidget {
+  const QuoteThumbs({
+    super.key,
     required this.urls,
     required this.blurred,
     required this.color,

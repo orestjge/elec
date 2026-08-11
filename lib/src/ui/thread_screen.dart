@@ -1025,10 +1025,36 @@ class _ThreadScreenState extends State<ThreadScreen>
 
   /// 入力欄の返信先表示に出すレス。無い番号（まだ来ていない・打ち間違い）なら
   /// null を返して何も出さない。NG のレスは中身を伏せ、番号だけ出す。
+  ///
+  /// 画像は URL の文字列を落としてサムネイルにする（引用行と同じ扱い）。返信先
+  /// が画像だけのレスだと、長い URL が 1 行を埋めるばかりで宛先を確かめられない。
   _ReplyTarget? _replyTargetFor(int number) {
     final res = _resByNumber(number);
     if (res == null) return null;
-    return _ReplyTarget(number, _isNgHidden(res) ? '' : resExcerpt(res));
+    if (_isNgHidden(res)) return _ReplyTarget(number, '');
+    final body = quotedResBody(res);
+    return _ReplyTarget(
+      number,
+      body.excerpt,
+      images: body.images,
+      blurImages: _guroMasked.contains(number),
+    );
+  }
+
+  /// 「グロ」注意が付いたレスの番号。[_state] の更新ごとに数え直す。
+  ///
+  /// 全レスの本文を走査するので、入力のたびに呼ばれる返信先の帯のために毎回は
+  /// 数えない。
+  Set<int> _guroMaskedCache = const {};
+  List<Res>? _guroMaskedFor;
+
+  Set<int> get _guroMasked {
+    final res = _state.res;
+    if (!identical(_guroMaskedFor, res)) {
+      _guroMaskedFor = res;
+      _guroMaskedCache = guroMaskedResNumbers(res);
+    }
+    return _guroMaskedCache;
   }
 
   Res? _resByNumber(int number) {
@@ -1213,9 +1239,7 @@ class _ThreadScreenState extends State<ThreadScreen>
                       _threadOwnerId(_state.res),
                     ),
                     isReplyToOwn: _isReplyToOwnPost(res),
-                    blurImages: guroMaskedResNumbers(
-                      _state.res,
-                    ).contains(res.number),
+                    blurImages: _guroMasked.contains(res.number),
                     linkPreviews: _view.linkPreviews,
                     resLayout: _view.resLayout,
                     defaultName: widget.defaultName,
@@ -1428,7 +1452,7 @@ class _ThreadScreenState extends State<ThreadScreen>
     final idCounts = _idCounts(_state.res);
     final idOrdinals = _idOrdinals(_state.res);
     final replyCountByNumber = replyCounts(_state.res);
-    final guroMasked = guroMaskedResNumbers(_state.res);
+    final guroMasked = _guroMasked;
     final ownerId = _threadOwnerId(_state.res);
     showModalBottomSheet<void>(
       context: context,
@@ -1666,7 +1690,7 @@ class _ThreadScreenState extends State<ThreadScreen>
     final idCounts = _idCounts(res);
     final idOrdinals = _idOrdinals(res);
     final replyCountByNumber = replyCounts(res);
-    final guroMasked = guroMaskedResNumbers(res);
+    final guroMasked = _guroMasked;
     final title = '会話 #${_conversationRangeLabel(centers)}';
     final effectiveFocusNumber =
         focusNumber != null && centers.contains(focusNumber)
@@ -1706,6 +1730,12 @@ class _ThreadScreenState extends State<ThreadScreen>
             _showConversation(n);
           },
           onTapUrl: _openUrl,
+          composer: _composer,
+          replyTargetFor: _replyTargetFor,
+          onTapReplyTarget: (number) {
+            Navigator.pop(context);
+            _showConversation(number, focusNumber: number);
+          },
           onSend: _submit,
           onPickAndUploadImages: _pickAndUploadImages,
           onPickAndUploadFile: _pickAndUploadFile,
@@ -2448,7 +2478,7 @@ class _ThreadScreenState extends State<ThreadScreen>
     final idCounts = _idCounts(res);
     final idOrdinals = _idOrdinals(res);
     final replies = replyCounts(res);
-    final guroMasked = guroMaskedResNumbers(res);
+    final guroMasked = _guroMasked;
     final threadOwnerId = _threadOwnerId(res);
     // 「新着」の境界（前回位置）。0 か総数以上なら新着ライン無し。
     final hasNewArrival = _openCount > 0 && _openCount < res.length;
@@ -3191,6 +3221,9 @@ class _ConversationSheet extends StatefulWidget {
     required this.onTapResRange,
     required this.onTapReplies,
     required this.onTapUrl,
+    required this.composer,
+    required this.replyTargetFor,
+    required this.onTapReplyTarget,
     required this.onSend,
     required this.onPickAndUploadImages,
     required this.onPickAndUploadFile,
@@ -3226,6 +3259,19 @@ class _ConversationSheet extends StatefulWidget {
   final void Function(int source, List<int> targets) onTapResRange;
   final ValueChanged<int> onTapReplies;
   final ValueChanged<Uri> onTapUrl;
+
+  /// 書きかけのレス。スレ画面の入力欄と**同じ** [TextEditingController] を受け取る。
+  ///
+  /// 下書きはスレに 1 つで、見ている場所（番号順の一覧・会話シート）では変わら
+  /// ない。会話を開いた拍子に書きかけが消えたり、シートで書いたぶんが閉じた
+  /// 途端に無くなったりしないようにするため。
+  final TextEditingController composer;
+
+  /// 本文の `>>N` から返信先を引く（[_Composer.replyTargetFor]）。
+  final _ReplyTarget? Function(int number) replyTargetFor;
+
+  /// 返信先の番号を押したとき。そのレスを中心にした会話へ開き直す。
+  final ValueChanged<int> onTapReplyTarget;
 
   /// 会話シート内の入力欄から直接送信する投稿関数（受理で true）。
   final Future<bool> Function(String) onSend;
@@ -3263,22 +3309,37 @@ class _ConversationSheet extends StatefulWidget {
 class _ConversationSheetState extends State<_ConversationSheet> {
   late final Map<int, GlobalKey> _keys;
   // 会話シート専用の入力欄（main の入力欄はシートに覆われて見えないため）。
-  // レスを左へスワイプして返信したときだけ出す（常時表示だと「会話全体への
-  // 返信」と誤解されうるため）。
-  final _controller = TextEditingController();
+  // 中身（下書き）はスレと共有で、欄そのものだけがシートのもの。フォーカスは
+  // 共有できない（同じ [FocusNode] を 2 つの欄に付けられない）ので、ここで持つ。
   final _focus = FocusNode();
-  bool _replying = false;
+
+  /// 入力欄を出しているか。レスを左へスワイプして返信したときに出す（常時表示
+  /// だと「会話全体への返信」と誤解されうるため）。ただし書きかけを持ったまま
+  /// 開いたときは初めから出す。隠したままだと、シートに覆われて手の届かない
+  /// 場所へ下書きが消えたように見えるため。
+  late bool _replying;
+
+  /// このシートを開いた時点で下書きがあったか。
+  ///
+  /// 「閉じる」の意味がこれで変わる。ここで書き始めたぶんは破棄してよいが、
+  /// 一覧側から持ち込んだ書きかけまで消すと、読むために閉じただけで長文が
+  /// 飛ぶ。持ち込みぶんは欄を畳むだけにして、スレの下書きとして残す。
+  late final bool _carriedDraft;
+
+  /// このシートで返信の宛先（`>>N`）を入れたか。見出しの文言に使う。
+  bool _repliedHere = false;
 
   @override
   void initState() {
     super.initState();
     _keys = {for (final entry in widget.entries) entry.res.number: GlobalKey()};
+    _carriedDraft = widget.composer.text.trim().isNotEmpty;
+    _replying = _carriedDraft;
     WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToFocus());
   }
 
   @override
   void dispose() {
-    _controller.dispose();
     _focus.dispose();
     super.dispose();
   }
@@ -3286,15 +3347,18 @@ class _ConversationSheetState extends State<_ConversationSheet> {
   /// レスの返信ボタンで呼ばれる。入力欄を出して `>>N` を挿入・フォーカスする。
   void _replyLocal(int number) {
     final anchor = '>>$number\n';
-    final sel = _controller.selection;
-    final text = _controller.text;
+    final sel = widget.composer.selection;
+    final text = widget.composer.text;
     final start = sel.isValid ? sel.start : text.length;
     final end = sel.isValid ? sel.end : text.length;
-    _controller.value = TextEditingValue(
+    widget.composer.value = TextEditingValue(
       text: text.replaceRange(start, end, anchor),
       selection: TextSelection.collapsed(offset: start + anchor.length),
     );
-    setState(() => _replying = true);
+    setState(() {
+      _replying = true;
+      _repliedHere = true;
+    });
     _focus.requestFocus();
   }
 
@@ -3305,11 +3369,26 @@ class _ConversationSheetState extends State<_ConversationSheet> {
     return accepted;
   }
 
-  /// 入力欄を閉じ、下書きを破棄する。
+  /// 入力欄を閉じる。ここで書き始めたぶんは下書きごと捨てる（[_carriedDraft]）。
   void _cancelReply() {
-    _controller.clear();
+    if (!_carriedDraft) widget.composer.clear();
     _focus.unfocus();
     setState(() => _replying = false);
+  }
+
+  /// 入力欄の上の見出し。null なら文言を出さず、閉じるボタンだけの行にする。
+  ///
+  /// 宛先が返信先の帯（[_ReplyTargetBar]）に出ているなら、その上でもう一度
+  /// 「返信」と名乗る必要はない。書きかけを持ち込んだだけの間は、宛先を決めて
+  /// 出した欄ではないので「返信」とは呼ばない。
+  ({IconData icon, String text})? _barLabel(String text) {
+    final hasTarget = referencedResNumbers(
+      text,
+    ).any((n) => widget.replyTargetFor(n) != null);
+    if (hasTarget) return null;
+    return _carriedDraft && !_repliedHere
+        ? (icon: Icons.edit_outlined, text: '書きかけのレス')
+        : (icon: Icons.reply, text: '返信（>>で対象を指定）');
   }
 
   void _scrollToFocus() {
@@ -3428,14 +3507,22 @@ class _ConversationSheetState extends State<_ConversationSheet> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 const Divider(height: 1),
-                _ReplyBar(onClose: _cancelReply),
+                ValueListenableBuilder<TextEditingValue>(
+                  valueListenable: widget.composer,
+                  builder: (context, value, _) => _ReplyBar(
+                    onClose: _cancelReply,
+                    label: _barLabel(value.text),
+                  ),
+                ),
                 _Composer(
-                  controller: _controller,
+                  controller: widget.composer,
                   focusNode: _focus,
                   onSend: _handleSend,
                   onPickAndUploadImages: widget.onPickAndUploadImages,
                   onPickAndUploadFile: widget.onPickAndUploadFile,
                   enabled: widget.enabled,
+                  replyTargetFor: widget.replyTargetFor,
+                  onTapReplyTarget: widget.onTapReplyTarget,
                 ),
               ],
             ),
@@ -3525,10 +3612,14 @@ class _ConversationPost extends StatelessWidget {
   }
 }
 
-/// 会話シートの返信入力欄の上に出す見出し。返信対象は本文の `>>N` で示す。
+/// 会話シートの入力欄の上に出す見出し。閉じるボタンを持つ。
+///
+/// [label] が null なら文言を出さず、閉じるボタンだけの行にする。宛先が下の
+/// [_ReplyTargetBar] に出ているときに、同じことを二度言わないため。
 class _ReplyBar extends StatelessWidget {
-  const _ReplyBar({required this.onClose});
+  const _ReplyBar({required this.onClose, required this.label});
   final VoidCallback onClose;
+  final ({IconData icon, String text})? label;
 
   @override
   Widget build(BuildContext context) {
@@ -3537,14 +3628,16 @@ class _ReplyBar extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 4, 6, 0),
       child: Row(
         children: [
-          Icon(Icons.reply, size: 15, color: scheme.onSurfaceVariant),
-          const SizedBox(width: 6),
-          Text(
-            '返信（>>で対象を指定）',
-            style: Theme.of(
-              context,
-            ).textTheme.labelMedium?.copyWith(color: scheme.onSurfaceVariant),
-          ),
+          if (label case final label?) ...[
+            Icon(label.icon, size: 15, color: scheme.onSurfaceVariant),
+            const SizedBox(width: 6),
+            Text(
+              label.text,
+              style: Theme.of(
+                context,
+              ).textTheme.labelMedium?.copyWith(color: scheme.onSurfaceVariant),
+            ),
+          ],
           const Spacer(),
           IconButton(
             icon: const Icon(Icons.close, size: 18),
@@ -3560,12 +3653,24 @@ class _ReplyBar extends StatelessWidget {
 
 /// 入力中の本文が指している返信先 1 件。番号と、1 行に潰した本文の抜粋。
 class _ReplyTarget {
-  const _ReplyTarget(this.number, this.excerpt);
+  const _ReplyTarget(
+    this.number,
+    this.excerpt, {
+    this.images = const [],
+    this.blurImages = false,
+  });
 
   final int number;
 
-  /// 本文の抜粋。NG のレスなど、中身を出さない場合は空。
+  /// 本文の抜粋。NG のレスなど、中身を出さない場合は空。画像 URL の文字列は
+  /// 除いてある（[images] のサムネイルで出す）。
   final String excerpt;
+
+  /// 返信先に貼られていた画像。
+  final List<Uri> images;
+
+  /// 返信先に「グロ」注意が付いており、サムネイルをぼかすか。
+  final bool blurImages;
 }
 
 /// 入力欄の上に「今どのレスへの返信を書いているか」を出す帯。
@@ -3610,6 +3715,9 @@ class _ReplyTargetBar extends StatelessWidget {
     );
 
     // 1 件 1 行。番号のうしろに本文の頭を添える（番号だけでは思い出せない）。
+    // 画像はサムネイルで添える（引用行と同じ [QuoteThumbs]）。URL の文字列は
+    // 抜粋から落としてあるので、絵を出さないと画像だけのレスが「に返信」の
+    // 一言になってしまう。
     Widget line(_ReplyTarget target) => Row(
       children: [
         number(target),
@@ -3624,6 +3732,12 @@ class _ReplyTargetBar extends StatelessWidget {
             ),
           ),
         ),
+        if (target.images.isNotEmpty)
+          QuoteThumbs(
+            urls: target.images,
+            blurred: target.blurImages,
+            color: scheme.onSurfaceVariant,
+          ),
       ],
     );
 

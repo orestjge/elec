@@ -296,6 +296,38 @@ void main() {
     expect(inReplyTargetBar('>>1 同じIDの2つ目'), findsOneWidget);
   });
 
+  testWidgets('返信先が画像なら URL の文字列ではなくサムネイルを添える', (tester) async {
+    final withImage = datLine(
+      '名無し<><>2025/11/03(月) 02:30:00.000 ID:ccc<> これ見て https://example.com/a.jpg <>',
+    );
+    final f = QueueFetcher([
+      ok([...res1, ...withImage]),
+    ]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.widgetWithText(TextField, 'レスを書く'),
+      '>>2 いいね',
+    );
+    await tester.pump();
+
+    // URL の文字列は 1 行を埋めるばかりで宛先の確かめにならない。引用行と同じ
+    // ように、文字列は落として絵で出す。
+    expect(inReplyTargetBar('これ見て'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: replyTargetBar(),
+        matching: find.textContaining('a.jpg'),
+      ),
+      findsNothing,
+    );
+    expect(
+      find.descendant(of: replyTargetBar(), matching: find.byType(QuoteThumbs)),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('返信先が多いときは頭の3件だけ出して残りは件数で示す', (tester) async {
     final many = <int>[];
     for (var i = 1; i <= 5; i++) {
@@ -1329,7 +1361,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('会話 #1  3件'), findsOneWidget);
 
-    // 開いただけでは入力欄は出ない（本体の 1 つだけ＝会話全体への返信と誤解しない）。
+    // 書きかけが無ければ、開いただけでは入力欄は出ない（本体の 1 つだけ＝会話
+    // 全体への返信と誤解しない）。
     expect(find.widgetWithText(TextField, 'レスを書く'), findsOneWidget);
 
     // シート内のレスを左へ引くと入力欄が出る（本体＋シートで 2 つ）。
@@ -1340,10 +1373,88 @@ void main() {
     final tf = tester.widget<TextField>(composers.last);
     expect(tf.controller!.text.startsWith('>>'), isTrue);
 
-    // 閉じるボタンで入力欄を隠せる。
+    // 閉じるボタンで入力欄を隠せる。ここで書き始めたぶんなので下書きも消える。
     await tester.tap(find.byIcon(Icons.close));
     await tester.pumpAndSettle();
-    expect(find.widgetWithText(TextField, 'レスを書く'), findsOneWidget);
+    final left = find.widgetWithText(TextField, 'レスを書く');
+    expect(left, findsOneWidget);
+    expect(tester.widget<TextField>(left).controller!.text, isEmpty);
+  });
+
+  testWidgets('会話ビューの入力欄も返信先を1行で出し、押すとその会話へ移る', (tester) async {
+    final f = QueueFetcher([
+      ok([...res1, ...res2, ...res3]),
+    ]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    await tester.tap(replyCount(0));
+    await tester.pumpAndSettle();
+    await swipeToReply(tester, posts(3).last);
+
+    // シート側の入力欄にも番号順ビューと同じ返信先の帯を出す（番号＋本文の頭）。
+    final bar = replyTargetBar().last;
+    expect(find.descendant(of: bar, matching: find.text('3')), findsOneWidget);
+    expect(
+      find.descendant(of: bar, matching: find.text('>>1-2 あとから来た')),
+      findsOneWidget,
+    );
+
+    // 押せば、その返信先を中心にした会話へ開き直す。
+    await tester.tap(find.descendant(of: bar, matching: find.text('3')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('会話 #3'), findsOneWidget);
+  });
+
+  testWidgets('下書きはスレに 1 つ（会話ビューと番号順ビューで持ち回る）', (tester) async {
+    final f = QueueFetcher([
+      ok([...res1, ...res2, ...res3]),
+    ]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    // 番号順ビューで書きかけを作ってから会話ビューを開く。
+    await tester.enterText(find.widgetWithText(TextField, 'レスを書く'), '書きかけ');
+    await tester.pump();
+    await tester.tap(replyCount(0));
+    await tester.pumpAndSettle();
+
+    // シートに覆われて手の届かない場所へ消えたように見せず、同じ書きかけを
+    // シート側の入力欄にも出す。
+    final composers = find.widgetWithText(TextField, 'レスを書く');
+    expect(composers, findsNWidgets(2));
+    expect(tester.widget<TextField>(composers.last).controller!.text, '書きかけ');
+
+    // シートで続きを書いて閉じると、番号順ビューの入力欄がそれを持っている。
+    await tester.enterText(composers.last, '書きかけの続き');
+    await tester.pump();
+    await tester.tapAt(const Offset(20, 20));
+    await tester.pumpAndSettle();
+
+    final main = find.widgetWithText(TextField, 'レスを書く');
+    expect(main, findsOneWidget);
+    expect(tester.widget<TextField>(main).controller!.text, '書きかけの続き');
+  });
+
+  testWidgets('会話ビューの閉じるボタンは持ち込んだ書きかけまでは消さない', (tester) async {
+    final f = QueueFetcher([
+      ok([...res1, ...res2, ...res3]),
+    ]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.widgetWithText(TextField, 'レスを書く'), '長い書きかけ');
+    await tester.pump();
+    await tester.tap(replyCount(0));
+    await tester.pumpAndSettle();
+
+    // 読むために畳んだだけで長文が飛ばないよう、欄を隠すだけにする。
+    await tester.tap(find.byIcon(Icons.close));
+    await tester.pumpAndSettle();
+
+    final main = find.widgetWithText(TextField, 'レスを書く');
+    expect(main, findsOneWidget);
+    expect(tester.widget<TextField>(main).controller!.text, '長い書きかけ');
   });
 
   testWidgets('スレタイシートからお気に入りを切り替える', (tester) async {
