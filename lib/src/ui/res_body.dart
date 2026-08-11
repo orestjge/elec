@@ -10,6 +10,14 @@ import 'link_urls.dart';
 String trimUnlessAsciiArt(String text) =>
     looksLikeAsciiArt(text) ? text : text.trim();
 
+/// AA を出すときの字。MS Pゴシック互換寄りの同梱フォント（Monapo）で、行間と
+/// 字送りを AA が組まれた前提（1 行 1 行が詰まって 1 枚の絵になる）に合わせる。
+///
+/// 大きさは呼ぶ側の [base] のまま。本文でも引用行でも同じ形で出したいので、
+/// 「どのフォントで・どれだけ詰めるか」だけをここに置く。
+TextStyle asciiArtStyle(TextStyle base) =>
+    base.copyWith(fontFamily: 'Monapo', height: 1.15, letterSpacing: 0);
+
 /// AA（アスキーアート）らしい本文だけ、MS Pゴシック互換寄りの同梱フォントで
 /// 表示する。単発の顔文字まで巻き込まないよう、AA 記号を含む行数を見る。
 bool looksLikeAsciiArt(String text) {
@@ -435,13 +443,7 @@ class _ResBodyState extends State<ResBody> {
 
   TextStyle _asciiArtStyle(BuildContext context, TextStyle? style) {
     final baseStyle = style ?? Theme.of(context).textTheme.bodyLarge;
-    final baseSize = baseStyle?.fontSize ?? 16;
-    return (baseStyle ?? const TextStyle()).copyWith(
-      fontFamily: 'Monapo',
-      fontSize: baseSize,
-      height: 1.15,
-      letterSpacing: 0,
-    );
+    return asciiArtStyle(baseStyle ?? const TextStyle(fontSize: 16));
   }
 }
 

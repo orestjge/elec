@@ -26,6 +26,7 @@ import 'id_icon.dart';
 import 'image_urls.dart';
 import 'link_urls.dart';
 import 'remote_image.dart';
+import 'res_body.dart';
 
 /// レス一覧の 1 行。番号順表示では [depth] 0 の行が並ぶだけになる。
 class ThreadTreeRow {
@@ -333,13 +334,25 @@ String _oneLine(String text) => text.replaceAll(RegExp(r'\s+'), ' ').trim();
 
 /// 引用行に出す返信先の中身。文章と、そこに貼られていた画像に分けたもの。
 class QuotedResBody {
-  const QuotedResBody({required this.excerpt, required this.images});
+  const QuotedResBody({
+    required this.excerpt,
+    required this.images,
+    this.asciiArt,
+  });
 
   /// 1 行に潰した本文。画像 URL の文字列は除いてある。
   final String excerpt;
 
   /// 本文に貼られていた画像。出現順・重複除去。
   final List<Uri> images;
+
+  /// 本文が AA だったときの、改行とインデントを残したままの本文（前後の空行だけ
+  /// 落としたもの）。AA でなければ null。
+  ///
+  /// AA を 1 行に潰すと `∧＿∧ （ ´∀｀） （ ）` のような記号の列になり、元が
+  /// 何の絵だったかは読み取れない。画像 URL をサムネイルに替えているのと同じ
+  /// 理由で、**絵は絵のまま小さく出す**（[QuotedResRow]）。
+  final String? asciiArt;
 }
 
 /// 返信先の本文を「文章」と「画像」へ分ける。
@@ -368,7 +381,26 @@ QuotedResBody quotedResBody(Res res) {
     if (seen.add(uri.toString())) images.add(uri);
   }
   rest.write(text.substring(cursor));
-  return QuotedResBody(excerpt: _oneLine(rest.toString()), images: images);
+  final body = rest.toString();
+  return QuotedResBody(
+    excerpt: _oneLine(body),
+    images: images,
+    asciiArt: looksLikeAsciiArt(body) ? _trimBlankLines(body) : null,
+  );
+}
+
+/// 前後の空行だけを落とす。行頭の空白は絵の一部なので触らない。
+String _trimBlankLines(String text) {
+  final lines = text.split('\n');
+  var start = 0;
+  var end = lines.length;
+  while (start < end && lines[start].trim().isEmpty) {
+    start++;
+  }
+  while (end > start && lines[end - 1].trim().isEmpty) {
+    end--;
+  }
+  return lines.sublist(start, end).join('\n');
 }
 
 /// 新着レスの手前に薄く再掲する返信先。
@@ -381,6 +413,10 @@ QuotedResBody quotedResBody(Res res) {
 /// レスの数だけこの行が挟まるため、2 行取ると一覧が引用で埋まってレス本体が
 /// 追えなくなる。日時も出さない（同じ理由で、行に置ける情報を「誰の・何の話か」
 /// ——ID の絵と本文の頭——に絞る）。
+///
+/// **画像と AA だけは 1 行を超える。** どちらも文字に直すと（長い URL・記号の列）
+/// 何への返信かを思い出す手掛かりにならないので、サムネイル（[QuoteThumbs]）と
+/// 縮めた絵（[QuoteAsciiArt]）に替えて、絵として読める高さを取る。
 class QuotedResRow extends StatelessWidget {
   const QuotedResRow({
     super.key,
@@ -445,7 +481,13 @@ class QuotedResRow extends StatelessWidget {
                   child: IdIcon(id: res.id!, size: 14),
                 ),
               ],
-              if (excerpt.isNotEmpty) ...[
+              // AA は 1 行に潰すと記号の列にしかならないので、縮めた絵で出す。
+              if (body.asciiArt case final art?) ...[
+                const SizedBox(width: 6),
+                Flexible(
+                  child: QuoteAsciiArt(text: art, color: dim),
+                ),
+              ] else if (excerpt.isNotEmpty) ...[
                 const SizedBox(width: 6),
                 Flexible(
                   child: Text(
@@ -457,12 +499,62 @@ class QuotedResRow extends StatelessWidget {
                 ),
               ],
               if (body.images.isNotEmpty)
-                QuoteThumbs(
-                  urls: body.images,
-                  blurred: blurImages,
-                  color: dim,
-                ),
+                QuoteThumbs(urls: body.images, blurred: blurImages, color: dim),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 引用行に出す AA の高さの上限。
+///
+/// サムネイル（32）より少しだけ高い程度に留める。引用行はレスの数だけ挟まるので、
+/// ここを伸ばすほど一覧が引用で埋まる。AA は縦に長いもの（10 行超）もあるが、
+/// **読ませるためではなく「あの絵だ」と思い出させるため**に置くので、字が読める
+/// 大きさまで確保する必要はない。行の高さより優先するのは形（シルエット）の方。
+const double quoteAsciiArtMaxHeight = 48;
+
+/// 返信先の AA を、収まる大きさへ縮めて出す。
+///
+/// 幅・高さの収まる分だけ**縦横同じ率で**縮める（[BoxFit.scaleDown]）。行ごとに
+/// 折り返すと絵が崩れるので折り返さず、元より大きくもしない——小さい AA は本文と
+/// 同じ大きさのまま出る。
+///
+/// 引用行（[QuotedResRow]）と、入力欄の上に出る返信先の帯の両方で使う。どちらも
+/// 「何への返信か」を思い出すための添え物なので、同じ形で出す。
+class QuoteAsciiArt extends StatelessWidget {
+  const QuoteAsciiArt({
+    super.key,
+    required this.text,
+    required this.color,
+    this.maxHeight = quoteAsciiArtMaxHeight,
+  });
+
+  final String text;
+
+  /// 引用行のほかの字と揃えた色。
+  final Color color;
+
+  /// 縮めた絵の高さの上限。
+  final double maxHeight;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxHeight: maxHeight),
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: Alignment.centerLeft,
+        child: Text(
+          text,
+          softWrap: false,
+          style: asciiArtStyle(
+            (theme.textTheme.bodySmall ?? const TextStyle()).copyWith(
+              color: color,
+            ),
           ),
         ),
       ),

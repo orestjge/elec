@@ -1031,6 +1031,7 @@ class _ThreadScreenState extends State<ThreadScreen>
   ///
   /// 画像は URL の文字列を落としてサムネイルにする（引用行と同じ扱い）。返信先
   /// が画像だけのレスだと、長い URL が 1 行を埋めるばかりで宛先を確かめられない。
+  /// AA も同じく、1 行に潰さず縮めた絵で出す（[QuotedResBody.asciiArt]）。
   _ReplyTarget? _replyTargetFor(int number) {
     final res = _resByNumber(number);
     if (res == null) return null;
@@ -1039,6 +1040,7 @@ class _ThreadScreenState extends State<ThreadScreen>
     return _ReplyTarget(
       number,
       body.excerpt,
+      asciiArt: body.asciiArt,
       images: body.images,
       blurImages: _guroMasked.contains(number),
     );
@@ -1554,8 +1556,7 @@ class _ThreadScreenState extends State<ThreadScreen>
                     spacing: 4,
                     children: [
                       TextButton.icon(
-                        onPressed: () =>
-                            _copyText(wacchoi, 'ワッチョイをコピーしました'),
+                        onPressed: () => _copyText(wacchoi, 'ワッチョイをコピーしました'),
                         icon: const Icon(Icons.copy, size: 18),
                         label: const Text('ワッチョイをコピー'),
                       ),
@@ -1735,9 +1736,12 @@ class _ThreadScreenState extends State<ThreadScreen>
           onTapUrl: _openUrl,
           composer: _composer,
           replyTargetFor: _replyTargetFor,
-          onTapReplyTarget: (number) {
-            Navigator.pop(context);
-            _showConversation(number, focusNumber: number);
+          // 返信先を押したときは、シートを閉じて開き直すのではなくレスの操作
+          // メニューを重ねる。書きかけを抱えたまま「誰に返しているか」を確かめ
+          // たいだけなので、閉じると今いる会話まで畳んでしまう。
+          onTapReplyTarget: (number, {onReply}) {
+            final target = _resByNumber(number);
+            if (target != null) _showResActions(target, onReply: onReply);
           },
           onSend: _submit,
           onPickAndUploadImages: _pickAndUploadImages,
@@ -2442,7 +2446,9 @@ class _ThreadScreenState extends State<ThreadScreen>
           alignment: Alignment.bottomCenter,
           child: SizedBox(
             height: 2,
-            child: _polling ? const LinearProgressIndicator(minHeight: 2) : null,
+            child: _polling
+                ? const LinearProgressIndicator(minHeight: 2)
+                : null,
           ),
         ),
       ),
@@ -2465,8 +2471,10 @@ class _ThreadScreenState extends State<ThreadScreen>
               onPickAndUploadFile: _pickAndUploadFile,
               enabled: _canWrite,
               replyTargetFor: _replyTargetFor,
-              onTapReplyTarget: (number) =>
-                  _showConversation(number, focusNumber: number),
+              onTapReplyTarget: (number) {
+                final target = _resByNumber(number);
+                if (target != null) _showResActions(target);
+              },
             ),
           ],
         ),
@@ -3281,8 +3289,10 @@ class _ConversationSheet extends StatefulWidget {
   /// 本文の `>>N` から返信先を引く（[_Composer.replyTargetFor]）。
   final _ReplyTarget? Function(int number) replyTargetFor;
 
-  /// 返信先の番号を押したとき。そのレスを中心にした会話へ開き直す。
-  final ValueChanged<int> onTapReplyTarget;
+  /// 返信先の行を押したとき。そのレスの操作メニュー（[onShowActions] と同じもの）
+  /// をこのシートの上に重ねる。返信はシート内の入力欄へ渡す。
+  final void Function(int number, {void Function(int)? onReply})
+  onTapReplyTarget;
 
   /// 会話シート内の入力欄から直接送信する投稿関数（受理で true）。
   final Future<bool> Function(String) onSend;
@@ -3533,7 +3543,8 @@ class _ConversationSheetState extends State<_ConversationSheet> {
                   onPickAndUploadFile: widget.onPickAndUploadFile,
                   enabled: widget.enabled,
                   replyTargetFor: widget.replyTargetFor,
-                  onTapReplyTarget: widget.onTapReplyTarget,
+                  onTapReplyTarget: (number) =>
+                      widget.onTapReplyTarget(number, onReply: _replyLocal),
                 ),
               ],
             ),
@@ -3667,6 +3678,7 @@ class _ReplyTarget {
   const _ReplyTarget(
     this.number,
     this.excerpt, {
+    this.asciiArt,
     this.images = const [],
     this.blurImages = false,
   });
@@ -3677,6 +3689,10 @@ class _ReplyTarget {
   /// 除いてある（[images] のサムネイルで出す）。
   final String excerpt;
 
+  /// 返信先が AA だったときの、形を残したままの本文。AA でなければ null
+  /// （[QuotedResBody.asciiArt]）。
+  final String? asciiArt;
+
   /// 返信先に貼られていた画像。
   final List<Uri> images;
 
@@ -3684,10 +3700,23 @@ class _ReplyTarget {
   final bool blurImages;
 }
 
+/// 入力欄の上の帯に出す AA の高さの上限。
+///
+/// 引用行（[quoteAsciiArtMaxHeight]）より低く抑える。この帯は入力欄を押し上げる
+/// 場所にあり、しかも 1 度に 3 件まで縦に並ぶ。書いている手元を狭めてまで大きく
+/// 出すものではないので、形が分かる程度で切り上げる。
+const double _replyTargetAsciiArtMaxHeight = 32;
+
 /// 入力欄の上に「今どのレスへの返信を書いているか」を出す帯。
 ///
 /// 本文に `>>N` を書いた時点で出る。宛先を確かめるのに書いた本文を遡って読み
-/// 直さずに済むようにするもので、番号を押せばそのレスの会話を開ける。
+/// 直さずに済むようにするもの。
+///
+/// **行を押すと、そのレスを長押ししたときと同じ操作メニューが出る**（レスの中身が
+/// 上に丸ごと載り、その下に返信・コピー・NG などが並ぶ）。会話へ飛ばさないのは、
+/// ここが**書いている最中**だから——確かめたいのは「この 1 レス」で、画面ごと
+/// 移ると書きかけを抱えたまま今いる場所を失う。メニューなら閉じれば入力へ戻れる
+/// し、会話を追いたければメニューの中の `>>N` から入れる。
 class _ReplyTargetBar extends StatelessWidget {
   const _ReplyTargetBar({required this.targets, this.onTap});
 
@@ -3708,19 +3737,15 @@ class _ReplyTargetBar extends StatelessWidget {
     final shown = targets.take(_maxShown).toList();
     final rest = targets.length - shown.length;
 
-    Widget number(_ReplyTarget target) => InkWell(
-      onTap: onTap == null ? null : () => onTap!(target.number),
-      borderRadius: BorderRadius.circular(4),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 2),
-        child: Text(
-          // 各行は返信先のレスそのもの（番号＋本文の頭）なので、番号は裸で出す。
-          // `>>N` と書くと、この行が N への返信に見えてしまう。
-          '${target.number}',
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: scheme.primary,
-            fontWeight: FontWeight.w700,
-          ),
+    Widget number(_ReplyTarget target) => Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2),
+      child: Text(
+        // 各行は返信先のレスそのもの（番号＋本文の頭）なので、番号は裸で出す。
+        // `>>N` と書くと、この行が N への返信に見えてしまう。
+        '${target.number}',
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: scheme.primary,
+          fontWeight: FontWeight.w700,
         ),
       ),
     );
@@ -3728,28 +3753,46 @@ class _ReplyTargetBar extends StatelessWidget {
     // 1 件 1 行。番号のうしろに本文の頭を添える（番号だけでは思い出せない）。
     // 画像はサムネイルで添える（引用行と同じ [QuoteThumbs]）。URL の文字列は
     // 抜粋から落としてあるので、絵を出さないと画像だけのレスが「に返信」の
-    // 一言になってしまう。
-    Widget line(_ReplyTarget target) => Row(
-      children: [
-        number(target),
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.only(left: 4),
-            child: Text(
-              target.excerpt.isEmpty ? 'に返信' : target.excerpt,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: dim,
+    // 一言になってしまう。AA も同じ理由で、1 行に潰さず縮めた絵で出す。
+    Widget body(_ReplyTarget target) {
+      if (target.asciiArt case final art?) {
+        return QuoteAsciiArt(
+          text: art,
+          color: scheme.onSurfaceVariant,
+          maxHeight: _replyTargetAsciiArtMaxHeight,
+        );
+      }
+      return Text(
+        target.excerpt.isEmpty ? 'に返信' : target.excerpt,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: dim,
+      );
+    }
+
+    // 行のどこを押してもそのレスを開ける（引用行と同じ）。番号だけを的にすると、
+    // 本文や絵を押しても何も起きない——見えているのは返信先そのものなので、
+    // そちらを押しにいくのが自然な手つきになる。
+    Widget line(_ReplyTarget target) => InkWell(
+      onTap: onTap == null ? null : () => onTap!(target.number),
+      borderRadius: BorderRadius.circular(4),
+      child: Row(
+        children: [
+          number(target),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.only(left: 4),
+              child: body(target),
             ),
           ),
-        ),
-        if (target.images.isNotEmpty)
-          QuoteThumbs(
-            urls: target.images,
-            blurred: target.blurImages,
-            color: scheme.onSurfaceVariant,
-          ),
-      ],
+          if (target.images.isNotEmpty)
+            QuoteThumbs(
+              urls: target.images,
+              blurred: target.blurImages,
+              color: scheme.onSurfaceVariant,
+            ),
+        ],
+      ),
     );
 
     return Padding(
@@ -3800,7 +3843,7 @@ class _Composer extends StatefulWidget {
   /// 本文の `>>N` から返信先を引く。そのレスが無ければ null。
   final _ReplyTarget? Function(int number)? replyTargetFor;
 
-  /// 返信先の番号を押したとき。会話を開く。
+  /// 返信先の行を押したとき。そのレスの操作メニューを出す。
   final ValueChanged<int>? onTapReplyTarget;
 
   /// 送信。受理されたら true を返す（入力欄をクリアする）。
