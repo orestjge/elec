@@ -258,7 +258,9 @@ void main() {
     expect(inReplyTargetBar('最初のレス'), findsOneWidget);
   });
 
-  testWidgets('入力中の >>N から返信先を出し、押すと会話が開く', (tester) async {
+  testWidgets('入力中の >>N から返信先を出し、押すとそのレスの操作メニューが出る', (tester) async {
+    // 書いている最中なので、会話へ画面ごと移らずメニューを重ねる（レスの長押しと
+    // 同じもの）。閉じれば書きかけと入力欄へそのまま戻れる。
     final f = QueueFetcher([
       ok([...res1, ...res2, ...res3]),
     ]);
@@ -273,7 +275,27 @@ void main() {
     await tester.tap(inReplyTargetBar('2'));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('会話 #2'), findsOneWidget);
+    // メニューの中身（レス本体＋操作）が出て、会話ビューへは移らない。
+    expect(find.text('>>2 に返信'), findsOneWidget);
+    expect(find.text('レス全体をコピー'), findsOneWidget);
+    expect(find.textContaining('会話 #'), findsNothing);
+  });
+
+  testWidgets('返信先は本文の頭を押してもメニューが出る', (tester) async {
+    // 見えているのは返信先そのものなので、番号だけでなく行のどこを押しても開く。
+    final f = QueueFetcher([
+      ok([...res1, ...res2, ...res3]),
+    ]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.widgetWithText(TextField, 'レスを書く'), '>>2 そうだね');
+    await tester.pump();
+
+    await tester.tap(inReplyTargetBar('>>1 同じIDの2つ目'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('>>2 に返信'), findsOneWidget);
   });
 
   testWidgets('返信先が数件なら1件1行で本文の頭まで出す', (tester) async {
@@ -306,10 +328,7 @@ void main() {
     await tester.pumpWidget(app(f));
     await tester.pumpAndSettle();
 
-    await tester.enterText(
-      find.widgetWithText(TextField, 'レスを書く'),
-      '>>2 いいね',
-    );
+    await tester.enterText(find.widgetWithText(TextField, 'レスを書く'), '>>2 いいね');
     await tester.pump();
 
     // URL の文字列は 1 行を埋めるばかりで宛先の確かめにならない。引用行と同じ
@@ -326,6 +345,31 @@ void main() {
       find.descendant(of: replyTargetBar(), matching: find.byType(QuoteThumbs)),
       findsOneWidget,
     );
+  });
+
+  testWidgets('返信先が AA なら 1 行に潰さず縮めた絵で添える', (tester) async {
+    final withAa = datLine(
+      '名無し<><>2025/11/03(月) 02:30:00.000 ID:ccc<>'
+      '　　 ∧＿∧<br>　　（　´∀｀）<br>　　（　　　　）<br>　　（＿）＿）<>',
+    );
+    final f = QueueFetcher([
+      ok([...res1, ...withAa]),
+    ]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.widgetWithText(TextField, 'レスを書く'), '>>2 いいね');
+    await tester.pump();
+
+    // 1 行に潰すと記号の列にしかならない。引用行と同じく、形のまま縮めて出す。
+    final art = find.descendant(
+      of: replyTargetBar(),
+      matching: find.byType(QuoteAsciiArt),
+    );
+    expect(art, findsOneWidget);
+    expect(tester.widget<QuoteAsciiArt>(art).text, contains('∧＿∧\n'));
+    // 書いている手元を狭めないよう、引用行より低く抑える。
+    expect(tester.getSize(art).height, lessThanOrEqualTo(32));
   });
 
   testWidgets('返信先が多いときは頭の3件だけ出して残りは件数で示す', (tester) async {
@@ -1438,10 +1482,12 @@ void main() {
       findsOneWidget,
     );
 
-    // 押せば、その返信先を中心にした会話へ開き直す。
+    // 押せば、そのレスの操作メニューをシートの上へ重ねる。シートは閉じない
+    // （今いる会話も書きかけも手放さずに宛先だけ確かめられる）。
     await tester.tap(find.descendant(of: bar, matching: find.text('3')));
     await tester.pumpAndSettle();
-    expect(find.textContaining('会話 #3'), findsOneWidget);
+    expect(find.text('>>3 に返信'), findsOneWidget);
+    expect(find.textContaining('会話 #1'), findsOneWidget);
   });
 
   testWidgets('下書きはスレに 1 つ（会話ビューと番号順ビューで持ち回る）', (tester) async {

@@ -269,13 +269,34 @@ void main() {
 
     test('画像以外のリンクは文章に残す', () {
       final body = quotedResBody(
-        post(1, 'ソース https://example.com/page.html と https://example.com/v.mp4'),
+        post(
+          1,
+          'ソース https://example.com/page.html と https://example.com/v.mp4',
+        ),
       );
       expect(
         body.excerpt,
         'ソース https://example.com/page.html と https://example.com/v.mp4',
       );
       expect(body.images, isEmpty);
+    });
+
+    test('AA は 1 行に潰さず形のまま持つ', () {
+      final body = quotedResBody(post(1, '　　 ∧＿∧<br>　　（　´∀｀）<br>　　（　　　　）'));
+      expect(body.asciiArt, '　　 ∧＿∧\n　　（　´∀｀）\n　　（　　　　）');
+      // 絵を出せない場所のために、1 行の抜粋も今まで通り持っておく。
+      expect(body.excerpt, '∧＿∧ （ ´∀｀） （ ）');
+    });
+
+    test('AA の前後の空行は落とし、行頭の空白は残す', () {
+      final body = quotedResBody(
+        post(1, '<br><br>　　 ∧＿∧<br>　　（　´∀｀）<br>　　（　　　　）<br><br>'),
+      );
+      expect(body.asciiArt, '　　 ∧＿∧\n　　（　´∀｀）\n　　（　　　　）');
+    });
+
+    test('普通の本文は AA にしない', () {
+      expect(quotedResBody(post(1, 'ふつうの返信です')).asciiArt, isNull);
     });
 
     test('あぼーんは文章だけ', () {
@@ -302,9 +323,7 @@ void main() {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: QuotedResRow(
-              res: post(1, 'これ見て https://example.com/a.jpg'),
-            ),
+            body: QuotedResRow(res: post(1, 'これ見て https://example.com/a.jpg')),
           ),
         ),
       );
@@ -371,6 +390,30 @@ void main() {
         rowFor('長めの返信先の本文で、放っておけば二行にも三行にもなるくらいの分量を書いておく'),
       );
       expect(tester.getSize(find.byType(QuotedResRow)).height, plain);
+    });
+
+    testWidgets('AA の返信先は 1 行に潰さず縮めた絵で出す', (tester) async {
+      // 1 行に潰すと記号の列にしかならず、何への返信かを思い出せない。形を保った
+      // まま、行に収まる大きさへ縮めて出す。
+      const aa = '　　 ∧＿∧\n　　（　´∀｀）\n　　（　　　　）\n　　｜　　　｜';
+      Widget rowFor(String body) => MaterialApp(
+        home: Scaffold(body: QuotedResRow(res: post(1, body))),
+      );
+
+      await tester.pumpWidget(rowFor('ふつうの返信です'));
+      final plain = tester.getSize(find.byType(QuotedResRow)).height;
+
+      await tester.pumpWidget(rowFor(aa.replaceAll('\n', '<br>')));
+      expect(find.text(aa), findsOneWidget);
+      final art = find.ancestor(
+        of: find.text(aa),
+        matching: find.byType(FittedBox),
+      );
+      expect(
+        tester.getSize(find.byType(QuotedResRow)).height,
+        greaterThan(plain),
+      );
+      expect(tester.getSize(art).height, lessThanOrEqualTo(48));
     });
 
     testWidgets('サムネイルは絵として読める大きさで出す', (tester) async {
