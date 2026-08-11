@@ -13,6 +13,13 @@ final _win31j = Windows31JCodec();
 List<int> sjis(String s) => _win31j.encode(s);
 List<int> datLine(String s) => [...sjis(s), 0x0A];
 
+/// 入力を持っている（＝キーボードを出している）欄。ページの外へ出た欄も見る
+/// （PageView の隣の面は生きたまま画面の外に居るだけで、入力は持てる）。
+final _focusedEditable = find.byWidgetPredicate(
+  (w) => w is EditableText && w.focusNode.hasFocus,
+  skipOffstage: false,
+);
+
 List<int> successBody() =>
     sjis('<html><!-- 2ch_X:true --><body>書きこみました</body></html>');
 
@@ -1145,6 +1152,39 @@ void main() {
 
     expect(find.text('料理スレ'), findsOneWidget);
     expect(find.text('野球スレ'), findsNothing);
+  });
+
+  testWidgets('検索中にスレを開くと検索欄は入力を手放す', (tester) async {
+    final fetcher = QueueFetcher([
+      subjectOk('1.dat<>料理スレ (10)\n', 'LM1'),
+      datOk(datLine('名無し<><>2025/11/03(月) 02:14:51.907 ID:aaa<> 本文 <>料理スレ')),
+    ]);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadListScreen(
+          fetcher: fetcher,
+          pollInterval: const Duration(seconds: 15),
+          readHistory: ReadHistory(MemoryReadHistoryStorage()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('スレ検索'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '料理');
+    await tester.pumpAndSettle();
+    // 検索欄が入力を持っている＝キーボードが出ている状態。
+    expect(_focusedEditable, findsOneWidget);
+
+    await tester.tap(find.text('料理スレ'));
+    await tester.pumpAndSettle();
+
+    // スレ面へ移ったら、一覧が残っていても入力は誰も持っていない。
+    expect(_focusedEditable, findsNothing);
+    // 検索語は残す（戻ったときに絞り込んだままの一覧が見える）。
+    expect(find.text('料理', skipOffstage: false), findsOneWidget);
   });
 
   testWidgets('一覧を左に引っ張ると直近に見たスレを開く', (tester) async {

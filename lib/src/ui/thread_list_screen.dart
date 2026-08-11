@@ -149,6 +149,11 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   /// 現在の表示に適用する並び。
   ThreadSort get _sort => _sortByFilter[_filter] ?? _defaultSort[_filter]!;
   final _search = TextEditingController();
+
+  /// スレタイ検索欄の入力。スレ面へ移るときに手放してキーボードを引っ込める
+  /// （[_dismissSearchKeyboard]）。欄は一覧ごと生かしたままなので、こちらから
+  /// 外さないとスレを見ている間もキーボードが出たままになる。
+  final _searchFocus = FocusNode();
   bool _searchOpen = false;
   double _horizontalDragDistance = 0;
   double _verticalDragDistance = 0;
@@ -251,6 +256,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
     _pages.dispose();
     _listScroll.dispose();
     _search.dispose();
+    _searchFocus.dispose();
     final fetcher = _fetcher;
     if (_ownsFetcher && fetcher is HttpClientFetcher) {
       fetcher.close();
@@ -894,8 +900,17 @@ class _ThreadListScreenState extends State<ThreadListScreen>
     }
   }
 
+  /// 検索欄からキーボードを引っ込める。検索語と欄は残す（戻ってきたときに
+  /// 絞り込んだままの一覧が見えるようにする）。
+  void _dismissSearchKeyboard() {
+    if (_searchFocus.hasFocus) _searchFocus.unfocus();
+  }
+
   /// スレを開く。控えを差し替えて、スレ面へ移る。
   void _openThread(ThreadSummary thread) {
+    // 検索中に開いたとき、一覧はページの外へ出るだけで生きているため、欄が入力を
+    // 持ったままだとスレを見ている間もキーボードが出たままになる。
+    _dismissSearchKeyboard();
     // 取得を待たずに履歴へ入れる（一覧の既読表示は開いた時点で変わる）。
     unawaited(_history.markOpenedThread(thread));
     final replacing = _parked?.key != thread.key;
@@ -929,6 +944,8 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   void _onPageChanged(int page) {
     final shown = page == 1;
     if (shown == _threadShown) return;
+    // 指で引いてスレ面へ移ったときも同じく手放す（[_openThread] と対）。
+    if (shown) _dismissSearchKeyboard();
     // 一覧へ戻ってきても並べ替えない。行き来のたびに行が動くと、さっきまで
     // 見ていた場所を見失うため（既読・新着バッジはその場で更新される）。
     setState(() => _threadShown = shown);
@@ -1191,6 +1208,7 @@ class _ThreadListScreenState extends State<ThreadListScreen>
       bottomNavigationBar: _BottomActionBar(
         searchOpen: _searchOpen,
         search: _search,
+        searchFocus: _searchFocus,
         onToggleSearch: _toggleSearch,
         onSearchChanged: (_) => setState(() {}),
         onSearchClear: () => setState(_search.clear),
@@ -1507,6 +1525,7 @@ class _BottomActionBar extends StatelessWidget {
   const _BottomActionBar({
     required this.searchOpen,
     required this.search,
+    required this.searchFocus,
     required this.onToggleSearch,
     required this.onSearchChanged,
     required this.onSearchClear,
@@ -1516,6 +1535,7 @@ class _BottomActionBar extends StatelessWidget {
 
   final bool searchOpen;
   final TextEditingController search;
+  final FocusNode searchFocus;
   final VoidCallback onToggleSearch;
   final ValueChanged<String> onSearchChanged;
   final VoidCallback onSearchClear;
@@ -1545,6 +1565,7 @@ class _BottomActionBar extends StatelessWidget {
               Expanded(
                 child: _ThreadSearchField(
                   controller: search,
+                  focusNode: searchFocus,
                   onChanged: onSearchChanged,
                   onClear: onSearchClear,
                 ),
@@ -2083,11 +2104,13 @@ class _BoardDrawer extends StatelessWidget {
 class _ThreadSearchField extends StatelessWidget {
   const _ThreadSearchField({
     required this.controller,
+    required this.focusNode,
     required this.onChanged,
     required this.onClear,
   });
 
   final TextEditingController controller;
+  final FocusNode focusNode;
   final ValueChanged<String> onChanged;
   final VoidCallback onClear;
 
@@ -2107,6 +2130,7 @@ class _ThreadSearchField extends StatelessWidget {
     final textStyle = theme.textTheme.labelLarge;
     return TextField(
       controller: controller,
+      focusNode: focusNode,
       autofocus: true,
       onChanged: onChanged,
       textInputAction: TextInputAction.search,
