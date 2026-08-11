@@ -300,7 +300,6 @@ class ResBody extends StatefulWidget {
     required this.onTapUrl,
     this.onTapResRange,
     this.onTapId,
-    this.onSelectionActiveChanged,
     this.selectable = true,
     this.style,
     this.highlightQuery = '',
@@ -314,8 +313,6 @@ class ResBody extends StatefulWidget {
   /// 本文中の `ID:xxx` を押したとき。null なら identicon は出すがタップは効かない
   /// （ID の一覧を出せない場所でも「誰か」は絵で分かるようにする）。
   final ValueChanged<String>? onTapId;
-
-  final ValueChanged<bool>? onSelectionActiveChanged;
 
   /// 本文を範囲選択できるようにするか。false でもリンク・レス参照タップは有効。
   final bool selectable;
@@ -332,8 +329,6 @@ class ResBody extends StatefulWidget {
 
 class _ResBodyState extends State<ResBody> {
   final _recognizers = <TapGestureRecognizer>[];
-  final _focusNode = FocusNode();
-  bool _selectionActive = false;
 
   // URL か >>数字 か ID:xxx を拾う。URL を先に（貪欲に）判定する。URL の中の
   // `ID:` を ID として切り出さないため、この順でなければならない。
@@ -342,27 +337,7 @@ class _ResBodyState extends State<ResBody> {
   );
 
   @override
-  void initState() {
-    super.initState();
-    _focusNode.addListener(_handleFocusChange);
-  }
-
-  // フォーカスを失うと選択も解除されるが、onSelectionChanged が collapsed で
-  // 呼ばれないことがあるため、フォーカス喪失を選択解除の確実な合図として使う。
-  void _handleFocusChange() {
-    if (!_focusNode.hasFocus) _setSelectionActive(false);
-  }
-
-  void _setSelectionActive(bool active) {
-    if (_selectionActive == active) return;
-    _selectionActive = active;
-    widget.onSelectionActiveChanged?.call(active);
-  }
-
-  @override
   void dispose() {
-    _focusNode.removeListener(_handleFocusChange);
-    _focusNode.dispose();
     _disposeRecognizers();
     super.dispose();
   }
@@ -475,13 +450,7 @@ class _ResBodyState extends State<ResBody> {
     Widget buildBody(TextStyle? style) {
       final rootSpan = TextSpan(style: style, children: spans);
       return widget.selectable
-          ? SelectableText.rich(
-              rootSpan,
-              focusNode: _focusNode,
-              onSelectionChanged: (selection, cause) {
-                _setSelectionActive(!selection.isCollapsed);
-              },
-            )
+          ? SelectableText.rich(rootSpan)
           : Text.rich(rootSpan);
     }
 

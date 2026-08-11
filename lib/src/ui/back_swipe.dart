@@ -76,12 +76,7 @@ double _swipeBackDismissDistance(double width) =>
 /// 横スワイプかどうかの判断はジェスチャの競り合いに任せるので、縦スクロールや
 /// 内側の横スクロールを邪魔しない。
 class BackSwipe extends StatefulWidget {
-  const BackSwipe({super.key, required this.child, this.enabled = true});
-
-  /// 戻るスワイプを受け付けるか。文字選択中など、横に引く操作が別の意味を持つ
-  /// 間は false にする（このときジェスチャ自体を組み立てないので、競り合いにも
-  /// 出てこない）。
-  final bool enabled;
+  const BackSwipe({super.key, required this.child});
 
   final Widget child;
 
@@ -170,7 +165,7 @@ class _BackSwipeState extends State<BackSwipe> {
   Widget build(BuildContext context) {
     // 戻れないところ（一覧の中に置かれている等）ではジェスチャを組み立てない。
     // 何もしない認識器が横スワイプを取ってしまうと、外側の横移動が効かなくなる。
-    if (!widget.enabled || _swipeBackRoute == null) return widget.child;
+    if (_swipeBackRoute == null) return widget.child;
     return RawGestureDetector(
       // 縦スクロールや内側の横スクロールと競り合わせたいので、当たり判定は
       // 子に任せる（この領域自体は塞がない）。
