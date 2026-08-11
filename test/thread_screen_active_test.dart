@@ -1,5 +1,6 @@
 import 'package:edge_core/edge_core.dart';
 import 'package:elec/src/net/read_history.dart';
+import 'package:elec/src/ui/post_item.dart';
 import 'package:elec/src/ui/thread_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -33,6 +34,15 @@ void main() {
     '名無し<><>2025/11/03(月) 02:14:5$n.907 ID:aaa<> 本文$n <>'
     '${n == 1 ? 'スレタイ' : ''}',
   );
+
+  /// [n] レスのスレ。
+  List<int> many(int n) => [for (var i = 1; i <= n; i++) ...res(i)];
+
+  /// いま組まれているレスの番号を上から順に。
+  List<int> visibleResNumbers(WidgetTester tester) => tester
+      .widgetList<PostItem>(find.byType(PostItem))
+      .map((w) => w.res.number)
+      .toList();
 
   /// [active] を外から切り替えられるスレ画面。
   Widget app({
@@ -134,5 +144,43 @@ void main() {
     // 開き直したときと同じく、控える前に見た位置から下が新着になる。
     expect(find.text('ここから新着'), findsOneWidget);
     expect(find.textContaining('本文3', findRichText: true), findsOneWidget);
+  });
+
+  testWidgets('表に戻っても読んでいた場所は動かない', (tester) async {
+    // 貼り直しで新着ラインが下がる＝行が 1 つ抜ける。位置を行のインデックスで
+    // 持っていると、そのぶんまるごとずれて戻ってくる。
+    final fetcher = CountingFetcher([ok(many(60))]);
+    final history = ReadHistory(MemoryReadHistoryStorage());
+    await history.markRead('1762103691', 30); // 30 レス目までが既読＝新着ライン付き
+
+    await tester.pumpWidget(
+      app(fetcher: fetcher, history: history, active: true),
+    );
+    await tester.pumpAndSettle();
+
+    // 新着ラインの先へ、指で送って読み進める。
+    for (var i = 0; i < 4; i++) {
+      await tester.drag(
+        find.byType(PostItem).at(2),
+        const Offset(0, -300),
+        warnIfMissed: false, // 端まで来ると掴む行が画面から外れる
+      );
+      await tester.pump();
+    }
+    await tester.pumpAndSettle();
+    final read = visibleResNumbers(tester);
+    expect(read.first, greaterThan(30), reason: '新着ラインより下まで来ていること');
+
+    // 一覧へ移って戻る。
+    await tester.pumpWidget(
+      app(fetcher: fetcher, history: history, active: false),
+    );
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(
+      app(fetcher: fetcher, history: history, active: true),
+    );
+    await tester.pumpAndSettle();
+
+    expect(visibleResNumbers(tester), read);
   });
 }
