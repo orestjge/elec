@@ -548,6 +548,44 @@ void main() {
     expect(field.focusNode!.hasFocus, isTrue);
   });
 
+  testWidgets('ポーリング中の細い線を出しても検索欄は作り直されない', (tester) async {
+    // AppBar の flexibleSpace を出し入れすると title ごと作り直しになり、検索欄の
+    // キーボード接続が張り直されて変換中の文字や選択が飛ぶ。取得中の線が出ても
+    // 消えても、検索欄の [EditableText] が同じままであることを見る。
+    final f = GatedFetcher([...res1, ...res2]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('テストスレ').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('スレ内検索'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'スレ内検索'), '最初');
+    await tester.pumpAndSettle();
+
+    EditableTextState searchField() => tester.state<EditableTextState>(
+      find.descendant(
+        of: find.widgetWithText(TextField, 'スレ内検索'),
+        matching: find.byType(EditableText),
+      ),
+    );
+
+    final before = searchField();
+    expect(before.widget.focusNode.hasFocus, isTrue);
+
+    await tester.pump(const Duration(seconds: 5)); // ポーリング開始
+    await tester.pump();
+    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+    expect(searchField(), same(before));
+
+    f.gate!.complete();
+    await tester.pumpAndSettle();
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+    expect(searchField(), same(before));
+    expect(before.widget.focusNode.hasFocus, isTrue);
+    expect(before.widget.controller.text, '最初');
+  });
+
   testWidgets('ポーリングで新着が付き、新着ラインが出る', (tester) async {
     final full = [...res1, ...res2];
     final f = QueueFetcher([

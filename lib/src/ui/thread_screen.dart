@@ -971,6 +971,9 @@ class _ThreadScreenState extends State<ThreadScreen>
     if (!shouldRestore) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_searching || _searchFocus.hasFocus) return;
+      // 取りに行っている間に書き込み欄へ移っていたら奪い返さない（フォーカスの
+      // 有無は取得を始めた時点のもので、返ってきた頃には変わっていることがある）。
+      if (_composerFocus.hasFocus) return;
       // IME 変換中に requestFocus すると入力連携が張り直され、変換中の文字が
       // 消える。確定前は触らない。
       if (_searchController.value.composing.isValid) return;
@@ -2428,12 +2431,20 @@ class _ThreadScreenState extends State<ThreadScreen>
         // 取得中の細い線は AppBar の下端に**重ねて**出す。bottom に置くと出て
         // いる間だけ AppBar が 2px 高くなり、本文がそのぶん下がって戻る＝
         // ポーリングのたびにレスが上下に揺れる。
-        flexibleSpace: _polling
-            ? const Align(
-                alignment: Alignment.bottomCenter,
-                child: LinearProgressIndicator(minHeight: 2),
-              )
-            : null,
+        //
+        // 置き場所（flexibleSpace）は取得中かどうかに関わらず**常に埋める**。
+        // AppBar は flexibleSpace が null かどうかで木の形を変える（非 null の
+        // ときだけ Stack と Material を挟む）ので、ポーリングのたびに null と
+        // 行き来させると title ごと作り直しになる。作り直されると検索欄の
+        // [EditableText] が state から作り直され、キーボードとの接続が張り直
+        // されて、変換中の文字・選択・カーソルが飛ぶ。中身だけ差し替える。
+        flexibleSpace: Align(
+          alignment: Alignment.bottomCenter,
+          child: SizedBox(
+            height: 2,
+            child: _polling ? const LinearProgressIndicator(minHeight: 2) : null,
+          ),
+        ),
       ),
       body: GestureDetector(
         behavior: HitTestBehavior.translucent,
