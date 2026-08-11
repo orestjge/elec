@@ -17,6 +17,8 @@
 /// 映像そのものは常に Overlay 側にある。戻ると小窓へ落ちる＝終了ではない。
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../net/auth_launcher.dart';
@@ -70,6 +72,11 @@ class MiniPlayerController extends ChangeNotifier {
   NavigatorState? _navigator;
   Route<void>? _route;
 
+  GlobalKey<OverlayState>? _overlayKey;
+
+  /// [showDialogAbove] で出している確認を閉じる手。片付けの順に並ぶ。
+  final List<VoidCallback> _dismissDialogs = [];
+
   MiniPlayerMedia? get media => _media;
   MiniPlayerMode get mode => _mode;
 
@@ -89,10 +96,84 @@ class MiniPlayerController extends ChangeNotifier {
       _index < items.length && items[_index] is ViewerVideoMedia,
   };
 
-  /// Navigator の外にいるビューアが、確認ダイアログを出すために借りる文脈。
+  /// Navigator の外にいるビューアが、[ScaffoldMessenger] を借りるための文脈。
   BuildContext? get dialogContext {
     final navigator = _navigator;
     return navigator != null && navigator.mounted ? navigator.context : null;
+  }
+
+  /// 全画面で画面を覆っているか。知らせや確認の出し先を選ぶのに使う——覆って
+  /// いる間は、アプリ側（Navigator や Scaffold）へ出したものは全部この下に潜る。
+  bool get coversScreen => _media != null && _mode == MiniPlayerMode.fullscreen;
+
+  /// プレーヤーを載せている Overlay を預かる。[MiniPlayerHost] が渡す。
+  void attachOverlay(GlobalKey<OverlayState> key) => _overlayKey = key;
+
+  /// 預かった Overlay を返す。別のホストのものに差し替わっていれば触らない。
+  void detachOverlay(GlobalKey<OverlayState> key) {
+    if (identical(_overlayKey, key)) _overlayKey = null;
+  }
+
+  /// [builder] が組む確認を、**プレーヤーより上**に出す。答え（暗幕タップなどの
+  /// 取り消しは null）を返す。
+  ///
+  /// [showDialog] は使えない。あちらは Navigator にルートを積むが、プレーヤーは
+  /// その Navigator より上（`MaterialApp.builder` の層）にいるので、積んだ確認は
+  /// 絵の下に潜って見えないまま指も届かない。ここでは同じ Overlay に直に載せて
+  /// 順番で勝たせる。
+  ///
+  /// [builder] には答えを返す手（close）を渡す。Navigator に載っていない＝
+  /// `Navigator.pop` では閉じられないので、ボタンからはこれを呼ぶ。
+  Future<T?> showDialogAbove<T>(
+    Widget Function(BuildContext context, ValueChanged<T?> close) builder,
+  ) {
+    final overlay = _overlayKey?.currentState;
+    if (overlay == null) return Future.value(null);
+
+    final answer = Completer<T?>();
+    late final OverlayEntry entry;
+    late final VoidCallback dismiss;
+    void close(T? value) {
+      if (answer.isCompleted) return;
+      _dismissDialogs.remove(dismiss);
+      entry.remove();
+      answer.complete(value);
+    }
+
+    dismiss = () => close(null);
+    entry = OverlayEntry(
+      builder: (context) => Stack(
+        children: [
+          // 暗幕は [showDialog] と同じ部品を使う。押して取り消せるだけでなく、
+          // 下のプレーヤーへ指も読み上げも通さない蓋になる（[BlockSemantics]）。
+          Positioned.fill(
+            child: ModalBarrier(
+              color: Colors.black54,
+              onDismiss: dismiss,
+              semanticsLabel: MaterialLocalizations.of(
+                context,
+              ).modalBarrierDismissLabel,
+            ),
+          ),
+          Semantics(
+            scopesRoute: true,
+            explicitChildNodes: true,
+            child: builder(context, close),
+          ),
+        ],
+      ),
+    );
+    _dismissDialogs.add(dismiss);
+    overlay.insert(entry);
+    return answer.future;
+  }
+
+  /// 出しっぱなしの確認を片付ける。下敷きが消えたあとに問いだけ残ると、
+  /// 何に対する問いなのか分からなくなる。
+  void _dismissAllDialogs() {
+    for (final dismiss in [..._dismissDialogs]) {
+      dismiss();
+    }
   }
 
   /// 再生ごとに増える通し番号。プレーヤーのウィジェット key に使い、**別の動画に
@@ -142,6 +223,7 @@ class MiniPlayerController extends ChangeNotifier {
   /// 再生をやめて片付ける。
   void close() {
     if (_media == null) return;
+    _dismissAllDialogs();
     _media = null;
     _mode = MiniPlayerMode.fullscreen;
     _index = 0;
@@ -199,6 +281,7 @@ class MiniPlayerController extends ChangeNotifier {
 
   @visibleForTesting
   void debugReset() {
+    _dismissDialogs.clear();
     _media = null;
     _mode = MiniPlayerMode.fullscreen;
     _index = 0;
@@ -301,6 +384,10 @@ class _MiniPlayerHostState extends State<MiniPlayerHost> {
   /// 口はアプリと同じ寿命なので remove/dispose はしない。
   late final OverlayEntry _entry = OverlayEntry(builder: _buildLayer);
 
+  /// この層の Overlay。確認をプレーヤーより上に出すのに使う
+  /// （[MiniPlayerController.showDialogAbove]）。
+  final _overlayKey = GlobalKey<OverlayState>();
+
   final _dragging = ValueNotifier(false);
 
   /// 下端から下へはみ出させたぶん（px, 0 以上）。指を離すまでの一時的な値で、
@@ -310,7 +397,14 @@ class _MiniPlayerHostState extends State<MiniPlayerHost> {
   Offset _dragTopLeft = Offset.zero;
 
   @override
+  void initState() {
+    super.initState();
+    _controller.attachOverlay(_overlayKey);
+  }
+
+  @override
   void dispose() {
+    _controller.detachOverlay(_overlayKey);
     _dragging.dispose();
     _dismissDrag.dispose();
     super.dispose();
@@ -355,7 +449,7 @@ class _MiniPlayerHostState extends State<MiniPlayerHost> {
         // アプリ本体は常に children[0]。ここを出し入れするとスレ画面の State が
         // 捨てられるので、プレーヤーが無いときも Stack ごと畳まない。
         widget.child,
-        Overlay(initialEntries: [_entry]),
+        Overlay(key: _overlayKey, initialEntries: [_entry]),
       ],
     );
   }

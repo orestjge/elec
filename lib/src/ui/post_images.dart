@@ -13,6 +13,7 @@ import 'audio_player_widget.dart';
 import 'embed_urls.dart';
 import 'format.dart';
 import 'image_urls.dart';
+import 'long_press.dart';
 import 'media_scrim.dart';
 import 'media_url_panel.dart';
 import 'mini_player.dart';
@@ -144,36 +145,77 @@ Future<void> removeNgImage(NgImage image) async {
   _evictDecodedImages();
 }
 
+/// はい／いいえを訊く。**全画面ビューアが出ていればその上に出す**。
+///
+/// ビューアは Navigator の外（`mini_player.dart`）に載っているので、[showDialog]
+/// で出した確認は絵の下に潜る。出ているのに指も届かず、絵を閉じるまで気づけない
+/// ——押しても何も起きていないように見えるので、出し先を場面で選ぶ。
+Future<bool> _confirm(
+  BuildContext context, {
+  required String title,
+  required String message,
+  required String action,
+}) async {
+  Widget dialog(ValueChanged<bool> answer) => AlertDialog(
+    title: Text(title),
+    content: Text(message),
+    actions: [
+      TextButton(onPressed: () => answer(false), child: const Text('キャンセル')),
+      FilledButton(onPressed: () => answer(true), child: Text(action)),
+    ],
+  );
+
+  final player = MiniPlayerController.shared;
+  if (player.coversScreen) {
+    return await player.showDialogAbove<bool>((_, close) => dialog(close)) ??
+        false;
+  }
+  final agreed = await showDialog<bool>(
+    context: context,
+    builder: (context) => dialog((value) => Navigator.pop(context, value)),
+  );
+  return agreed == true;
+}
+
+/// 断りの知らせ。確認と同じ理由で、ビューアが出ている間は上に載せる
+/// （[SnackBar] はアプリ側の [Scaffold] に出るので絵の下に隠れる）。
+void _tell(BuildContext context, String message) {
+  final player = MiniPlayerController.shared;
+  if (player.coversScreen) {
+    unawaited(
+      player.showDialogAbove<void>(
+        (_, close) => AlertDialog(
+          content: Text(message),
+          actions: [
+            TextButton(onPressed: () => close(null), child: const Text('OK')),
+          ],
+        ),
+      ),
+    );
+    return;
+  }
+  ScaffoldMessenger.maybeOf(
+    context,
+  )?.showSnackBar(SnackBar(content: Text(message)));
+}
+
 /// 確認してから NG に登録する。登録できたら true。
 ///
 /// 本文が手元に無い（まだ読み込めていない）画像は NG にできない。指紋を採れない
 /// ので、黙って何もしないのではなく理由を出す。
 Future<bool> confirmAddNgImage(BuildContext context, Uri url) async {
-  final agreed = await showDialog<bool>(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: const Text('この画像をNG'),
-      content: const Text('同じ画像は、次から別の URL で貼られても隠します。貼り直しで多少変わった画像も隠します。'),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context, false),
-          child: const Text('キャンセル'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.pop(context, true),
-          child: const Text('NGにする'),
-        ),
-      ],
-    ),
+  final agreed = await _confirm(
+    context,
+    title: 'この画像をNG',
+    message: '同じ画像は、次から別の URL で貼られても隠します。貼り直しで多少変わった画像も隠します。',
+    action: 'NGにする',
   );
-  if (agreed != true || !context.mounted) return false;
+  if (!agreed || !context.mounted) return false;
 
   final messenger = ScaffoldMessenger.maybeOf(context);
   final image = await addNgImage(url);
   if (image == null) {
-    messenger?.showSnackBar(
-      const SnackBar(content: Text('まだ読み込めていない画像はNGにできません')),
-    );
+    if (context.mounted) _tell(context, 'まだ読み込めていない画像はNGにできません');
     return false;
   }
   messenger?.showSnackBar(
@@ -199,24 +241,78 @@ Future<bool> confirmAddNgImage(BuildContext context, Uri url) async {
 Future<void> confirmRemoveNgImage(BuildContext context, Uri url) async {
   final image = NgStore.shared.ngImageForUrl(url);
   if (image == null) return;
-  final agreed = await showDialog<bool>(
+  final agreed = await _confirm(
+    context,
+    title: 'この画像のNGを解除',
+    message: '隠していた画像をまた表示します。',
+    action: '解除',
+  );
+  if (agreed) await removeNgImage(image);
+}
+
+/// サムネイルの長押しで出す操作。
+enum _ImageAction { openExternally, copyUrl, ng }
+
+/// サムネイルの長押しで、その 1 枚に効く操作を並べる。
+///
+/// **NG は拡大せずに掛けられるようにする。** 伏せたい画像ほど大きくは見たくない
+/// ので、全画面ビューアを開かないと NG にできないのは順番が逆になる。開かずに
+/// 元を辿る操作（ブラウザ・URL）も、行き先が同じなのでここへ集める。
+Future<void> showImageActions(
+  BuildContext context,
+  Uri url, {
+  ValueChanged<Uri>? onOpenExternally,
+}) async {
+  final action = await showModalBottomSheet<_ImageAction>(
     context: context,
-    builder: (context) => AlertDialog(
-      title: const Text('この画像のNGを解除'),
-      content: const Text('隠していた画像をまた表示します。'),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context, false),
-          child: const Text('キャンセル'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.pop(context, true),
-          child: const Text('解除'),
-        ),
-      ],
+    showDragHandle: true,
+    builder: (context) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: const Icon(Icons.open_in_browser),
+            title: const Text('ブラウザで開く'),
+            onTap: () => Navigator.pop(context, _ImageAction.openExternally),
+          ),
+          ListTile(
+            leading: const Icon(Icons.link),
+            title: const Text('URLをコピー'),
+            // どこから来た画像かは URL を出さないと読めない（ビューアの題名と
+            // 同じ考え方＝`media_url_panel.dart`）。長い URL でも札は太らせない。
+            subtitle: Text(
+              url.toString(),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            onTap: () => Navigator.pop(context, _ImageAction.copyUrl),
+          ),
+          ListTile(
+            leading: const Icon(Icons.hide_image_outlined),
+            title: const Text('この画像をNG'),
+            onTap: () => Navigator.pop(context, _ImageAction.ng),
+          ),
+        ],
+      ),
     ),
   );
-  if (agreed == true) await removeNgImage(image);
+  if (action == null || !context.mounted) return;
+  switch (action) {
+    case _ImageAction.openExternally:
+      if (onOpenExternally != null) {
+        onOpenExternally(url);
+      } else {
+        const SystemBrowserLauncher().open(url);
+      }
+    case _ImageAction.copyUrl:
+      await Clipboard.setData(ClipboardData(text: url.toString()));
+      if (!context.mounted) return;
+      ScaffoldMessenger.maybeOf(
+        context,
+      )?.showSnackBar(const SnackBar(content: Text('URLをコピーしました')));
+    case _ImageAction.ng:
+      await confirmAddNgImage(context, url);
+  }
 }
 
 /// デコード済みの画像を捨てて、NG 判定を掛け直させる。
@@ -453,7 +549,8 @@ class _Thumb extends StatefulWidget {
   /// 「グロ」注意が付いた画像で、初期表示をモザイクにするか。
   final bool blurred;
 
-  /// 長押しで NG に登録できるか。
+  /// 長押しで操作の一覧（[showImageActions]）を出せるか。NG を含む一覧なので、
+  /// NG の出番が無い場所（入力欄の添付プレビュー）では長押しごと止める。
   final bool canNg;
 
   /// 全画面ビューアの「ブラウザで開く」の実処理（[PostImages.onOpenImageExternally]）。
@@ -467,7 +564,21 @@ class _ThumbState extends State<_Thumb> {
   /// モザイクを一度タップで解除したか。解除後は通常どおりタップで全画面表示。
   bool _revealed = false;
 
+  /// 長押しの手応え（沈み込み）を出しているか。
+  bool _pressed = false;
+
+  Timer? _pressTimer;
+
+  /// 指を置いた位置。ここから [pressMoveSlop] 離れたらスワイプとみなす。
+  Offset? _downAt;
+
   Uri get _url => widget.url;
+
+  @override
+  void dispose() {
+    _pressTimer?.cancel();
+    super.dispose();
+  }
 
   void _openViewer() => openViewerAt(
     context,
@@ -479,7 +590,39 @@ class _ThumbState extends State<_Thumb> {
   /// 「読み込む」を選んだ。以後この URL は上限を上げて読む。
   void _load() => setState(() => ImageLoadPolicy.allow(_url));
 
-  Future<void> _confirmNg() => confirmAddNgImage(context, _url);
+  Future<void> _showActions() => showImageActions(
+    context,
+    _url,
+    onOpenExternally: widget.onOpenExternally,
+  );
+
+  /// 指が触れた。この押しは自分が引き受けると外（レス）へ知らせ、少し待ってから
+  /// 沈み込みを出す（[pressFeedbackDelay]）。
+  void _pressDown(Offset position) {
+    const LongPressClaimed(pressed: true).dispatch(context);
+    _downAt = position;
+    _pressTimer?.cancel();
+    _pressTimer = Timer(pressFeedbackDelay, () {
+      if (mounted) setState(() => _pressed = true);
+    });
+  }
+
+  /// 指が動いたら、スワイプとみなして引っ込める（レスと同じ見切り方）。
+  void _pressMove(Offset position) {
+    final downAt = _downAt;
+    if (downAt == null) return;
+    if ((position - downAt).distance <= pressMoveSlop) return;
+    _pressRelease();
+  }
+
+  /// 指を離した・スクロールに取られた・長押しが済んだ、どれでも元へ戻す。
+  void _pressRelease() {
+    _pressTimer?.cancel();
+    if (_downAt == null && !_pressed) return;
+    _downAt = null;
+    const LongPressClaimed(pressed: false).dispatch(context);
+    if (_pressed) setState(() => _pressed = false);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -502,78 +645,143 @@ class _ThumbState extends State<_Thumb> {
     // 既に大きすぎると分かっている URL は、通信する前にカードへ落とす。
     // 初めて見る URL は読みに行き、上限で弾かれたら errorBuilder が同じ絵を出す。
     final skipped = ImageLoadPolicy.skipsAutoLoad(_url);
-    return GestureDetector(
-      onTap: masked ? () => setState(() => _revealed = true) : _openViewer,
-      onLongPress: widget.canNg ? _confirmNg : null,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(10),
-        child: Stack(
-          children: [
-            if (skipped)
-              _TooLargeThumb(
-                size: widget.size,
-                bytes: ImageLoadPolicy.knownBytes(_url),
-                onLoad: _load,
-              )
-            else
-              Image(
-                image: RemoteImage(
-                  _url,
-                  // サムネイルは一辺 [size] の正方形に cover で敷く。物理ピクセル
-                  // に直した分だけデコードすれば足りる。
-                  target: Size.square(
-                    widget.size * MediaQuery.devicePixelRatioOf(context),
+    return _longPressable(
+      GestureDetector(
+        onTap: masked ? () => setState(() => _revealed = true) : _openViewer,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: Stack(
+            children: [
+              if (skipped)
+                _TooLargeThumb(
+                  size: widget.size,
+                  bytes: ImageLoadPolicy.knownBytes(_url),
+                  onLoad: _load,
+                )
+              else
+                Image(
+                  image: RemoteImage(
+                    _url,
+                    // サムネイルは一辺 [size] の正方形に cover で敷く。物理ピクセル
+                    // に直した分だけデコードすれば足りる。
+                    target: Size.square(
+                      widget.size * MediaQuery.devicePixelRatioOf(context),
+                    ),
+                    cover: true,
+                    maxBytes: ImageLoadPolicy.limitFor(_url),
                   ),
-                  cover: true,
-                  maxBytes: ImageLoadPolicy.limitFor(_url),
-                ),
-                height: widget.size,
-                width: widget.size,
-                fit: BoxFit.cover,
-                loadingBuilder: (context, child, progress) {
-                  if (progress == null) return child;
-                  return _Placeholder(
-                    size: widget.size,
-                    color: scheme.surfaceContainerHighest,
-                    // 何割まで来たかが分かると、止まっているのか進んでいるのか
-                    // が読める。バイト数はサムネイルが小さいときは出さない。
-                    child: _LoadProgress(
-                      progress: progress,
-                      showBytes: widget.size >= 120,
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  );
-                },
-                errorBuilder: (context, error, stack) {
-                  if (error is ImageTooLargeException) {
-                    return _TooLargeThumb(
+                  height: widget.size,
+                  width: widget.size,
+                  fit: BoxFit.cover,
+                  loadingBuilder: (context, child, progress) {
+                    if (progress == null) return child;
+                    return _Placeholder(
                       size: widget.size,
-                      bytes: error.bytes,
-                      onLoad: _load,
+                      color: scheme.surfaceContainerHighest,
+                      // 何割まで来たかが分かると、止まっているのか進んでいるのか
+                      // が読める。バイト数はサムネイルが小さいときは出さない。
+                      child: _LoadProgress(
+                        progress: progress,
+                        showBytes: widget.size >= 120,
+                        color: scheme.onSurfaceVariant,
+                      ),
                     );
-                  }
-                  // 中身を見て初めて NG と分かった。デコード前に弾いているので、
-                  // 絵は一度も出ていない。
-                  if (error is ImageNgException) {
-                    return _NgThumb(size: widget.size, url: _url);
-                  }
-                  return _Placeholder(
-                    size: widget.size,
-                    color: scheme.surfaceContainerHighest,
-                    child: Icon(
-                      Icons.broken_image_outlined,
-                      color: scheme.onSurfaceVariant,
+                  },
+                  errorBuilder: (context, error, stack) {
+                    if (error is ImageTooLargeException) {
+                      return _TooLargeThumb(
+                        size: widget.size,
+                        bytes: error.bytes,
+                        onLoad: _load,
+                      );
+                    }
+                    // 中身を見て初めて NG と分かった。デコード前に弾いているので、
+                    // 絵は一度も出ていない。
+                    if (error is ImageNgException) {
+                      return _NgThumb(size: widget.size, url: _url);
+                    }
+                    return _Placeholder(
+                      size: widget.size,
+                      color: scheme.surfaceContainerHighest,
+                      child: Icon(
+                        Icons.broken_image_outlined,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    );
+                  },
+                ),
+              if (masked) const Positioned.fill(child: _GuroMask()),
+              // 押している間の陰り。絵柄は明るいものも暗いものもあるので、
+              // 縮むだけでなく暗くして、どちらでも沈んだと分かるようにする。
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: AnimatedOpacity(
+                    opacity: _pressed ? 1 : 0,
+                    duration: _pressDuration,
+                    curve: Curves.easeOut,
+                    child: ColoredBox(
+                      color: Colors.black.withValues(alpha: .3),
                     ),
-                  );
-                },
+                  ),
+                ),
               ),
-            if (masked) const Positioned.fill(child: _GuroMask()),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
+
+  /// 長押しで操作の一覧を出せるようにする。押している間はこの絵だけを沈める。
+  ///
+  /// [GestureDetector] の `onLongPress` は使えない。あちらは既定の 500ms 固定で、
+  /// レス自身の長押し（400ms／`post_item.dart`）に必ず先を越される——レスの中の
+  /// サムネイルを長押しすると、出るのはレスのメニューの方だった。長さを揃えれば
+  /// 内側のこちらが勝つ（`long_press.dart`）。
+  Widget _longPressable(Widget child) {
+    // 沈み込みは絵の側だけに出す。レスの沈み込みは [LongPressClaimed] で降りて
+    // もらう（[_pressDown]）——開くのはこの絵のメニューなので、レス全体が広がると
+    // 的が違って見える。
+    final pressable = AnimatedScale(
+      scale: _pressed ? 0.94 : 1,
+      duration: _pressDuration,
+      curve: Curves.easeOut,
+      child: child,
+    );
+    if (!widget.canNg) return pressable;
+    // 指の動きは長押しの判定を待たずに自分で見る（レスと同じ。[_pressMove]）。
+    return Listener(
+      onPointerMove: (event) => _pressMove(event.localPosition),
+      child: RawGestureDetector(
+        gestures: <Type, GestureRecognizerFactory>{
+          LongPressGestureRecognizer:
+              GestureRecognizerFactoryWithHandlers<LongPressGestureRecognizer>(
+                () => LongPressGestureRecognizer(
+                  duration: menuLongPressDuration,
+                  debugOwner: this,
+                ),
+                (recognizer) {
+                  recognizer.onLongPressDown = (details) =>
+                      _pressDown(details.localPosition);
+                  recognizer.onLongPressCancel = _pressRelease;
+                  recognizer.onLongPressUp = _pressRelease;
+                  recognizer.onLongPress = () {
+                    // 指を離す前に一覧が出ると分かる合図。レスの長押しと揃える。
+                    HapticFeedback.mediumImpact();
+                    unawaited(_showActions());
+                  };
+                },
+              ),
+        },
+        child: pressable,
+      ),
+    );
+  }
 }
+
+/// サムネイルが沈む・戻るまでの時間。指の下の小さな絵なので、レスの沈み込み
+/// （広がりきるまで 450ms）ほど長く掛けると離した後に動いて見える。
+const _pressDuration = Duration(milliseconds: 140);
 
 /// 自動読み込みを見送った画像のサムネイル枠。タップで読み込む。
 class _TooLargeThumb extends StatelessWidget {
@@ -1226,8 +1434,9 @@ class _MediaViewerViewState extends State<MediaViewerView> {
   /// いま見ている画像を NG にする。伏せた画像を開いたままにしておく意味は
   /// 無いので、登録できたらビューアを閉じる。
   Future<void> _ngCurrent() async {
-    // この層は Navigator の外にいるので、ダイアログを出す文脈は
-    // [MiniPlayerController] が覚えているものを借りる。
+    // 確認はビューアの上に出る（[MiniPlayerController.showDialogAbove]）。渡す
+    // 文脈は知らせ（[SnackBar]）を出す先＝アプリ側で、この層は Navigator の外に
+    // いるので [MiniPlayerController] が覚えているものを借りる。
     final host = MiniPlayerController.shared.dialogContext ?? context;
     final added = await confirmAddNgImage(host, _url);
     if (added) widget.onClose();
