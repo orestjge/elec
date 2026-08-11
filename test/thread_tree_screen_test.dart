@@ -52,6 +52,13 @@ void main() {
     return settings;
   }
 
+  /// 番号順に切り替えた設定。既定はツリーなので、番号順は明示して作る。
+  Future<ThreadViewSettings> numberSettings() async {
+    final settings = ThreadViewSettings(MemoryThreadViewSettingsStorage());
+    await settings.setLayout(ThreadLayout.number);
+    return settings;
+  }
+
   Widget app(
     HttpFetcher f, {
     required ReadHistory history,
@@ -120,7 +127,7 @@ void main() {
       app(
         f,
         history: ReadHistory(MemoryReadHistoryStorage()),
-        view: ThreadViewSettings(MemoryThreadViewSettingsStorage()),
+        view: await numberSettings(),
       ),
     );
     await tester.pumpAndSettle();
@@ -136,7 +143,7 @@ void main() {
       app(
         f,
         history: ReadHistory(MemoryReadHistoryStorage()),
-        view: ThreadViewSettings(MemoryThreadViewSettingsStorage()),
+        view: await numberSettings(),
       ),
     );
     await tester.pumpAndSettle();
@@ -167,7 +174,7 @@ void main() {
       app(
         f,
         history: ReadHistory(MemoryReadHistoryStorage()),
-        view: ThreadViewSettings(MemoryThreadViewSettingsStorage()),
+        view: await numberSettings(),
       ),
     );
     await tester.pumpAndSettle();
@@ -419,6 +426,8 @@ void main() {
   testWidgets('設定で並べ方を切り替えると保存され、その場で効く', (tester) async {
     final storage = MemoryThreadViewSettingsStorage();
     final view = ThreadViewSettings(storage);
+    // 既定はツリー。切り替えは既定でない側（番号順）を選んで確かめる。
+    expect(view.layout, ThreadLayout.tree);
 
     await tester.pumpWidget(
       MaterialApp(home: SettingsScreen(threadView: view)),
@@ -427,18 +436,19 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey('settings-thread-layout')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('ツリー').last);
+    await tester.tap(find.text('番号順').last);
     await tester.pumpAndSettle();
 
-    expect(view.layout, ThreadLayout.tree);
-    expect(storage.values['layout'], 'tree');
-    expect(find.textContaining('ツリー'), findsOneWidget);
+    expect(view.layout, ThreadLayout.number);
+    expect(storage.values['layout'], 'number');
+    expect(find.textContaining('番号順'), findsOneWidget);
   });
 
   testWidgets('設定でレスの見せ方を切り替えると保存され、その場で効く', (tester) async {
     final storage = MemoryThreadViewSettingsStorage();
     final view = ThreadViewSettings(storage);
-    expect(view.resLayout, ResLayout.gutter);
+    // 既定はヘッダにまとめる組み方。切り替えは柱の組み方を選んで確かめる。
+    expect(view.resLayout, ResLayout.header);
 
     await tester.pumpWidget(
       MaterialApp(home: SettingsScreen(threadView: view)),
@@ -447,11 +457,11 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey('settings-res-layout')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('ヘッダにまとめる').last);
+    await tester.tap(find.text('アイコンを左に大きく').last);
     await tester.pumpAndSettle();
 
-    expect(view.resLayout, ResLayout.header);
-    expect(storage.values['resLayout'], 'header');
-    expect(find.textContaining('ヘッダにまとめる'), findsOneWidget);
+    expect(view.resLayout, ResLayout.gutter);
+    expect(storage.values['resLayout'], 'gutter');
+    expect(find.textContaining('アイコンを左に大きく'), findsOneWidget);
   });
 }
