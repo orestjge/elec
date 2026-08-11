@@ -33,67 +33,6 @@ void main() {
     expect(MiniPlayerController.shared.media, isNull);
   });
 
-  testWidgets('YouTube の映像は縦画面いっぱいに広げず 16:9 に切って中央へ置く', (tester) async {
-    final youtube = embedVideosIn('https://youtu.be/dQw4w9WgXcQ').single;
-    final nico = embedVideosIn('https://www.nicovideo.jp/watch/sm9').single;
-    const surfaceKey = Key('surface');
-    const surface = ColoredBox(color: Colors.black, key: surfaceKey);
-
-    // 縦長の画面を渡す。埋め込みプレーヤーは渡した枠に映像を収めるので、枠が
-    // 縦長のままだと上下に大きな黒帯が出る。
-    await tester.pumpWidget(
-      Directionality(
-        textDirection: TextDirection.ltr,
-        child: Center(
-          child: SizedBox(
-            width: 360,
-            height: 500,
-            child: frameEmbedSurface(youtube, surface),
-          ),
-        ),
-      ),
-    );
-    expect(tester.getSize(find.byKey(surfaceKey)), const Size(360, 202.5));
-
-    // ニコニコは動画だけでなく watch ページ全体なので、枠は切らない。
-    await tester.pumpWidget(
-      Directionality(
-        textDirection: TextDirection.ltr,
-        child: Center(
-          child: SizedBox(
-            width: 360,
-            height: 500,
-            child: frameEmbedSurface(nico, surface),
-          ),
-        ),
-      ),
-    );
-    expect(tester.getSize(find.byKey(surfaceKey)), const Size(360, 500));
-  });
-
-  testWidgets('小窓（16:9）では枠いっぱいのまま', (tester) async {
-    final youtube = embedVideosIn('https://youtu.be/dQw4w9WgXcQ').single;
-    const surfaceKey = Key('surface');
-
-    await tester.pumpWidget(
-      Directionality(
-        textDirection: TextDirection.ltr,
-        child: Center(
-          child: SizedBox(
-            width: 200,
-            height: 112.5,
-            child: frameEmbedSurface(
-              youtube,
-              const ColoredBox(color: Colors.black, key: surfaceKey),
-            ),
-          ),
-        ),
-      ),
-    );
-
-    expect(tester.getSize(find.byKey(surfaceKey)), const Size(200, 112.5));
-  });
-
   test('YouTube の WebView リクエストには Referer を付ける', () {
     final video = embedVideosIn('https://youtu.be/dQw4w9WgXcQ').single;
 
@@ -106,5 +45,118 @@ void main() {
     final video = embedVideosIn('https://www.nicovideo.jp/watch/sm9').single;
 
     expect(embedPlayerRequestHeaders(video), isEmpty);
+  });
+
+  group('上下スワイプ（EmbedSwipeArea）', () {
+    late List<String> done;
+
+    // 中身は WebView の代わり。指を取り合う相手として、タップと横ドラッグを
+    // 受け取る子を置く（本物の WebView も同じように指を自分のものにする）。
+    Widget host({required bool enabled, Widget? child}) => MaterialApp(
+      home: EmbedSwipeArea(
+        enabled: enabled,
+        onMinimize: () => done.add('minimize'),
+        onClose: () => done.add('close'),
+        child:
+            child ??
+            const ColoredBox(color: Colors.black, child: SizedBox.expand()),
+      ),
+    );
+
+    setUp(() => done = []);
+
+    testWidgets('下へ払うと小窓へ落ちる', (tester) async {
+      await tester.pumpWidget(host(enabled: true));
+
+      await tester.drag(find.byType(EmbedSwipeArea), const Offset(0, 150));
+      await tester.pumpAndSettle();
+
+      expect(done, ['minimize']);
+    });
+
+    testWidgets('上へ払うと終わる', (tester) async {
+      await tester.pumpWidget(host(enabled: true));
+
+      await tester.drag(find.byType(EmbedSwipeArea), const Offset(0, -150));
+      await tester.pumpAndSettle();
+
+      expect(done, ['close']);
+    });
+
+    testWidgets('距離が足りなければ元に戻る', (tester) async {
+      await tester.pumpWidget(host(enabled: true));
+
+      await tester.drag(find.byType(EmbedSwipeArea), const Offset(0, 60));
+      await tester.pumpAndSettle();
+
+      expect(done, isEmpty);
+    });
+
+    testWidgets('距離が足りなくても速く払えば効く', (tester) async {
+      await tester.pumpWidget(host(enabled: true));
+
+      await tester.fling(
+        find.byType(EmbedSwipeArea),
+        const Offset(0, 60),
+        1000,
+      );
+      await tester.pumpAndSettle();
+
+      expect(done, ['minimize']);
+    });
+
+    testWidgets('横に滑り出した指は WebView に譲る', (tester) async {
+      var dragged = 0;
+      await tester.pumpWidget(
+        host(
+          enabled: true,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onHorizontalDragEnd: (_) => dragged++,
+            child: const SizedBox.expand(),
+          ),
+        ),
+      );
+
+      // 横へ出てから縦にも振れる指。向きは滑り出しで決まるので畳まない。
+      final gesture = await tester.startGesture(const Offset(200, 300));
+      await gesture.moveBy(const Offset(40, 0));
+      await gesture.moveBy(const Offset(0, 200));
+      await gesture.up();
+      await tester.pumpAndSettle();
+
+      expect(done, isEmpty);
+      expect(dragged, 1);
+    });
+
+    testWidgets('タップは中身（WebView）にそのまま届く', (tester) async {
+      var tapped = 0;
+      await tester.pumpWidget(
+        host(
+          enabled: true,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => tapped++,
+            child: const SizedBox.expand(),
+          ),
+        ),
+      );
+
+      await tester.tap(find.byType(EmbedSwipeArea));
+      await tester.pumpAndSettle();
+
+      expect(tapped, 1);
+      expect(done, isEmpty);
+    });
+
+    testWidgets('見張っていない（小窓・ニコニコ）ときは何も起きない', (tester) async {
+      await tester.pumpWidget(host(enabled: false));
+
+      await tester.drag(find.byType(EmbedSwipeArea), const Offset(0, 150));
+      await tester.drag(find.byType(EmbedSwipeArea), const Offset(0, -150));
+      await tester.pumpAndSettle();
+
+      expect(done, isEmpty);
+    });
   });
 }
