@@ -141,6 +141,8 @@ Future<void> _shoot(
   ThreadLayout layout = ThreadLayout.number,
   int? lastSeen,
   bool openIdSheet = false,
+  bool openConversation = false,
+  String? draft,
   ResLayout resLayout = ResLayout.gutter,
 }) async {
   tester.view.physicalSize = Size(width * 2, 900 * 2);
@@ -183,6 +185,22 @@ Future<void> _shoot(
   await tester.pump();
   await tester.pump(Duration.zero);
   await tester.pump(const Duration(milliseconds: 400));
+
+  if (draft != null) {
+    await tester.enterText(find.byType(TextField).first, draft);
+    await tester.pump();
+  }
+
+  if (openConversation) {
+    // ヘッダ左端の返信数を押して会話シートを開く。
+    await tester.tap(
+      find
+          .byWidgetPredicate((w) => w.runtimeType.toString() == '_ReplyCount')
+          .first,
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+  }
 
   if (openIdSheet) {
     // ヘッダの ID アイコン（本文中の ID にも同じ絵が出るので先頭を取る）を
@@ -303,6 +321,29 @@ void main() {
       ElecTheme.light(),
       '$dir/thread_id_sheet.png',
       openIdSheet: true,
+    );
+  });
+
+  // 書きかけの入力欄。返信先の帯に、番号・本文の頭・画像のサムネイルが 1 行で
+  // 並ぶ（レス 6 は画像 2 枚のレス）。
+  testWidgets('composer', (tester) async {
+    await _shoot(
+      tester,
+      ElecTheme.light(),
+      '$dir/thread_composer.png',
+      draft: '>>6 これいいね',
+    );
+  });
+
+  // 書きかけを持ったまま会話シートを開いたところ。下書きはスレに 1 つなので、
+  // シート側の入力欄が同じ本文と同じ返信先の帯を出す。
+  testWidgets('conversation composer', (tester) async {
+    await _shoot(
+      tester,
+      ElecTheme.light(),
+      '$dir/thread_conversation_composer.png',
+      draft: '>>6 これいいね',
+      openConversation: true,
     );
   });
 
