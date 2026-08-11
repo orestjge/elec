@@ -2354,14 +2354,20 @@ class _ThreadScreenState extends State<ThreadScreen>
         : math.min(_currentSearchIndex, matches.length - 1);
     return Scaffold(
       appBar: AppBar(
-        toolbarHeight: 80,
+        toolbarHeight: _ThreadTitleBar.barHeight,
+        // 戻るとスレタイの間は既定（leading 56＋titleSpacing 16）だと 32px も
+        // 空き、そのぶんスレタイの折り返しが早まる。押せる大きさ（48）は保った
+        // まま枠を詰め、間隔もタイトル側の内側の余白（4）だけにする。
+        leadingWidth: 48,
+        titleSpacing: 0,
         // ルートとして開かれていないときは自前で戻るを出す（既定の実装は
         // ルートが積まれているかどうかで判断するため、ここでは出てこない）。
         leading: widget.onClose == null
             ? null
             : BackButton(onPressed: widget.onClose),
-        // タイトルは重要なので AppBar 内でできるだけ読ませる。極端に長い場合は
-        // これまで通りタップで全文を出す。
+        // タイトルは重要なので AppBar 内でできるだけ読ませる（入りきらない
+        // ぶんは字を落として行を足す＝[_ThreadTitleBar]）。それでも溢れる
+        // 極端に長いものは、これまで通りタップで全文を出す。
         title: _searching
             ? _ThreadSearchField(
                 controller: _searchController,
@@ -2378,44 +2384,16 @@ class _ThreadScreenState extends State<ThreadScreen>
                 onNext: matches.isEmpty ? null : () => _moveSearchResult(1),
                 onClose: _closeSearch,
               )
-            : InkWell(
+            : _ThreadTitleBar(
+                title: _effectiveTitle.isEmpty
+                    ? 'スレッド'
+                    : decodeEntities(_effectiveTitle),
+                status: _loading || _error != null || _notFound
+                    ? null
+                    : _statusLabel == null
+                    ? '${_state.res.length}レス'
+                    : '${_state.res.length}レス ・ $_statusLabel',
                 onTap: _showFullTitle,
-                borderRadius: BorderRadius.circular(8),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    vertical: 4,
-                    horizontal: 4,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        _effectiveTitle.isEmpty
-                            ? 'スレッド'
-                            : decodeEntities(_effectiveTitle),
-                        maxLines: 2,
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          height: 1.22,
-                        ),
-                      ),
-                      if (!_loading && _error == null && !_notFound)
-                        Text(
-                          _statusLabel == null
-                              ? '${_state.res.length}レス'
-                              : '${_state.res.length}レス ・ $_statusLabel',
-                          style: Theme.of(context).textTheme.labelSmall
-                              ?.copyWith(
-                                color: Theme.of(
-                                  context,
-                                ).colorScheme.onSurfaceVariant,
-                              ),
-                        ),
-                    ],
-                  ),
-                ),
               ),
         // 取得中の細い線は AppBar の下端に**重ねて**出す。bottom に置くと出て
         // いる間だけ AppBar が 2px 高くなり、本文がそのぶん下がって戻る＝
@@ -2721,6 +2699,187 @@ class _ThreadSearchField extends StatelessWidget {
 }
 
 enum _ThreadTitleAction { search }
+
+/// AppBar のスレタイと、その下の「Nレス ・ 取得時刻」の行。
+///
+/// スレタイは長さがまちまちで、固定サイズの 2 行では入りきらないものが珍しく
+/// ない（エッヂの実況スレは 40 字を超えるものが多い）。**入る大きさまで字を
+/// 落とし、それでも入らなければ 3 行目まで使う**。優先するのは字の大きさで、
+/// 行を足すのは同じ大きさで 2 行に入らないときだけ——1 行の情報量より、まず
+/// 読める字であることを取る。
+///
+/// 収まり判定は [TextPainter] で実測する。[FittedBox] のように見た目だけ縮める
+/// 方法は下限が無く、長いスレタイで字が潰れて読めなくなる。高さの持ち分は
+/// [barHeight] から自分の余白を引いて求めるので、端末の文字サイズ設定を大きく
+/// している人でも AppBar から溢れない（そのぶん行数か字の大きさが減る）。
+///
+/// **高さは制約から取れない**——AppBar は title を高さ無制限で測ってから中央へ
+/// 置く（`_AppBarTitleBox`）ので、`LayoutBuilder` に降りてくる `maxHeight` は
+/// `toolbarHeight` ではなく infinity になる。ここを制約任せにしていた頃は、
+/// 3 行のスレタイが AppBar を 1px はみ出して上下が削れていた。
+class _ThreadTitleBar extends StatelessWidget {
+  const _ThreadTitleBar({
+    required this.title,
+    required this.status,
+    required this.onTap,
+  });
+
+  /// AppBar の高さ（`toolbarHeight`）。中身の収まりを決めるのはこの値なので、
+  /// AppBar と同じ定数をここから渡す。
+  static const barHeight = 80.0;
+
+  final String title;
+
+  /// タイトルの下に出す小さい行。取得前・エラー時は null（行ごと出さない）。
+  final String? status;
+
+  final VoidCallback onTap;
+
+  /// 大きい順に試す文字サイズ。
+  ///
+  /// 上限の 15 は本文（`titleMedium` 相当）より気持ち小さいくらいで、2〜3 行の
+  /// 塊として読みやすい大きさ。**16 だと 1 行に入る字数が足りず、短めのスレタイ
+  /// でもすぐ折り返していた**ので 1 段落とした。下限の 13 は、3 行にしても
+  /// `toolbarHeight: 80` に収まる大きさでもある。
+  static const _sizes = [15.0, 14.0, 13.0];
+
+  /// 使ってよい行数（少ない方を優先する）。
+  static const _lineCounts = [2, 3];
+
+  static const _lineHeight = 1.22;
+
+  /// 押せる範囲（＝タップの反応が出る枠）の内側の余白。
+  static const _padding = EdgeInsets.symmetric(vertical: 4, horizontal: 4);
+
+  /// 押せる範囲と AppBar の端との間隔。右は画面の端（actions が無く
+  /// `titleSpacing` も 0 なので、空けないと長いスレタイが端に貼り付く）、上は
+  /// ステータスバー側との間。**枠の外側**に置く（内側に足すと、タップの反応が
+  /// 端まで伸びてしまう）。どちらも「触れていない」と分かるだけの最小限。
+  static const _margin = EdgeInsets.only(top: 3, right: 8);
+
+  static TextPainter _painter(
+    String text,
+    TextStyle style,
+    TextScaler scaler,
+    double maxWidth,
+    int maxLines,
+  ) => TextPainter(
+    text: TextSpan(text: text, style: style),
+    maxLines: maxLines,
+    textScaler: scaler,
+    textDirection: TextDirection.ltr,
+  )..layout(maxWidth: maxWidth);
+
+  /// [budget] の高さ・[maxWidth] の幅に収まる（文字サイズ, 行数）を選ぶ。
+  ///
+  /// どの組み合わせでも入りきらないときは、**高さには収まる中でいちばん多く
+  /// 読める組み合わせ**（＝最小サイズの最大行数）を返す。呼ぶ側で末尾を省く。
+  static (double, int) _fit(
+    String text,
+    TextStyle base,
+    TextScaler scaler,
+    double maxWidth,
+    double budget,
+  ) {
+    (double, int)? fallback;
+    for (final size in _sizes) {
+      for (final lines in _lineCounts) {
+        final painter = _painter(
+          text,
+          base.copyWith(fontSize: size),
+          scaler,
+          maxWidth,
+          lines,
+        );
+        final tooTall = painter.height > budget;
+        final overflows = painter.didExceedMaxLines;
+        painter.dispose();
+        // 高さが尽きたら、この字で行を足しても入らない。次の小さい字へ。
+        if (tooTall) break;
+        if (!overflows) return (size, lines);
+        fallback = (size, lines);
+      }
+    }
+    return fallback ?? (_sizes.last, 1);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scaler = MediaQuery.textScalerOf(context);
+    final inherited = DefaultTextStyle.of(context).style;
+    // 実測に使うので、AppBar から降りてくる既定（フォントなど）に重ねた
+    // 「実際に描かれる」スタイルを組み立てる。
+    final titleStyle = inherited.merge(
+      const TextStyle(fontWeight: FontWeight.w600, height: _lineHeight),
+    );
+    final status = this.status;
+    final statusStyle = inherited.merge(
+      theme.textTheme.labelSmall?.copyWith(
+        color: theme.colorScheme.onSurfaceVariant,
+      ),
+    );
+
+    return Padding(
+      padding: _margin,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: _padding,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              // 高さは AppBar から降りてこない（クラスの説明を参照）ので、
+              // 自分の余白を引いて求める。何かに挟まれて縦が狭くなっている
+              // ときだけ、降りてきた制約の方を採る。
+              var budget = math.min(
+                constraints.maxHeight,
+                barHeight - _margin.vertical - _padding.vertical,
+              );
+              if (status != null) {
+                final painter = _painter(
+                  status,
+                  statusStyle,
+                  scaler,
+                  constraints.maxWidth,
+                  1,
+                );
+                budget -= painter.height;
+                painter.dispose();
+              }
+              final (size, lines) = _fit(
+                title,
+                titleStyle,
+                scaler,
+                constraints.maxWidth,
+                budget,
+              );
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    title,
+                    maxLines: lines,
+                    overflow: TextOverflow.ellipsis,
+                    style: titleStyle.copyWith(fontSize: size),
+                  ),
+                  if (status != null)
+                    Text(
+                      status,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: statusStyle,
+                    ),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 /// 右端のファストスクロール用つまみ。長いスレで一気に距離を移動できる。
 ///
