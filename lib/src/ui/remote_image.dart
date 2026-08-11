@@ -105,6 +105,46 @@ class ImageLoadPolicy {
   }
 }
 
+/// 画像の**縦横比**を URL ごとに覚えておく。
+///
+/// サムネイルを元の絵の形で出すために要る値だが、比率はデコードして初めて
+/// 分かる。つまり最初の 1 枚は「正方形で場所を取っておいて、届いたら形が
+/// 決まる」しかない——その瞬間に下のレスがずれる。
+///
+/// ここで覚えておくと、**2 度目からはずれない**。同じスレを開き直しても、
+/// スクロールで一度離れて戻っても、最初から正しい高さで組める。覚えるのは
+/// 表示のたびではなく[デコードの入口]（`RemoteImage._targetSize`）で、
+/// 原寸がそのまま渡ってくる。
+///
+/// プロセス内だけ。アプリを終了すると忘れるので、次の起動では 1 回だけまた
+/// ずれる（本文はディスクに残っているので通信は起きない）。
+class ImageAspect extends ChangeNotifier {
+  ImageAspect._();
+
+  static final ImageAspect shared = ImageAspect._();
+
+  final Map<String, double> _ratios = {};
+
+  /// 幅 ÷ 高さ。まだ一度も読めていない URL なら null。
+  double? ratioOf(Uri url) => _ratios[url.toString()];
+
+  /// 原寸から比率を覚える。値が変わったときだけ知らせる（同じ絵を別の大きさで
+  /// 開き直すたびに画面全体を組み直さないため）。
+  void remember(Uri url, int width, int height) {
+    if (width <= 0 || height <= 0) return;
+    final key = url.toString();
+    final ratio = width / height;
+    if (_ratios[key] == ratio) return;
+    _ratios[key] = ratio;
+    // デコードは通信・ファイル読みの後ろで動く（build や layout の最中では
+    // ない）ので、その場で知らせてよい。
+    notifyListeners();
+  }
+
+  @visibleForTesting
+  void reset() => _ratios.clear();
+}
+
 /// 取得した本文を直近のぶんだけ覚えておく置き場。
 ///
 /// **サムネイルと全画面は目標サイズが違う＝別のキャッシュ key** なので、
@@ -359,6 +399,10 @@ class RemoteImage extends ImageProvider<RemoteImage> {
 
   /// 原寸 [width]×[height] をどこまで縮めてデコードするか。
   ui.TargetImageSize _targetSize(int width, int height) {
+    // 原寸が分かる唯一の場所。サムネイルを元の形で出すのに使うので覚えておく
+    // （[ImageAspect]）。縮めた後の大きさでも比率は同じだが、ここなら丸め誤差
+    // が乗らない。
+    ImageAspect.shared.remember(url, width, height);
     if (width <= 0 || height <= 0) {
       return ui.TargetImageSize(width: width, height: height);
     }

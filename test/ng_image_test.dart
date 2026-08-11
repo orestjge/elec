@@ -150,6 +150,9 @@ void main() {
 
   setUp(() {
     ImageLoadPolicy.reset();
+    // 覚えた縦横比もテストごとに捨てる。持ち越すと、同じ URL を使う後続の
+    // テストがサムネイルの形（＝置き場所）ごと変わる。
+    ImageAspect.shared.reset();
     PaintingBinding.instance.imageCache.clear();
     PaintingBinding.instance.imageCache.clearLiveImages();
     RemoteImage.resetClient();
@@ -221,9 +224,7 @@ void main() {
 
   test('NG を解除すると出し直せる', () async {
     final url = Uri.parse('https://img.example.com/x.png');
-    final client = _FakeHttpClient({
-      url.toString(): await _scenePng(200, 150),
-    });
+    final client = _FakeHttpClient({url.toString(): await _scenePng(200, 150)});
 
     await io.HttpOverrides.runZoned(() async {
       RemoteImage.resetClient();
@@ -245,9 +246,7 @@ void main() {
 
   test('NG 画像が無い間は指紋を採らない', () async {
     final url = Uri.parse('https://img.example.com/plain.png');
-    final client = _FakeHttpClient({
-      url.toString(): await _scenePng(200, 150),
-    });
+    final client = _FakeHttpClient({url.toString(): await _scenePng(200, 150)});
 
     await io.HttpOverrides.runZoned(() async {
       RemoteImage.resetClient();
@@ -259,8 +258,10 @@ void main() {
   });
 
   test('読み込んでいない画像は NG にできない', () async {
-    expect(await addNgImage(Uri.parse('https://img.example.com/never.png')),
-        isNull);
+    expect(
+      await addNgImage(Uri.parse('https://img.example.com/never.png')),
+      isNull,
+    );
     expect(NgStore.shared.images, isEmpty);
   });
 }

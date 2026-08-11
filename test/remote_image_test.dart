@@ -124,6 +124,9 @@ void main() {
 
   setUp(() {
     ImageLoadPolicy.reset();
+    // 覚えた縦横比もテストごとに捨てる。持ち越すと、同じ URL を使う後続の
+    // テストがサムネイルの形（＝置き場所）ごと変わる。
+    ImageAspect.shared.reset();
     PaintingBinding.instance.imageCache.clear();
     PaintingBinding.instance.imageCache.clearLiveImages();
     RemoteImage.resetClient();

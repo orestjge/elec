@@ -13,6 +13,7 @@ import 'package:elec/src/ui/video_thumbnail.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as img;
 import 'package:video_player_platform_interface/video_player_platform_interface.dart';
 
 import 'support/fake_video_player.dart';
@@ -27,6 +28,13 @@ final _tinyPng = base64Decode(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwAD'
   'hgGAWjR9awAAAABJRU5ErkJggg==',
 );
+
+/// [width]×[height] の JPEG。動画から切り出したフレームの代わり。
+Uint8List _frame(int width, int height) {
+  final image = img.Image(width: width, height: height);
+  img.fill(image, color: img.ColorRgb8(40, 90, 200));
+  return Uint8List.fromList(img.encodeJpg(image, quality: 70));
+}
 
 /// ニコニコのサムネ解決をテスト内で完結させるフェイク。
 class _StubFetcher implements HttpFetcher {
@@ -117,6 +125,10 @@ void main() {
   // ビューアは 1 つしかない（[MiniPlayerController.shared]）ので、テストごとに
   // 開きっぱなしを持ち越さない。
   tearDown(MiniPlayerController.shared.debugReset);
+
+  // 覚えた縦横比も持ち越さない。残っているとサムネイルが正方形でなくなり、
+  // 位置で拾うテストが取り違える。
+  tearDown(ImageAspect.shared.reset);
 
   testWidgets('同一レス内の複数画像をビューアで巡回できる', (tester) async {
     final urls = [
@@ -417,7 +429,10 @@ void main() {
     await tester.tap(find.text('この画像をNG'));
     await tester.pumpAndSettle();
     // 確認はアプリ側（Navigator）へ出す。ビューアは出ていない。
-    expect(find.text('同じ画像は、次から別の URL で貼られても隠します。貼り直しで多少変わった画像も隠します。'), findsOneWidget);
+    expect(
+      find.text('同じ画像は、次から別の URL で貼られても隠します。貼り直しで多少変わった画像も隠します。'),
+      findsOneWidget,
+    );
     expect(
       _isTappable(tester, find.widgetWithText(FilledButton, 'NGにする')),
       isTrue,
@@ -522,9 +537,10 @@ void main() {
 
     // 等倍へ戻したら細かさも戻す（見えない分をメモリに抱えたままにしない）。
     tester
-        .widget<InteractiveViewer>(find.byType(InteractiveViewer))
-        .transformationController!
-        .value = Matrix4.identity();
+            .widget<InteractiveViewer>(find.byType(InteractiveViewer))
+            .transformationController!
+            .value =
+        Matrix4.identity();
     await tester.pumpAndSettle();
     expect(_viewerDecodeTarget(tester), fit);
   });
@@ -797,7 +813,9 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         builder: _host,
-        home: Scaffold(body: PostImages(urls: const [], videoUrls: [video])),
+        home: Scaffold(
+          body: PostImages(urls: const [], videoUrls: [video]),
+        ),
       ),
     );
 
@@ -964,6 +982,68 @@ void main() {
     expect(find.byType(Image), findsOneWidget);
     expect(find.byIcon(Icons.play_arrow_rounded), findsOneWidget);
     expect(find.text('example.com'), findsOneWidget);
+  });
+
+  testWidgets('動画サムネイルは映像の形で出す', (tester) async {
+    addTearDown(() {
+      VideoThumbnails.debugTargetPlatform = null;
+      VideoThumbnails.generator = originalVideoGenerator;
+      VideoThumbnails.clearCache();
+    });
+    VideoThumbnails.debugTargetPlatform = TargetPlatform.android;
+    VideoThumbnails.clearCache();
+    // 16:9 の映像。フレームのヘッダから形が分かるので、正方形に切らず横へ
+    // 伸ばして出す（画像のサムネイルと同じ規則＝`thumbBox`）。
+    VideoThumbnails.generator = (url) async => _frame(320, 180);
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: _host,
+        home: Scaffold(
+          body: PostImages(
+            urls: const [],
+            videoUrls: [Uri.parse('https://example.com/movie.mp4')],
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final card = tester.getRect(
+      find.ancestor(of: find.byType(Image), matching: find.byType(InkWell)),
+    );
+    expect(card.height, 160);
+    expect(card.width / card.height, moreOrLessEquals(16 / 9, epsilon: 0.01));
+  });
+
+  testWidgets('フレームを取れない間は正方形で場所を取る', (tester) async {
+    addTearDown(() {
+      VideoThumbnails.debugTargetPlatform = null;
+      VideoThumbnails.generator = originalVideoGenerator;
+      VideoThumbnails.clearCache();
+    });
+    VideoThumbnails.debugTargetPlatform = TargetPlatform.android;
+    VideoThumbnails.clearCache();
+    VideoThumbnails.generator = (url) async => null;
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: _host,
+        home: Scaffold(
+          body: PostImages(
+            urls: const [],
+            videoUrls: [Uri.parse('https://example.com/movie.mp4')],
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final card = tester.getRect(
+      find.ancestor(
+        of: find.byIcon(Icons.play_arrow_rounded),
+        matching: find.byType(InkWell),
+      ),
+    );
+    expect(card.width, card.height);
   });
 
   testWidgets('YouTube/ニコニコは再生サムネイルとして表示しタップを通知する', (tester) async {
