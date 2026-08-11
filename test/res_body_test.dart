@@ -120,6 +120,82 @@ void main() {
     expect(text.textSpan?.style?.fontFamily, 'Monapo');
   });
 
+  group('AA を幅に合わせて縮める', () {
+    test('収まっているものは縮めない（拡大もしない）', () {
+      expect(
+        asciiArtFitScale(naturalWidth: 200, maxWidth: 340, fontSize: 15),
+        1,
+      );
+      expect(asciiArtFitScale(naturalWidth: 0, maxWidth: 340, fontSize: 15), 1);
+      expect(
+        asciiArtFitScale(
+          naturalWidth: 600,
+          maxWidth: double.infinity,
+          fontSize: 15,
+        ),
+        1,
+      );
+    });
+
+    test('はみ出す分だけ縮める', () {
+      expect(
+        asciiArtFitScale(naturalWidth: 600, maxWidth: 400, fontSize: 15),
+        closeTo(2 / 3, 1e-9),
+      );
+    });
+
+    test('字の下限より小さくはしない', () {
+      // 15px の本文なら 8px（下限）まで＝0.53 が底。あとは横スクロールに回す。
+      expect(
+        asciiArtFitScale(naturalWidth: 3000, maxWidth: 300, fontSize: 15),
+        closeTo(8 / 15, 1e-9),
+      );
+      // すでに下限より小さい字なら、これ以上は縮めない。
+      expect(asciiArtFitScale(naturalWidth: 600, maxWidth: 300, fontSize: 6), 1);
+    });
+
+    testWidgets('狭い画面でははみ出す AA の字を小さくして出す', (tester) async {
+      // テストのフォント（Ahem）は 1 字が字の大きさぶんの正方形なので、
+      // 「何字ぶんの幅か」がそのまま必要な幅になる。
+      const aa = '''
+　　 ∧＿∧　　　　＿＿＿＿＿＿＿
+　　（　´∀｀）　＜　横に長い AA
+　　（　　　　）　￣￣￣￣￣￣￣
+''';
+
+      Future<double?> fontSizeAt(double width) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: SizedBox(
+                width: width,
+                child: ResBody(
+                  text: aa,
+                  style: const TextStyle(fontSize: 15),
+                  onTapRes: (_) {},
+                  onTapUrl: (_) {},
+                ),
+              ),
+            ),
+          ),
+        );
+        return tester
+            .widget<SelectableText>(find.byType(SelectableText))
+            .textSpan
+            ?.style
+            ?.fontSize;
+      }
+
+      expect(await fontSizeAt(800), 15, reason: '収まるなら本文と同じ大きさのまま');
+
+      final narrow = await fontSizeAt(200);
+      expect(narrow, lessThan(15));
+      expect(narrow, greaterThanOrEqualTo(minAsciiArtFontSize));
+
+      expect(await fontSizeAt(40), minAsciiArtFontSize, reason: '下限で止める');
+    });
+  });
+
   testWidgets('通常本文は通常表示のままにする', (tester) async {
     await tester.pumpWidget(
       MaterialApp(

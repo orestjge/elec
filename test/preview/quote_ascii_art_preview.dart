@@ -6,7 +6,6 @@
 library;
 
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:edge_core/edge_core.dart';
@@ -14,7 +13,6 @@ import 'package:elec/src/ui/thread_tree.dart';
 import 'package:elec/theme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
-import 'package:flutter/services.dart' show FontLoader;
 import 'package:flutter_test/flutter_test.dart';
 
 import '../support/preview_fonts.dart';
@@ -141,13 +139,6 @@ Widget _barSheet() => Builder(
   },
 );
 
-Future<void> _loadMonapo() async {
-  final bytes = ByteData.sublistView(
-    Uint8List.fromList(File('assets/fonts/monapo.ttf').readAsBytesSync()),
-  );
-  await (FontLoader('Monapo')..addFont(Future.value(bytes))).load();
-}
-
 Future<void> _shoot(
   WidgetTester tester,
   ThemeData theme,
@@ -189,7 +180,7 @@ void main() {
 
   setUpAll(() async {
     await loadPreviewFonts();
-    await _loadMonapo();
+    await loadAsciiArtFont();
   });
 
   testWidgets('quote aa light', (tester) async {

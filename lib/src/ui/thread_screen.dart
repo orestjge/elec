@@ -31,6 +31,7 @@ import 'post_item.dart';
 import 'reply_swipe.dart';
 import 'dat_html.dart';
 import 'reply_tier.dart';
+import 'res_body.dart';
 import 'thread_map.dart';
 import 'thread_tree.dart';
 import 'mini_player.dart';
@@ -3542,6 +3543,9 @@ class _ConversationSheetState extends State<_ConversationSheet> {
                   onPickAndUploadImages: widget.onPickAndUploadImages,
                   onPickAndUploadFile: widget.onPickAndUploadFile,
                   enabled: widget.enabled,
+                  // レスを左へ引いて出した欄は、そのまま書き始めるためのもの。
+                  // 持ち込んだ書きかけで出ているだけなら畳んだ札で出す。
+                  openForWriting: _repliedHere,
                   replyTargetFor: widget.replyTargetFor,
                   onTapReplyTarget: (number) =>
                       widget.onTapReplyTarget(number, onReply: _replyLocal),
@@ -3833,6 +3837,7 @@ class _Composer extends StatefulWidget {
     required this.onPickAndUploadImages,
     required this.onPickAndUploadFile,
     required this.enabled,
+    this.openForWriting = false,
     this.replyTargetFor,
     this.onTapReplyTarget,
   });
@@ -3852,6 +3857,10 @@ class _Composer extends StatefulWidget {
   final Future<Uri?> Function() onPickAndUploadFile;
   final bool enabled;
 
+  /// 出た時点で書き始めるための欄か（会話シートでレスを左へ引いて出したとき）。
+  /// 立っていれば畳まずに出して、焦点まで渡す。
+  final bool openForWriting;
+
   @override
   State<_Composer> createState() => _ComposerState();
 }
@@ -3861,12 +3870,27 @@ class _ComposerState extends State<_Composer> {
   bool _uploadingImage = false;
   bool _uploadingFile = false;
 
+  /// 畳んだ書きかけを押して、入力欄を出し直している最中か。
+  ///
+  /// 欄そのものが無い状態から書き始めるので、**まず欄を出し、それからフォーカスを
+  /// 渡す**（[FocusNode] は付いている欄が無いと焦点を受け取れない）。この 1 フレーム
+  /// だけを跨ぐための合図で、焦点が着いたら（[_onFocusChanged]）役目を終える。
+  bool _resuming = false;
+
   @override
   void initState() {
     super.initState();
     // 本文中の URL から添付プレビューを作るので、テキスト変更で作り直す。
     widget.controller.addListener(_onTextChanged);
     widget.focusNode.addListener(_onFocusChanged);
+    // 書くために出された欄（会話シートの返信）は、畳まず・焦点を持って現れる。
+    // 焦点は欄が組み上がってからでないと渡せないので、1 フレーム待つ。
+    if (widget.openForWriting) {
+      _resuming = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) widget.focusNode.requestFocus();
+      });
+    }
   }
 
   @override
@@ -3890,11 +3914,38 @@ class _ComposerState extends State<_Composer> {
   }
 
   void _onTextChanged() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    // 畳んでいる間に本文が変わるのは、外から入れられたときだけ——レスを左へ
+    // 引いて `>>N` を入れた、添付の URL が入った。どれも「これから書く」場面
+    // なので、札のままにせず欄を開いて焦点まで渡す（畳んだ状態では焦点を渡す
+    // 相手＝入力欄そのものが無く、呼び出し側の requestFocus は空振りする）。
+    //
+    // **手前に会話シートが載っているときは触らない。** 下書きはスレに 1 つで、
+    // シート側の入力欄も同じ本文を持つため、そちらで書いている最中に後ろから
+    // 焦点を奪ってしまう。
+    final folded =
+        widget.enabled &&
+        !widget.focusNode.hasFocus &&
+        !_resuming &&
+        widget.controller.text.trim().isNotEmpty;
+    if (folded && (ModalRoute.of(context)?.isCurrent ?? true)) {
+      _resumeWriting();
+      return;
+    }
+    setState(() {});
   }
 
   void _onFocusChanged() {
-    if (mounted) setState(() {});
+    if (mounted) setState(() => _resuming = false);
+  }
+
+  /// 畳んだ書きかけを押したとき。入力欄を出し、次のフレームで焦点を渡す。
+  void _resumeWriting() {
+    if (!mounted) return;
+    setState(() => _resuming = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.focusNode.requestFocus();
+    });
   }
 
   Future<void> _send() async {
@@ -3911,7 +3962,12 @@ class _ComposerState extends State<_Composer> {
     setState(() => _sending = true);
     try {
       final accepted = await widget.onSend(text);
-      if (accepted) widget.controller.clear();
+      if (accepted) {
+        widget.controller.clear();
+        // 送り終えたら書く姿勢も解く。欄は空になっていて、続けて書く用が無い
+        // ならキーボードが場所を取り続ける理由も無い（欄は 1 段へ戻る）。
+        widget.focusNode.unfocus();
+      }
     } finally {
       if (mounted) setState(() => _sending = false);
     }
@@ -4018,6 +4074,156 @@ class _ComposerState extends State<_Composer> {
         !_sending &&
         !_uploadingImage &&
         !_uploadingFile;
+    // 添付ボタンを止める条件（送信中・アップロード中は触らせない）。
+    final busy =
+        !widget.enabled || _sending || _uploadingImage || _uploadingFile;
+
+    // **書き始めたら 2 段に組み替える。** 1 段目が入力欄、2 段目が添付と送信。
+    //
+    // 何も書いていないうちは 1 行の欄とボタンが横に並んでいてよい（画面の下に
+    // 置く帯として、これがいちばん低い）。書き始めると話が変わる。ボタンに
+    // 取られている 90 ほどは、そのまま本文の幅であり——AA なら**縮小せずに
+    // 収まるかどうかの差**になる。書いている間は幅を本文に回す。
+    //
+    // キーボードを閉じたら畳んで 1 段へ戻す。手が止まっている間まで場所を取る
+    // 理由は無く、書きかけは畳んだ札（[_DraftPreview]）に残るので、押せばここへ
+    // 戻ってこられる。**ただし停止スレでは畳まない**——もう書けない欄に残った
+    // 本文は、選んでコピーして次スレへ持っていくためのもので、畳むと選べなく
+    // なる。
+    //
+    // 添付の**アップロード中も広げたまま**にする。上げ終われば URL が本文に
+    // 入って（＝書く場面に入って）どのみち広がるので、待っている間だけ 1 段に
+    // 留めると、終わった拍子に欄が伸びてボタンが動く。押した直後から広げて
+    // おけば、指の下は最後まで動かない。
+    final expanded =
+        widget.focusNode.hasFocus ||
+        _resuming ||
+        _uploadingImage ||
+        _uploadingFile ||
+        (!widget.enabled && text.isNotEmpty);
+    // 欄の代わりに、畳んだ書きかけの札を出すか。
+    final collapsedDraft = !expanded && text.trim().isNotEmpty;
+
+    // AA を書いているときだけ字を組み替えるので、置ける幅を知る。
+    final field = LayoutBuilder(
+      builder: (context, constraints) {
+        // 欄の幅から、左右の padding（14×2）とカーソルのぶんを引いたものが、
+        // 字の置ける幅。
+        final fit = composeAsciiArtFit(
+          context,
+          base: textStyle,
+          text: text,
+          maxWidth: constraints.maxWidth - 28 - 2,
+        );
+        return TextField(
+          controller: widget.controller,
+          focusNode: widget.focusNode,
+          // 停止スレでも欄は生かしたまま読み取り専用にする。無効
+          // （enabled: false）にすると書きかけを選択もコピーもできず、
+          // 次スレへ持っていく手立てが無くなるため。書けないことは
+          // ヒントと、無効になった送信・添付ボタンで示す。
+          readOnly: !widget.enabled,
+          minLines: 1,
+          // AA は字が小さいぶん行数を増やす（欄の高さは変わらない）。
+          maxLines: fit?.lines(5) ?? 5,
+          textInputAction: TextInputAction.newline,
+          // 行高を明示すると 1 行時の高さがフォントに左右されず、
+          // kComposeControlHeight にぴたりと収まる。
+          style: fit?.style ?? textStyle,
+          decoration: composeFieldDecoration(
+            scheme: scheme,
+            hintText: widget.enabled ? 'レスを書く' : '書き込み停止中',
+            // ヒントは欄が空のとき＝AA ではないときに出るので、普通の字のまま。
+            textStyle: textStyle,
+            // 21（15×1.4）+ 10.5×2 = 42 = kComposeControlHeight。
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 14,
+              vertical: 10.5,
+            ),
+          ),
+        );
+      },
+    );
+
+    // 添付系は入力欄に添えるだけの脇役なので、色を onSurfaceVariant に
+    // 落として送信ボタンとの主従をはっきりさせる。
+    Widget quietButton({
+      required String tooltip,
+      required IconData icon,
+      required bool loading,
+      required VoidCallback? onPressed,
+    }) => SizedBox(
+      width: kComposeControlHeight,
+      height: kComposeControlHeight,
+      child: IconButton(
+        padding: EdgeInsets.zero,
+        tooltip: tooltip,
+        style: composeQuietButtonStyle(scheme),
+        onPressed: onPressed,
+        icon: loading
+            ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : Icon(icon, size: 21),
+      ),
+    );
+
+    final attachImageButton = quietButton(
+      tooltip: '画像を追加',
+      icon: Icons.image_outlined,
+      loading: _uploadingImage,
+      onPressed: busy ? null : _attachImage,
+    );
+    final attachFileButton = quietButton(
+      tooltip: 'ファイルを添付',
+      icon: Icons.attach_file,
+      loading: _uploadingFile,
+      onPressed: busy ? null : _attachFile,
+    );
+    // キーボードを閉じるボタンは、開いている間だけ。1 段のときは出ない
+    // （フォーカスがある＝2 段に広がっている）ので、2 段目にだけ置けばよい。
+    final hideKeyboardButton = widget.enabled && widget.focusNode.hasFocus
+        ? quietButton(
+            tooltip: 'キーボードを閉じる',
+            icon: Icons.keyboard_hide,
+            loading: false,
+            onPressed: widget.focusNode.unfocus,
+          )
+        : null;
+
+    // 送信ボタンは 1 行時の入力欄と同じ高さに固定。丸ボタンだと入力欄の角丸
+    // （14）から浮くので、同じ角丸の四角に合わせる。
+    // 本文が空のうちは押しても何も起きない（[_send] が弾く）ので、
+    // 塗りも控えめにして「まだ送れない」ことを見た目でも伝える。
+    final sendButton = SizedBox(
+      width: kComposeControlHeight,
+      height: kComposeControlHeight,
+      child: IconButton(
+        padding: EdgeInsets.zero,
+        tooltip: '送信',
+        onPressed: !widget.enabled || _sending ? null : _send,
+        style: IconButton.styleFrom(
+          backgroundColor: canSend ? scheme.primary : Colors.transparent,
+          foregroundColor: canSend
+              ? scheme.onPrimary
+              : scheme.onSurfaceVariant.withValues(alpha: 0.7),
+          shape: composeShape,
+        ),
+        icon: _sending
+            ? SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: scheme.onSurfaceVariant,
+                ),
+              )
+            : const Icon(Icons.send, size: 19),
+      ),
+    );
+
     return SafeArea(
       top: false,
       child: Container(
@@ -4033,169 +4239,132 @@ class _ComposerState extends State<_Composer> {
         ),
         // 送信ボタンが塗りを持つので、左右の余白は同じにして端を揃える。
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (replyTargets.isNotEmpty)
-              _ReplyTargetBar(
-                targets: replyTargets,
-                onTap: widget.onTapReplyTarget,
-              ),
-            if (hasAttachments) ...[
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 160),
-                child: SingleChildScrollView(
-                  child: PostImages(
-                    urls: imageUrls,
-                    videoUrls: videoUrls,
-                    audioUrls: audioUrls,
-                    embedVideos: embedVideos,
-                    onRemove: _removeUrl,
-                    thumbSize: 96,
-                  ),
+        // **この帯の中を押しても入力欄の焦点は外さない。**
+        //
+        // デスクトップでは入力欄の外を押した時点で焦点が外れる（[TextField] の
+        // 既定の onTapOutside）。ここが効くと、指を置いた瞬間に欄が畳まれて
+        // 2 段目のボタンが動き、離した指はもうボタンの上にいない——押したはずの
+        // 送信も添付も起きずに、欄が 1 段へ戻るだけになる。添付・送信・返信先は
+        // 入力欄の一部なので、押しても書いている状態は続く。
+        child: TextFieldTapRegion(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (replyTargets.isNotEmpty)
+                _ReplyTargetBar(
+                  targets: replyTargets,
+                  onTap: widget.onTapReplyTarget,
                 ),
-              ),
-              const SizedBox(height: 10),
-            ],
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: widget.controller,
-                    focusNode: widget.focusNode,
-                    // 停止スレでも欄は生かしたまま読み取り専用にする。無効
-                    // （enabled: false）にすると書きかけを選択もコピーもできず、
-                    // 次スレへ持っていく手立てが無くなるため。書けないことは
-                    // ヒントと、無効になった送信・添付ボタンで示す。
-                    readOnly: !widget.enabled,
-                    minLines: 1,
-                    maxLines: 5,
-                    textInputAction: TextInputAction.newline,
-                    // 行高を明示すると 1 行時の高さがフォントに左右されず、
-                    // kComposeControlHeight にぴたりと収まる。
-                    style: textStyle,
-                    decoration:
-                        composeFieldDecoration(
-                          scheme: scheme,
-                          hintText: widget.enabled ? 'レスを書く' : '書き込み停止中',
-                          textStyle: textStyle,
-                          // 21（15×1.4）+ 10.5×2 = 42 = kComposeControlHeight。
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 10.5,
-                          ),
-                        ).copyWith(
-                          suffixIcon:
-                              widget.enabled && widget.focusNode.hasFocus
-                              ? IconButton(
-                                  tooltip: 'キーボードを閉じる',
-                                  icon: const Icon(
-                                    Icons.keyboard_hide,
-                                    size: 20,
-                                  ),
-                                  padding: EdgeInsets.zero,
-                                  style: composeQuietButtonStyle(scheme),
-                                  onPressed: widget.focusNode.unfocus,
-                                )
-                              : null,
-                          // ボタンの既定の最小サイズ（48）に入力欄が引っ張られると、
-                          // フォーカスした瞬間だけ欄が伸びて他のボタンとずれる。
-                          // 高さを行に合わせて固定し、出入りしても動かないようにする。
-                          suffixIconConstraints: const BoxConstraints.tightFor(
-                            width: 40,
-                            height: kComposeControlHeight,
-                          ),
-                        ),
-                  ),
-                ),
-                const SizedBox(width: 6),
-                // 添付系は入力欄に添えるだけの脇役なので、色を onSurfaceVariant に
-                // 落として送信ボタンとの主従をはっきりさせる。
-                SizedBox(
-                  width: kComposeControlHeight,
-                  height: kComposeControlHeight,
-                  child: IconButton(
-                    padding: EdgeInsets.zero,
-                    tooltip: '画像を追加',
-                    style: composeQuietButtonStyle(scheme),
-                    onPressed:
-                        !widget.enabled ||
-                            _sending ||
-                            _uploadingImage ||
-                            _uploadingFile
-                        ? null
-                        : _attachImage,
-                    icon: _uploadingImage
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.image_outlined, size: 21),
-                  ),
-                ),
-                SizedBox(
-                  width: kComposeControlHeight,
-                  height: kComposeControlHeight,
-                  child: IconButton(
-                    padding: EdgeInsets.zero,
-                    tooltip: 'ファイルを添付',
-                    style: composeQuietButtonStyle(scheme),
-                    onPressed:
-                        !widget.enabled ||
-                            _sending ||
-                            _uploadingImage ||
-                            _uploadingFile
-                        ? null
-                        : _attachFile,
-                    icon: _uploadingFile
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.attach_file, size: 21),
-                  ),
-                ),
-                const SizedBox(width: 4),
-                // 送信ボタンは 1 行時の入力欄と同じ高さに固定。複数行に伸びたら
-                // crossAxisAlignment.end で下端に留まる。丸ボタンだと入力欄の角丸
-                // （14）から浮くので、同じ角丸の四角に合わせる。
-                // 本文が空のうちは押しても何も起きない（[_send] が弾く）ので、
-                // 塗りも控えめにして「まだ送れない」ことを見た目でも伝える。
-                SizedBox(
-                  width: kComposeControlHeight,
-                  height: kComposeControlHeight,
-                  child: IconButton(
-                    padding: EdgeInsets.zero,
-                    tooltip: '送信',
-                    onPressed: !widget.enabled || _sending ? null : _send,
-                    style: IconButton.styleFrom(
-                      backgroundColor: canSend
-                          ? scheme.primary
-                          : Colors.transparent,
-                      foregroundColor: canSend
-                          ? scheme.onPrimary
-                          : scheme.onSurfaceVariant.withValues(alpha: 0.7),
-                      shape: composeShape,
+              if (hasAttachments) ...[
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 160),
+                  child: SingleChildScrollView(
+                    child: PostImages(
+                      urls: imageUrls,
+                      videoUrls: videoUrls,
+                      audioUrls: audioUrls,
+                      embedVideos: embedVideos,
+                      onRemove: _removeUrl,
+                      thumbSize: 96,
                     ),
-                    icon: _sending
-                        ? SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: scheme.onSurfaceVariant,
-                            ),
-                          )
-                        : const Icon(Icons.send, size: 19),
                   ),
+                ),
+                const SizedBox(height: 10),
+              ],
+              // 入力欄は**どちらの組み方でも同じ位置**（この Row の先頭）に置く。
+              // 1 段と 2 段で入れ物を変えると、切り替わった拍子に欄が作り直されて
+              // フォーカスも入力中の文字も落ちる（＝タップした瞬間にキーボードが
+              // 閉じる）。動かすのはボタンの側だけにする。
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Expanded(
+                    child: collapsedDraft
+                        ? _DraftPreview(
+                            text: text,
+                            style: textStyle,
+                            onTap: _resumeWriting,
+                          )
+                        : field,
+                  ),
+                  if (!expanded) ...[
+                    const SizedBox(width: 6),
+                    attachImageButton,
+                    attachFileButton,
+                    const SizedBox(width: 4),
+                    sendButton,
+                  ],
+                ],
+              ),
+              if (expanded) ...[
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    attachImageButton,
+                    attachFileButton,
+                    const Spacer(),
+                    if (hideKeyboardButton != null) hideKeyboardButton,
+                    const SizedBox(width: 4),
+                    sendButton,
+                  ],
                 ),
               ],
-            ),
-          ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// キーボードを閉じたあとの書きかけを、入力欄と同じ形の札 1 行に畳んだもの。
+/// 押すと入力欄へ戻る（[_ComposerState._resumeWriting]）。
+///
+/// 手が止まっている間は、入力欄が 2 段のまま画面の下を占め続ける理由が無い。
+/// かといって書きかけを隠すと、残っていること自体を忘れて別のスレへ行ってしまう
+/// ——だから**畳んでも中身は見せる**。塗りも角丸も入力欄と同じにして、「ここが
+/// さっきの欄だ」と分かる形に留める。
+///
+/// 文章は 1 行に潰して末尾を `…` で切る。**AA だけは潰さない**（[QuoteAsciiArt]）：
+/// 記号の列にしてしまうと元が何の絵だったか読み取れず、引用行で同じ理由から
+/// 形のまま縮めているのと揃わない。
+class _DraftPreview extends StatelessWidget {
+  const _DraftPreview({
+    required this.text,
+    required this.style,
+    required this.onTap,
+  });
+
+  final String text;
+  final TextStyle? style;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: composeFieldFill(scheme),
+      borderRadius: BorderRadius.circular(kComposeRadius),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          height: kComposeControlHeight,
+          alignment: Alignment.centerLeft,
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          child: looksLikeAsciiArt(text)
+              ? QuoteAsciiArt(
+                  text: trimBlankLines(text),
+                  color: style?.color ?? scheme.onSurface,
+                  maxHeight: kComposeControlHeight - 12,
+                )
+              : Text(
+                  text.replaceAll(RegExp(r'\s+'), ' ').trim(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: style,
+                ),
         ),
       ),
     );

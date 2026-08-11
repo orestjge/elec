@@ -143,6 +143,7 @@ Future<void> _shoot(
   bool openIdSheet = false,
   bool openConversation = false,
   String? draft,
+  bool foldDraft = false,
   ResLayout resLayout = ResLayout.gutter,
 }) async {
   tester.view.physicalSize = Size(width * 2, 900 * 2);
@@ -189,6 +190,11 @@ Future<void> _shoot(
   if (draft != null) {
     await tester.enterText(find.byType(TextField).first, draft);
     await tester.pump();
+    if (foldDraft) {
+      // キーボードを閉じたあとの姿（書きかけは 1 行の札に畳まれる）。
+      await tester.tap(find.byTooltip('キーボードを閉じる'));
+      await tester.pump();
+    }
   }
 
   if (openConversation) {
@@ -230,7 +236,11 @@ void main() {
   final dir = Platform.environment['OUT'] ?? 'notes/preview';
 
   // フォント読み込みはテスト本体の外で（fake async のゾーンに入れない）。
-  setUpAll(loadPreviewFonts);
+  setUpAll(() async {
+    await loadPreviewFonts();
+    // AA の下書きを撮るので、本文と同じ同梱フォントを読む。
+    await loadAsciiArtFont();
+  });
 
   testWidgets('light', (tester) async {
     await _shoot(tester, ElecTheme.light(), '$dir/thread_light.png');
@@ -332,6 +342,56 @@ void main() {
       ElecTheme.light(),
       '$dir/thread_composer.png',
       draft: '>>6 これいいね',
+    );
+  });
+
+  // 書きかけを持ったままキーボードを閉じたところ。欄は 1 段に畳まれ、書きかけは
+  // 札として残る（押すと続きから書ける）。
+  testWidgets('composer folded', (tester) async {
+    await _shoot(
+      tester,
+      ElecTheme.light(),
+      '$dir/thread_composer_folded.png',
+      draft: '>>6 これいいね。長い書きかけは末尾を … で切って 1 行に畳む。もっと長い本文でも同じ。',
+      foldDraft: true,
+    );
+  });
+
+  // AA の書きかけを畳んだところ。1 行に潰すと記号の列になってしまうので、形の
+  // まま縮めて出す（引用行と同じ扱い）。
+  testWidgets('composer folded ascii art', (tester) async {
+    await _shoot(
+      tester,
+      ElecTheme.light(),
+      '$dir/thread_composer_folded_aa.png',
+      draft: '''
+　　　　＿＿＿
+　　　／　　　＼
+　　／　＼　　／＼
+　／　　（●）　（●）＼
+　｜　　　　　▼　　　｜
+　＼　　　　　　　　／
+　　＼＿＿＿＿＿＿／''',
+      foldDraft: true,
+    );
+  });
+
+  // AA を書いている入力欄。書き始めるとボタンが 2 段目へ下りて、欄が幅いっぱいに
+  // なる（＝AA を縮めずに収めやすくなる）。
+  testWidgets('composer ascii art', (tester) async {
+    await _shoot(
+      tester,
+      ElecTheme.light(),
+      '$dir/thread_composer_aa.png',
+      draft: '''
+　　　　＿＿＿
+　　　／　　　＼
+　　／　＼　　／＼
+　／　　（●）　（●）＼
+　｜　　　　　▼　　　｜
+　｜　　　　_人_　　　｜
+　＼　　　　　　　　／
+　　＼＿＿＿＿＿＿／　　　モナーだお''',
     );
   });
 

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'res_body.dart';
+
 /// 文章を書く画面（スレ画面のレス入力欄・スレ立て画面）で共有する見た目。
 ///
 /// 入力欄の作りはスレ一覧の「スレタイ検索」に揃える方針＝**角丸は弱く（14）、
@@ -37,6 +39,59 @@ Color composeFieldFill(ColorScheme scheme) =>
 /// 余白が空いたように見えてしまう。
 TextStyle? composeBodyTextStyle(ThemeData theme) =>
     theme.textTheme.bodyLarge?.copyWith(fontSize: 15, height: 1.4);
+
+/// 入力欄に AA を書いた（貼った）ときの、字と行数の組み替え。null なら AA では
+/// ないので、入力欄はいつもどおりでよい。
+///
+/// 普通の字のまま出すと、AA は字幅が合わないうえ長い行が欄の幅で折り返され、
+/// **何を貼ったのか書いている本人にも分からない**。出来上がり（[ResBody]）と
+/// 同じ Monapo に切り替え、1 行が折り返さない大きさまで小さくして、書いている
+/// 最中から絵として見えるようにする。
+///
+/// 複数行の入力欄は横スクロールできない（[TextField] は必ず折り返す）ので、
+/// [minAsciiArtFontSize] まで縮めても収まらないぶんは折り返す。そこは本文表示と
+/// 違うところで、これ以上小さくしても書きようがない。
+class ComposeAsciiArtFit {
+  const ComposeAsciiArtFit({required this.style, required this.lineScale});
+
+  /// 入力欄に使う字。
+  final TextStyle style;
+
+  /// 同じ高さに入る行数の増え方。字を小さくしたぶん行は詰まるので、行数の上限を
+  /// この率で伸ばすと**入力欄の高さは変わらないまま**、見える行数だけ増える。
+  final double lineScale;
+
+  /// 普通の字なら [lines] 行ぶんの高さに、いま何行入るか。
+  int lines(int lines) => (lines * lineScale).round();
+}
+
+/// [text] が AA なら、それを入力欄に出すための字と行数を組む。
+///
+/// [maxWidth] は入力欄の**文字が置ける幅**（欄の幅から左右の padding と
+/// suffixIcon を引いたもの）。
+ComposeAsciiArtFit? composeAsciiArtFit(
+  BuildContext context, {
+  required TextStyle? base,
+  required String text,
+  required double maxWidth,
+}) {
+  if (!looksLikeAsciiArt(text)) return null;
+  final baseStyle = base ?? const TextStyle(fontSize: 15, height: 1.4);
+  final art = asciiArtStyle(baseStyle);
+  final fontSize = art.fontSize ?? 15;
+  final scale = asciiArtFitScale(
+    naturalWidth: asciiArtNaturalWidth(context, text, art),
+    maxWidth: maxWidth,
+    fontSize: fontSize,
+  );
+  final style = scale == 1 ? art : art.copyWith(fontSize: fontSize * scale);
+  final baseLine = (baseStyle.fontSize ?? 15) * (baseStyle.height ?? 1);
+  final artLine = (style.fontSize ?? 15) * (style.height ?? 1);
+  return ComposeAsciiArtFit(
+    style: style,
+    lineScale: artLine <= 0 ? 1 : (baseLine / artLine).clamp(1, 4),
+  );
+}
 
 /// 添付など、塗りを持たない脇役ボタンの見た目。押したときの反応も角丸の四角に
 /// して、真円のリップルが入力欄や送信ボタンから浮かないようにする。

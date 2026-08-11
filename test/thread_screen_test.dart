@@ -5,6 +5,7 @@ import 'package:elec/src/net/board.dart';
 import 'package:elec/src/net/ng_store.dart';
 import 'package:elec/src/net/read_history.dart';
 import 'package:elec/src/net/thread_link.dart';
+import 'package:elec/src/ui/compose_style.dart';
 import 'package:elec/src/ui/id_icon.dart';
 import 'package:elec/src/ui/mini_player.dart';
 import 'package:elec/src/ui/post_images.dart';
@@ -12,6 +13,7 @@ import 'package:elec/src/ui/post_item.dart';
 import 'package:elec/src/ui/thread_map.dart';
 import 'package:elec/src/ui/thread_screen.dart';
 import 'package:elec/src/ui/thread_tree.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -281,6 +283,38 @@ void main() {
     expect(find.textContaining('会話 #'), findsNothing);
   });
 
+  testWidgets('入力欄に AA を書くと、AA の字で・幅に収めて見せる', (tester) async {
+    // 普通の字のままでは字幅も折り返しも合わず、何を貼ったのか書いている本人にも
+    // 分からない。出来上がりと同じ Monapo に切り替え、欄の幅に収まるまで縮める。
+    const aa = '''
+　　 ∧＿∧　　　　＿＿＿＿＿＿＿
+　　（　´∀｀）　＜　横に長い AA
+　　（　　　　）　￣￣￣￣￣￣￣''';
+
+    final f = QueueFetcher([
+      ok([...res1, ...res2, ...res3]),
+    ]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    final composer = find.widgetWithText(TextField, 'レスを書く');
+    await tester.enterText(composer, aa);
+    await tester.pump();
+
+    final art = tester.widget<TextField>(composer);
+    expect(art.style?.fontFamily, 'Monapo');
+    expect(art.style?.fontSize, lessThanOrEqualTo(15));
+    // 字が小さくなったぶん行数を増やす（＝欄の高さは変えずに多く見せる）。
+    expect(art.maxLines, greaterThan(5));
+
+    await tester.enterText(composer, 'ふつうの本文です');
+    await tester.pump();
+
+    final plain = tester.widget<TextField>(composer);
+    expect(plain.style?.fontFamily, isNot('Monapo'));
+    expect(plain.maxLines, 5);
+  });
+
   testWidgets('返信先は本文の頭を押してもメニューが出る', (tester) async {
     // 見えているのは返信先そのものなので、番号だけでなく行のどこを押しても開く。
     final f = QueueFetcher([
@@ -428,15 +462,165 @@ void main() {
     await tester.pump();
 
     expect(find.byTooltip('キーボードを閉じる'), findsOneWidget);
-    var field = tester.widget<TextField>(composer);
+    final field = tester.widget<TextField>(composer);
     expect(field.focusNode!.hasFocus, isTrue);
 
     await tester.tap(find.byTooltip('キーボードを閉じる'));
     await tester.pump();
 
-    field = tester.widget<TextField>(composer);
     expect(field.focusNode!.hasFocus, isFalse);
     expect(field.controller!.text, '書きかけ');
+  });
+
+  // デスクトップでは入力欄の外を押した時点で焦点が外れる（[TextField] の既定の
+  // onTapOutside）。2 段目のボタンがこれに巻き込まれると、押した指の下で欄が
+  // 畳まれてボタンが動き、押したはずの操作が起きない。
+  testWidgets('2段目のボタンは押した瞬間に欄を畳まない（デスクトップでも効く）', (tester) async {
+    // 後始末を忘れると他のテストへ漏れるので、必ず戻す。
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    var picked = 0;
+    final f = QueueFetcher([
+      ok([...res1, ...res2]),
+    ]);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadScreen(
+          threadKey: '1762103691',
+          threadTitle: 'テストスレ',
+          fetcher: f,
+          pollInterval: const Duration(seconds: 5),
+          readHistory: ReadHistory(MemoryReadHistoryStorage()),
+          pickAndUploadImages: () async {
+            picked++;
+            return [Uri.parse('https://i.imgur.com/a.jpg')];
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final composer = find.widgetWithText(TextField, 'レスを書く');
+    await tester.tap(composer);
+    await tester.pump();
+    await tester.enterText(composer, '書きかけ');
+    await tester.pump();
+    expect(tester.widget<TextField>(composer).focusNode!.hasFocus, isTrue);
+
+    // 実際の指と同じく、押してから離すまでの間にフレームを 1 枚挟む。ここで
+    // 欄が畳まれるとボタンが動いてしまい、離した指はボタンの上にいない。
+    final press = await tester.startGesture(
+      tester.getCenter(find.byTooltip('画像を追加')),
+    );
+    await tester.pump(const Duration(milliseconds: 50));
+    await press.up();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    // ボタンは効き、欄は 2 段のまま（焦点も残る）。
+    expect(picked, 1);
+    final field = find.widgetWithText(TextField, 'レスを書く');
+    expect(field, findsOneWidget);
+    expect(tester.widget<TextField>(field).focusNode!.hasFocus, isTrue);
+
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  testWidgets('画像のアップロード中も欄は2段のまま（終わった拍子に動かない）', (tester) async {
+    final upload = Completer<List<Uri>>();
+    final f = QueueFetcher([
+      ok([...res1, ...res2]),
+    ]);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadScreen(
+          threadKey: '1762103691',
+          threadTitle: 'テストスレ',
+          fetcher: f,
+          pollInterval: const Duration(seconds: 5),
+          readHistory: ReadHistory(MemoryReadHistoryStorage()),
+          pickAndUploadImages: () => upload.future,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 何も書いていない 1 段の状態から添付を始める。
+    final composer = find.widgetWithText(TextField, 'レスを書く');
+    expect(
+      tester.getRect(find.widgetWithIcon(IconButton, Icons.send)).top,
+      tester.getRect(composer).top,
+    );
+
+    await tester.tap(find.byTooltip('画像を追加'));
+    await tester.pump();
+
+    // 上げている間から 2 段（ボタンは欄の下）。
+    expect(
+      tester.getRect(find.widgetWithIcon(IconButton, Icons.send)).top,
+      greaterThanOrEqualTo(tester.getRect(composer).bottom),
+    );
+
+    upload.complete([Uri.parse('https://i.imgur.com/a.jpg')]);
+    await tester.pump();
+    await tester.pump();
+
+    // 終わっても 2 段のまま。URL が入って、そのまま本文を書ける。
+    final field = find.widgetWithText(TextField, 'レスを書く');
+    expect(
+      tester.getRect(find.widgetWithIcon(IconButton, Icons.send)).top,
+      greaterThanOrEqualTo(tester.getRect(field).bottom),
+    );
+    expect(
+      tester.widget<TextField>(field).controller!.text,
+      contains('https://i.imgur.com/a.jpg'),
+    );
+  });
+
+  testWidgets('キーボードを閉じると1段に畳み、押せば書きかけの続きから開く', (tester) async {
+    // 手が止まっている間まで 2 段で場所を取る理由は無い。畳んでも書きかけは
+    // 札として見えていて、押せばそのまま書き続けられる。
+    final f = QueueFetcher([
+      ok([...res1, ...res2]),
+    ]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    final composer = find.widgetWithText(TextField, 'レスを書く');
+    await tester.tap(composer);
+    await tester.pump();
+    await tester.enterText(composer, 'とても長い書きかけの本文です');
+    await tester.pump();
+
+    // 書いている間は 2 段（ボタンは欄の下）。
+    expect(
+      tester.getRect(find.widgetWithIcon(IconButton, Icons.send)).top,
+      greaterThanOrEqualTo(tester.getRect(composer).bottom),
+    );
+
+    await tester.tap(find.byTooltip('キーボードを閉じる'));
+    await tester.pump();
+
+    // 欄は畳まれ、書きかけは 1 行の札に残る。ボタンは横へ戻る。
+    expect(composer, findsNothing);
+    expect(find.text('とても長い書きかけの本文です'), findsOneWidget);
+    final folded = tester.getRect(find.text('とても長い書きかけの本文です'));
+    expect(folded.height, lessThan(kComposeControlHeight));
+    expect(
+      tester.getRect(find.widgetWithIcon(IconButton, Icons.send)).top,
+      lessThan(folded.bottom),
+    );
+
+    // 札を押すと欄が戻り、続きから書ける（焦点は次のフレームで渡す）。
+    await tester.tap(find.text('とても長い書きかけの本文です'));
+    await tester.pump();
+    await tester.pump();
+
+    final reopened = tester.widget<TextField>(
+      find.widgetWithText(TextField, 'とても長い書きかけの本文です'),
+    );
+    expect(reopened.controller!.text, 'とても長い書きかけの本文です');
+    expect(reopened.focusNode!.hasFocus, isTrue);
   });
 
   // デスクトップの既定の密度（compact）は InputDecoration の上下パディングを
@@ -462,31 +646,36 @@ void main() {
     await tester.pumpAndSettle();
 
     final composer = find.widgetWithText(TextField, 'レスを書く');
-    void expectAligned(String state) {
-      final field = tester.getRect(composer);
-      for (final icon in [
-        Icons.image_outlined,
-        Icons.attach_file,
-        Icons.send,
-      ]) {
-        final button = tester.getRect(
-          find.ancestor(
-            of: find.byIcon(icon),
-            matching: find.byType(IconButton),
-          ),
-        );
-        expect(button.top, field.top, reason: '$state: ${icon.codePoint} の上端');
-        expect(button.bottom, field.bottom, reason: '$state: 下端');
-      }
+    Rect buttonRect(IconData icon) => tester.getRect(
+      find.ancestor(of: find.byIcon(icon), matching: find.byType(IconButton)),
+    );
+    const buttons = [Icons.image_outlined, Icons.attach_file, Icons.send];
+
+    // 書き始める前は 1 段。欄とボタンが横一列に揃う。
+    for (final icon in buttons) {
+      expect(buttonRect(icon).top, tester.getRect(composer).top);
+      expect(buttonRect(icon).bottom, tester.getRect(composer).bottom);
     }
 
-    expectAligned('未入力');
+    // 書き始めると 2 段になる。欄は幅いっぱいに広がり、ボタンはその下へ回る。
     await tester.tap(composer);
     await tester.pump();
-    expectAligned('フォーカス中');
     await tester.enterText(composer, 'あ');
     await tester.pump();
-    expectAligned('1行入力');
+
+    final field = tester.getRect(composer);
+    // 欄の高さは 1 行のまま（compact 密度でも縮まない）。
+    expect(field.height, kComposeControlHeight);
+    for (final icon in buttons) {
+      final button = buttonRect(icon);
+      expect(
+        button.top,
+        greaterThanOrEqualTo(field.bottom),
+        reason: '${icon.codePoint} は欄の下',
+      );
+      expect(button.height, kComposeControlHeight);
+      expect(buttonRect(buttons.first).top, button.top, reason: '2 段目で横に揃う');
+    }
   });
 
   testWidgets('スレ内検索で一致件数を表示する', (tester) async {
@@ -1447,13 +1636,15 @@ void main() {
     // 全体への返信と誤解しない）。
     expect(find.widgetWithText(TextField, 'レスを書く'), findsOneWidget);
 
-    // シート内のレスを左へ引くと入力欄が出る（本体＋シートで 2 つ）。
+    // シート内のレスを左へ引くと、書ける状態の入力欄が出る（本体側の欄は
+    // 下書きを持ったまま焦点を失うので、畳んだ札になる）。
     await swipeToReply(tester, posts(3).last);
     final composers = find.widgetWithText(TextField, 'レスを書く');
-    expect(composers, findsNWidgets(2));
-    // シート側の入力欄には対象の >>N が入っている。
-    final tf = tester.widget<TextField>(composers.last);
+    expect(composers, findsOneWidget);
+    // シート側の入力欄には対象の >>N が入っていて、そのまま書き始められる。
+    final tf = tester.widget<TextField>(composers);
     expect(tf.controller!.text.startsWith('>>'), isTrue);
+    expect(tf.focusNode!.hasFocus, isTrue);
 
     // 閉じるボタンで入力欄を隠せる。ここで書き始めたぶんなので下書きも消える。
     await tester.tap(find.byIcon(Icons.close));
@@ -1504,17 +1695,28 @@ void main() {
     await tester.pumpAndSettle();
 
     // シートに覆われて手の届かない場所へ消えたように見せず、同じ書きかけを
-    // シート側の入力欄にも出す。
-    final composers = find.widgetWithText(TextField, 'レスを書く');
-    expect(composers, findsNWidgets(2));
-    expect(tester.widget<TextField>(composers.last).controller!.text, '書きかけ');
+    // シート側にも出す。書いている最中ではないので、畳んだ札で（本体側の欄も
+    // 焦点を失って畳まれるので、札は 2 つ）。
+    expect(find.widgetWithText(TextField, 'レスを書く'), findsNothing);
+    expect(find.text('書きかけ'), findsNWidgets(2));
+
+    // 札を押せば、シート側でそのまま続きを書ける。
+    await tester.tap(find.text('書きかけ').last);
+    await tester.pump();
+    await tester.pump();
+    final sheetField = find.widgetWithText(TextField, 'レスを書く');
+    expect(sheetField, findsOneWidget);
 
     // シートで続きを書いて閉じると、番号順ビューの入力欄がそれを持っている。
-    await tester.enterText(composers.last, '書きかけの続き');
+    await tester.enterText(sheetField, '書きかけの続き');
     await tester.pump();
     await tester.tapAt(const Offset(20, 20));
     await tester.pumpAndSettle();
 
+    expect(find.text('書きかけの続き'), findsOneWidget);
+    await tester.tap(find.text('書きかけの続き'));
+    await tester.pump();
+    await tester.pump();
     final main = find.widgetWithText(TextField, 'レスを書く');
     expect(main, findsOneWidget);
     expect(tester.widget<TextField>(main).controller!.text, '書きかけの続き');
@@ -1535,6 +1737,15 @@ void main() {
     // 読むために畳んだだけで長文が飛ばないよう、欄を隠すだけにする。
     await tester.tap(find.byIcon(Icons.close));
     await tester.pumpAndSettle();
+
+    // 番号順ビューの側には、畳んだ札として書きかけが残っている（シートの裏なので
+    // 触れるのはシートを閉じてから）。押せば書きかけの続きから開く。
+    expect(find.text('長い書きかけ'), findsOneWidget);
+    await tester.tapAt(const Offset(20, 20));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('長い書きかけ'));
+    await tester.pump();
+    await tester.pump();
 
     final main = find.widgetWithText(TextField, 'レスを書く');
     expect(main, findsOneWidget);
