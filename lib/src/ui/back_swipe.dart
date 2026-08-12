@@ -165,32 +165,43 @@ class _BackSwipeState extends State<BackSwipe> {
 
   @override
   Widget build(BuildContext context) {
-    // 戻れないところ（一覧の中に置かれている等）ではジェスチャを組み立てない。
-    // 何もしない認識器が横スワイプを取ってしまうと、外側の横移動が効かなくなる。
-    if (_swipeBackRoute == null) return widget.child;
     // 内側のスクロールと同じ距離でドラッグを成立させる（`device_gestures.dart`）。
     final gestures = deviceGesturesOf(context);
+    // 戻れないところ（一覧の中に置かれている・上に別のルートが被っている間）では
+    // ジェスチャを組み立てない。何もしない認識器が横スワイプを取ってしまうと、
+    // 外側の横移動が効かなくなる。
+    //
+    // **ただし木の形は変えない。** ここで [widget.child] をそのまま返すと、
+    // 認識器のぶん木が 1 段変わる＝**この下がまるごと捨てられて組み直される**。
+    // [_swipeBackRoute] は `isCurrent` を見ているので、画像ビューアや確認の
+    // ルートが被さる／退くたびにその判定が反転する——スレ本体が作り直され、
+    // 一覧は `initialScrollIndex`（＝開いたときの着地点）から始まってしまう。
+    // 画像を閉じると読んでいた場所を失って着地点へ戻されていたのはこれ。
+    // 枠は常に置いたまま、渡す認識器だけを空にする。
+    final enabled = _swipeBackRoute != null;
     return RawGestureDetector(
       // 縦スクロールや内側の横スクロールと競り合わせたいので、当たり判定は
       // 子に任せる（この領域自体は塞がない）。
       behavior: HitTestBehavior.translucent,
-      gestures: <Type, GestureRecognizerFactory>{
-        HorizontalDragGestureRecognizer:
-            GestureRecognizerFactoryWithHandlers<
-              HorizontalDragGestureRecognizer
-            >(() => HorizontalDragGestureRecognizer(debugOwner: this), (
-              recognizer,
-            ) {
-              recognizer.gestureSettings = gestures;
-              // 指を置いた位置から数える。既定（start）だと、ドラッグと判定
-              // されるまでに動いた数十 px ぶんページが指から遅れてしまう。
-              recognizer.dragStartBehavior = DragStartBehavior.down;
-              recognizer.onStart = _start;
-              recognizer.onUpdate = _update;
-              recognizer.onEnd = _end;
-              recognizer.onCancel = _cancel;
-            }),
-      },
+      gestures: !enabled
+          ? const <Type, GestureRecognizerFactory>{}
+          : <Type, GestureRecognizerFactory>{
+              HorizontalDragGestureRecognizer:
+                  GestureRecognizerFactoryWithHandlers<
+                    HorizontalDragGestureRecognizer
+                  >(() => HorizontalDragGestureRecognizer(debugOwner: this), (
+                    recognizer,
+                  ) {
+                    recognizer.gestureSettings = gestures;
+                    // 指を置いた位置から数える。既定（start）だと、ドラッグと
+                    // 判定されるまでに動いた数十 px ぶんページが指から遅れる。
+                    recognizer.dragStartBehavior = DragStartBehavior.down;
+                    recognizer.onStart = _start;
+                    recognizer.onUpdate = _update;
+                    recognizer.onEnd = _end;
+                    recognizer.onCancel = _cancel;
+                  }),
+            },
       child: widget.child,
     );
   }

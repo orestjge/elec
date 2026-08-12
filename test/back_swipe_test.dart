@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:edge_core/edge_core.dart';
 import 'package:elec/src/net/read_history.dart';
+import 'package:elec/src/ui/back_swipe.dart';
 import 'package:elec/src/ui/thread_list_screen.dart';
 import 'package:elec/src/ui/thread_screen.dart';
 import 'package:elec/src/ui/thread_tile.dart';
@@ -325,4 +328,66 @@ void main() {
 
     expect(onThread(tester), isTrue);
   });
+
+  testWidgets('上にルートが被って退いても、下の中身は作り直されない', (tester) async {
+    // 画像ビューアは全画面の黒いルートを 1 枚被せる。その間 `isCurrent` が
+    // false になるので、[BackSwipe] は戻るスワイプを組み立てない側へ回る。
+    // そこで木の形まで変えると下がまるごと組み直され、一覧はスクロール位置を
+    // 失って開いたときの着地点から始まってしまう。
+    final navigator = GlobalKey<NavigatorState>();
+    var inits = 0;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        navigatorKey: navigator,
+        home: const Scaffold(body: SizedBox.shrink()),
+      ),
+    );
+    // スレをリンクから開いたときと同じルート。
+    unawaited(
+      navigator.currentState!.push(
+        SwipeBackPageRoute<void>(
+          pageBuilder: (context, animation, secondaryAnimation) =>
+              BackSwipe(child: _CountingChild(onInit: () => inits++)),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(inits, 1);
+
+    // ビューアの黒いルート相当を被せて、閉じる。
+    unawaited(
+      navigator.currentState!.push(
+        MaterialPageRoute<void>(
+          builder: (_) => const ColoredBox(color: Color(0xFF000000)),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    navigator.currentState!.pop();
+    await tester.pumpAndSettle();
+
+    expect(inits, 1, reason: '被せ／退けのたびに作り直されていない');
+  });
+}
+
+/// State が作り直された回数を数えるだけの中身。
+class _CountingChild extends StatefulWidget {
+  const _CountingChild({required this.onInit});
+
+  final VoidCallback onInit;
+
+  @override
+  State<_CountingChild> createState() => _CountingChildState();
+}
+
+class _CountingChildState extends State<_CountingChild> {
+  @override
+  void initState() {
+    super.initState();
+    widget.onInit();
+  }
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.expand();
 }
