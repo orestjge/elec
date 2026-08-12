@@ -8,6 +8,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
+import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
 
 import '../net/auth_launcher.dart';
 import 'embed_urls.dart';
@@ -22,6 +24,26 @@ bool get supportsEmbedWebView {
     TargetPlatform.android || TargetPlatform.iOS => true,
     _ => false,
   };
+}
+
+/// 映像を**この画面の中で**鳴らすための WebView の作り方。
+///
+/// 共通の API には無く、プラットフォームの実装に直接触るしかない設定が 2 つある。
+///
+/// - iOS: `allowsInlineMediaPlayback` を立てないと、映像は WebView の中ではなく
+///   OS のフルスクリーンプレーヤーで開く。小窓に落としても映像が付いてこない。
+/// - iOS: `mediaTypesRequiringUserAction` を空にして自動再生を許す（Android は
+///   `AndroidWebViewController` 側の設定なので、コントローラを作ってから）。
+///
+/// 実装が入れ替わっていた場合（テストのフェイクなど）は既定の引数で作る。
+PlatformWebViewControllerCreationParams _mediaPlaybackParams() {
+  if (WebViewPlatform.instance is WebKitWebViewPlatform) {
+    return WebKitWebViewControllerCreationParams(
+      allowsInlineMediaPlayback: true,
+      mediaTypesRequiringUserAction: <PlaybackMediaTypes>{},
+    );
+  }
+  return const PlatformWebViewControllerCreationParams();
 }
 
 /// サービス動画を再生する WebView と、その周りの操作。
@@ -64,7 +86,9 @@ class _EmbedPlayerViewState extends State<EmbedPlayerView> {
   @override
   void initState() {
     super.initState();
-    _controller = WebViewController()
+    final controller = WebViewController.fromPlatformCreationParams(
+      _mediaPlaybackParams(),
+    )
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(Colors.black)
       ..setNavigationDelegate(
@@ -80,11 +104,18 @@ class _EmbedPlayerViewState extends State<EmbedPlayerView> {
             if (mounted) setState(() => _failed = true);
           },
         ),
-      )
-      ..loadRequest(
-        widget.video.playerUrl,
-        headers: embedPlayerRequestHeaders(widget.video),
       );
+    // Android は**読み込む前に**許しておく（後から変えても、すでに動いている
+    // ページの自動再生には効かない）。
+    final platform = controller.platform;
+    if (platform is AndroidWebViewController) {
+      platform.setMediaPlaybackRequiresUserGesture(false);
+    }
+    controller.loadRequest(
+      widget.video.playerUrl,
+      headers: embedPlayerRequestHeaders(widget.video),
+    );
+    _controller = controller;
   }
 
   void _openExternally() {
@@ -110,10 +141,9 @@ class _EmbedPlayerViewState extends State<EmbedPlayerView> {
         autofocus: true,
         child: EmbedSwipeArea(
           // **小窓では見張らない**（窓の移動・全画面へ戻す・閉じるはホスト側が
-          // 持つ）。**ニコニコでも見張らない**——出しているのが watch ページ
-          // そのもので縦に流れるので、上下は WebView に譲らないと読めなくなる。
-          // YouTube は埋め込みプレーヤーだけで、縦に流れるものが無い。
-          enabled: !mini && widget.video.kind == EmbedKind.youtube,
+          // 持つ）。全画面ならサービスを問わず見張る——どちらも出しているのは
+          // 埋め込みプレーヤーで、縦に流れるものが無い。
+          enabled: !mini,
           onMinimize: widget.onMinimize,
           onClose: widget.onClose,
           child: Stack(

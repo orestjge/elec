@@ -47,11 +47,16 @@ void main() {
     ]);
   });
 
-  test('ニコニコはサムネイルを持たない', () {
+  test('ニコニコは埋め込みプレーヤーで開き、サムネイルは持たない', () {
     final v = embedVideosIn('https://www.nicovideo.jp/watch/sm9').single;
     expect(v.kind, EmbedKind.niconico);
     expect(v.id, 'sm9');
-    expect(v.playerUrl.toString(), 'https://www.nicovideo.jp/watch/sm9');
+    // 視聴ページ（スマホの UA では sp.nicovideo.jp へ飛ばされる）ではなく
+    // 埋め込みプレーヤーを開く。
+    expect(
+      v.playerUrl.toString(),
+      'https://embed.nicovideo.jp/watch/sm9?autoplay=1',
+    );
     expect(v.thumbnailUrl, isNull);
   });
 

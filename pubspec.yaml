@@ -72,6 +72,12 @@ dependencies:
   just_audio: ^0.10.6
   webview_flutter: ^4.13.1
 
+  # WebView の再生まわりだけプラットフォームの実装に直接触る。この画面の中で
+  # 映像を鳴らす設定（iOS のインライン再生、Android の自動再生）は共通 API に
+  # 無い。詳しくは `embed_player.dart` の `_mediaPlaybackParams`。
+  webview_flutter_android: ^4.12.0
+  webview_flutter_wkwebview: ^3.25.0
+
   # アップロード前の画像編集（トリミング・回転・モザイク・縮小・再符号化）。
   # 純 Dart なので Android/iOS/macOS で同じ結果になり、アイソレートでも動く。
   image: ^4.5.4
