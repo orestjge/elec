@@ -15,7 +15,9 @@ import 'remote_image.dart';
 ///    出ている以上、長い URL を並べても読む用が無いため。
 ///
 /// 差し替えで 1 度だけ高さが変わるが、先に枠だけ確保して待つより、出ないときに
-/// 空き地が残らない方を採った（出ないことの方が多い前提の機能なので）。
+/// 空き地が残らない方を採った（出ないことの方が多い前提の機能なので）。**1 度だけ**
+/// なのが要点で、既に取れている URL はカードから始める（[_LinkCardState] の
+/// `_readyPreview`）。
 ///
 /// 知っている板のスレ URL（[ThreadLinks.targetOf]）だけは OGP ではなく **dat から
 /// スレタイを取る**。read.cgi の OGP は板によって無く、dat落ちしたスレでは倉庫の
@@ -59,6 +61,16 @@ class _LinkCardState extends State<LinkCard> {
   Future<LinkPreview?>? _preview;
   Future<ThreadLinkInfo?>? _thread;
 
+  /// 既に取れている中身。あれば待たずに、最初のフレームからカードで出す。
+  ///
+  /// 長いスレをスクロールすると、画面外へ出たレスは State ごと捨てられて戻って
+  /// くるときに作り直される。取得は覚えてあるので通信は起きないが、`FutureBuilder`
+  /// は**完了済みの Future でも 1 フレームは「まだ無い」を返す**ので、それだけで
+  /// カードが URL に戻ってすぐ戻る——つまりちらつく。手元にあるものは Future を
+  /// 経由せずそのまま出す。
+  LinkPreview? _readyPreview;
+  ThreadLinkInfo? _readyThread;
+
   @override
   void initState() {
     super.initState();
@@ -74,24 +86,30 @@ class _LinkCardState extends State<LinkCard> {
   void _start() {
     _preview = null;
     _thread = null;
+    _readyPreview = null;
+    _readyThread = null;
     final target = ThreadLinks.targetOf(widget.url);
     if (target != null) {
-      _thread = ThreadLinks.resolve(target);
+      _readyThread = ThreadLinks.cached(target);
+      if (_readyThread == null) _thread = ThreadLinks.resolve(target);
       return;
     }
-    _preview = widget.enabled ? LinkPreviews.resolve(widget.url) : null;
+    if (!widget.enabled) return;
+    _readyPreview = LinkPreviews.cached(widget.url);
+    if (_readyPreview == null) _preview = LinkPreviews.resolve(widget.url);
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_readyThread case final info?) return _threadCard(info);
+    if (_readyPreview case final preview?) return _previewCard(preview);
     final thread = _thread;
     if (thread != null) {
       return FutureBuilder<ThreadLinkInfo?>(
         future: thread,
         builder: (context, snapshot) {
           final info = snapshot.data;
-          if (info == null) return _plainLink();
-          return _ThreadCard(info: info, onTap: () => widget.onTap(widget.url));
+          return info == null ? _plainLink() : _threadCard(info);
         },
       );
     }
@@ -101,15 +119,19 @@ class _LinkCardState extends State<LinkCard> {
       future: future,
       builder: (context, snapshot) {
         final preview = snapshot.data;
-        if (preview == null) return _plainLink();
-        return _Card(
-          preview: preview,
-          showImage: widget.showImage,
-          onTap: () => widget.onTap(widget.url),
-        );
+        return preview == null ? _plainLink() : _previewCard(preview);
       },
     );
   }
+
+  Widget _threadCard(ThreadLinkInfo info) =>
+      _ThreadCard(info: info, onTap: () => widget.onTap(widget.url));
+
+  Widget _previewCard(LinkPreview preview) => _Card(
+    preview: preview,
+    showImage: widget.showImage,
+    onTap: () => widget.onTap(widget.url),
+  );
 
   Widget _plainLink() => GestureDetector(
     onTap: () => widget.onTap(widget.url),

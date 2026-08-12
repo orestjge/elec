@@ -171,6 +171,26 @@ void main() {
     expect(find.text('https://example.com/a.html'), findsNothing);
   });
 
+  testWidgets('もう取れている URL は、作り直しても URL に戻らない', (tester) async {
+    final url = Uri.parse('https://example.com/a.html');
+    Widget card() =>
+        wrap(LinkCard(url: url, raw: url.toString(), onTap: (_) {}));
+
+    await tester.pumpWidget(card());
+    await tester.pumpAndSettle();
+    expect(find.text('記事の見出し'), findsOneWidget);
+
+    // 画面外へ出すと State ごと捨てられ、戻ってくると作り直される（長いスレを
+    // スクロールしていれば普通に起きる）。
+    await tester.pumpWidget(wrap(const SizedBox()));
+    await tester.pumpWidget(card());
+
+    // ここは作り直した 1 フレーム目。もう手元にある中身なので、URL に戻らず
+    // 最初からカードで出る。
+    expect(find.text('https://example.com/a.html'), findsNothing);
+    expect(find.text('記事の見出し'), findsOneWidget);
+  });
+
   testWidgets('カードにできなければ URL のまま', (tester) async {
     LinkPreviews.debugClient = _FakeClient(
       utf8.encode('<html><head></head><body>OGP なし</body></html>'),
@@ -302,6 +322,21 @@ void main() {
       );
       // スレタイは dat から取るので、リンク先の HTML は読まない。
       expect(client.requests, 0);
+    });
+
+    testWidgets('もう取れているスレは、作り直しても URL に戻らない', (tester) async {
+      Widget card() =>
+          wrap(LinkCard(url: Uri.parse(url), raw: url, onTap: (_) {}));
+
+      await tester.pumpWidget(card());
+      await tester.pumpAndSettle();
+      expect(find.text('貼られたスレのタイトル'), findsOneWidget);
+
+      await tester.pumpWidget(wrap(const SizedBox()));
+      await tester.pumpWidget(card());
+
+      expect(find.text(url), findsNothing);
+      expect(find.text('貼られたスレのタイトル'), findsOneWidget);
     });
 
     testWidgets('dat落ちなら札を添える', (tester) async {

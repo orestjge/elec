@@ -87,16 +87,34 @@ class LinkPreviews {
   /// 解決済み（失敗を含む）。Dart の Map は挿入順に並ぶので古いものから捨てられる。
   static final _cache = <String, Future<LinkPreview?>>{};
 
+  /// 取れた中身。[cached] が待たずに引くための控え。
+  static final _resolved = <String, LinkPreview>{};
+
   /// [url] のカード内容を返す。出せるものが無ければ null。
   static Future<LinkPreview?> resolve(Uri url) {
     final key = url.toString();
     final cached = _cache[key];
     if (cached != null) return cached;
-    final future = _gated(() => _resolve(url));
+    final future = _gated(() => _resolve(url)).then((preview) {
+      if (preview != null) _resolved[key] = preview;
+      return preview;
+    });
     _cache[key] = future;
-    if (_cache.length > _maxCached) _cache.remove(_cache.keys.first);
+    if (_cache.length > _maxCached) {
+      final oldest = _cache.keys.first;
+      _resolved.remove(oldest);
+      _cache.remove(oldest);
+    }
     return future;
   }
+
+  /// 既に取れているカードの中身。まだ取っていない・取れなかったときは null。
+  ///
+  /// 待たずに引けるので、カードを作り直すとき（スレをスクロールして画面外へ出た
+  /// レスが戻ってきたときなど）に **URL からの差し替えを踏み直さない**ために使う。
+  /// 完了済みの Future でも `FutureBuilder` は 1 フレーム「まだ無い」を返すので、
+  /// それだけで URL が一瞬ちらついて見える。
+  static LinkPreview? cached(Uri url) => _resolved[url.toString()];
 
   /// テスト用に通信を差し替える。null に戻すと素のクライアントへ戻る。
   @visibleForTesting
@@ -107,7 +125,10 @@ class LinkPreviews {
 
   /// テスト間で覚えた結果を捨てる。
   @visibleForTesting
-  static void clearCache() => _cache.clear();
+  static void clearCache() {
+    _cache.clear();
+    _resolved.clear();
+  }
 
   static Future<LinkPreview?> _resolve(Uri url) async {
     try {
