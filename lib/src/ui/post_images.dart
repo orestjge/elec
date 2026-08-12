@@ -1118,6 +1118,12 @@ class _VideoThumb extends StatelessWidget {
     // Android/iOS/macOS では先頭フレームをサムネイル生成して敷く。生成前・失敗・
     // 非対応プラットフォームでは無地の再生カードにフォールバックする。
     if (!VideoThumbnails.isSupported) return _card(context, frame: null);
+    // **もう作ってあるフレームは待たずに敷く。** `FutureBuilder` は完了済みの
+    // Future でも 1 フレーム「まだ無い」を返すので、行を作り直すたびに無地へ戻る。
+    // ここは縦横比で箱を組んでいるぶん、絵が消えるだけでなく**箱の形まで戻って
+    // 下のレスが動く**ので、ちらつきが大きい。
+    final ready = VideoThumbnails.cached(url);
+    if (ready != null) return _card(context, frame: ready);
     return FutureBuilder<Uint8List?>(
       future: VideoThumbnails.resolve(url),
       builder: (context, snapshot) => _card(context, frame: snapshot.data),
@@ -1241,6 +1247,9 @@ class _EmbedThumb extends StatelessWidget {
       return _card(context, thumbnail: Uri.tryParse(direct));
     }
     if (video.kind == EmbedKind.niconico) {
+      // もう取れているものは待たない（[_VideoThumb] と同じ理由）。
+      final ready = NicoThumbnails.cached(video.id);
+      if (ready != null) return _card(context, thumbnail: ready);
       return FutureBuilder<Uri?>(
         future: NicoThumbnails.resolve(video.id),
         builder: (context, snapshot) =>
@@ -1975,6 +1984,9 @@ class _ViewerVideoPoster extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (!VideoThumbnails.isSupported) return const _VideoPosterFrame();
+    // もう作ってあるフレームは待たない（[_VideoThumb] と同じ理由）。
+    final ready = VideoThumbnails.cached(url);
+    if (ready != null) return _VideoPosterFrame(frame: ready);
     return FutureBuilder<Uint8List?>(
       future: VideoThumbnails.resolve(url),
       builder: (context, snapshot) => _VideoPosterFrame(frame: snapshot.data),

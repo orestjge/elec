@@ -67,4 +67,29 @@ void main() {
     await NicoThumbnails.resolve('sm9');
     expect(fetcher.requested.length, 1);
   });
+
+  test('取れた URL は cached で待たずに引ける', () async {
+    NicoThumbnails.fetcher = _FakeFetcher(
+      _xml('<thumbnail_url>https://x/y</thumbnail_url>'),
+    );
+
+    expect(NicoThumbnails.cached('sm9'), isNull);
+    await NicoThumbnails.resolve('sm9');
+    // 行を作り直しても無地の再生カードに戻らないのはこれ。
+    expect(NicoThumbnails.cached('sm9'), Uri.parse('https://x/y'));
+  });
+
+  test('失敗も覚えて、叩き直さない', () async {
+    // resolve は build から呼ばれる＝スクロール中は毎フレーム通る。
+    final fetcher = _FakeFetcher(
+      _xml('<nicovideo_thumb_response status="fail"/>'),
+    );
+    NicoThumbnails.fetcher = fetcher;
+
+    await NicoThumbnails.resolve('sm1');
+    await NicoThumbnails.resolve('sm1');
+    await NicoThumbnails.resolve('sm1');
+    expect(fetcher.requested.length, 1);
+    expect(NicoThumbnails.cached('sm1'), isNull);
+  });
 }
