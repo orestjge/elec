@@ -1015,6 +1015,58 @@ void main() {
     expect(card.width / card.height, moreOrLessEquals(16 / 9, epsilon: 0.01));
   });
 
+  testWidgets('作り直しても、生成済みのサムネイルは無地に戻らない', (tester) async {
+    addTearDown(() {
+      VideoThumbnails.debugTargetPlatform = null;
+      VideoThumbnails.generator = originalVideoGenerator;
+      VideoThumbnails.clearCache();
+    });
+    VideoThumbnails.debugTargetPlatform = TargetPlatform.android;
+    VideoThumbnails.clearCache();
+    var calls = 0;
+    VideoThumbnails.generator = (url) async {
+      calls++;
+      return _frame(320, 180);
+    };
+
+    Widget app() => MaterialApp(
+      builder: _host,
+      home: Scaffold(
+        body: PostImages(
+          urls: const [],
+          videoUrls: [Uri.parse('https://example.com/movie.mp4')],
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(app());
+    await tester.pumpAndSettle();
+    expect(find.byType(Image), findsOneWidget);
+
+    // 画面外へ出ると行は State ごと捨てられ、戻ってくると作り直される（長いスレを
+    // スクロールしていれば普通に起きる）。
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: _host,
+        home: const Scaffold(body: SizedBox()),
+      ),
+    );
+    await tester.pumpWidget(app());
+
+    // ここは作り直した 1 フレーム目。絵が消えないだけでなく、**箱の形も映像の
+    // まま**（無地に戻ると正方形になり、下のレスまで動いてしまう）。
+    expect(find.byType(Image), findsOneWidget);
+    final rebuilt = tester.getRect(
+      find.ancestor(of: find.byType(Image), matching: find.byType(InkWell)),
+    );
+    expect(
+      rebuilt.width / rebuilt.height,
+      moreOrLessEquals(16 / 9, epsilon: 0.01),
+    );
+    // 作り直しで生成し直してもいない。
+    expect(calls, 1);
+  });
+
   testWidgets('フレームを取れない間は正方形で場所を取る', (tester) async {
     addTearDown(() {
       VideoThumbnails.debugTargetPlatform = null;

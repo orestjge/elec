@@ -9,7 +9,8 @@
 ///
 /// それ以外のプラットフォームでは常に null を返し、呼び出し側は再生カードに
 /// フォールバックする。結果はプロセス内でキャッシュし、スクロールによる重複生成を
-/// 避ける。
+/// 避ける。取れたフレームは待たずに引ける形でも覚えるので（[VideoThumbnails.cached]）、
+/// 行を作り直しても無地のカードには戻らない。
 library;
 
 import 'package:flutter/foundation.dart';
@@ -38,6 +39,9 @@ class VideoThumbnails {
 
   static final Map<String, Future<Uint8List?>> _cache = {};
 
+  /// 生成できたフレーム。[cached] が待たずに引くための控え。
+  static final Map<String, Uint8List> _resolved = {};
+
   /// このプラットフォームでサムネイル生成が可能か（Android/iOS/macOS）。
   static bool get isSupported {
     return switch (debugTargetPlatform ?? defaultTargetPlatform) {
@@ -49,23 +53,38 @@ class VideoThumbnails {
   }
 
   /// [url] の先頭フレームを JPEG バイト列で返す。生成できなければ null。
-  /// 成功結果はキャッシュし、失敗（null）は次回再試行できるよう捨てる。
+  ///
+  /// **結果はキャッシュする。失敗も覚える。** 生成は OS のデコーダを回す重い処理
+  /// なので、取れなかった動画を再描画のたびに叩き直さない（`resolve` は build から
+  /// 呼ばれる＝スクロール中は毎フレーム通る）。覚え直したければアプリを開き直す。
+  /// リンクプレビュー（`link_preview.dart`）と同じ考え方。
   static Future<Uint8List?> resolve(Uri url) {
     if (!isSupported) return Future.value(null);
     final key = url.toString();
     final cached = _cache[key];
     if (cached != null) return cached;
-    final future = generator(url);
-    _cache[key] = future;
-    future.then((bytes) {
-      if (bytes == null) _cache.remove(key);
+    final future = generator(url).then((bytes) {
+      if (bytes != null) _resolved[key] = bytes;
+      return bytes;
     });
+    _cache[key] = future;
     return future;
   }
 
+  /// もう生成できているフレーム。まだ生成していない・できなかったときは null。
+  ///
+  /// 待たずに引けるので、サムネイルを作り直すとき（スクロールで画面外へ出た行が
+  /// 戻ってきたときなど）に**無地のカードから出し直さない**ために使う。完了済みの
+  /// Future でも `FutureBuilder` は 1 フレーム「まだ無い」を返すので、それだけで
+  /// 絵が消えるうえ、フレームの縦横比で組んでいる**箱の形まで戻って下の行が動く**。
+  static Uint8List? cached(Uri url) => _resolved[url.toString()];
+
   /// テスト間でキャッシュを初期化する。
   @visibleForTesting
-  static void clearCache() => _cache.clear();
+  static void clearCache() {
+    _cache.clear();
+    _resolved.clear();
+  }
 
   static Future<Uint8List?> _generate(Uri url) async {
     final platform = debugTargetPlatform ?? defaultTargetPlatform;

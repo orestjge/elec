@@ -26,22 +26,37 @@ class NicoThumbnails {
 
   static final Map<String, Future<Uri?>> _cache = {};
 
+  /// 取れたサムネイル URL。[cached] が待たずに引くための控え。
+  static final Map<String, Uri> _resolved = {};
+
   /// 動画 ID [id]（`sm9` など）のサムネイル URL を返す。取得できなければ null。
-  /// 成功結果はキャッシュし、失敗（null）は次回再試行できるよう捨てる。
+  ///
+  /// **結果はキャッシュする。失敗も覚える。** `resolve` は build から呼ばれる＝
+  /// スクロール中は毎フレーム通るので、取れなかった動画を叩き直し続けない。
+  /// 覚え直したければアプリを開き直す（`link_preview.dart` と同じ考え方）。
   static Future<Uri?> resolve(String id) {
     final cached = _cache[id];
     if (cached != null) return cached;
-    final future = _fetch(id);
-    _cache[id] = future;
-    future.then((url) {
-      if (url == null) _cache.remove(id);
+    final future = _fetch(id).then((url) {
+      if (url != null) _resolved[id] = url;
+      return url;
     });
+    _cache[id] = future;
     return future;
   }
 
+  /// もう取れているサムネイル URL。まだ取っていない・取れなかったときは null。
+  ///
+  /// 待たずに引けるので、行を作り直したときに無地の再生カードから出し直さない
+  /// ために使う（`VideoThumbnails.cached` と同じ用途）。
+  static Uri? cached(String id) => _resolved[id];
+
   /// テスト間でキャッシュを初期化する。
   @visibleForTesting
-  static void clearCache() => _cache.clear();
+  static void clearCache() {
+    _cache.clear();
+    _resolved.clear();
+  }
 
   static Future<Uri?> _fetch(String id) async {
     try {
