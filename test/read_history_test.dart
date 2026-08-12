@@ -4,6 +4,21 @@ import 'package:edge_core/edge_core.dart';
 import 'package:elec/src/net/read_history.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+/// 書き込みの回数を数えるだけの保存先。
+class _CountingStorage implements ReadHistoryStorage {
+  int saves = 0;
+  ReadHistorySnapshot _snapshot = const ReadHistorySnapshot();
+
+  @override
+  Future<ReadHistorySnapshot> load() async => _snapshot;
+
+  @override
+  Future<void> save(ReadHistorySnapshot snapshot) async {
+    saves += 1;
+    _snapshot = snapshot;
+  }
+}
+
 void main() {
   group('ReadHistory', () {
     test('markRead で既読になり lastSeen を返す', () async {
@@ -21,6 +36,38 @@ void main() {
       expect(h.lastSeen('1'), 100);
       await h.markRead('1', 120);
       expect(h.lastSeen('1'), 120);
+    });
+
+    test('続けて既読位置が動いても、書き込みは増やさない', () async {
+      final storage = _CountingStorage();
+      final h = ReadHistory(storage);
+      // スレを送っている 1 秒ぶん。以前はこれが 60 回の書き込みになっていた。
+      for (var i = 1; i <= 60; i++) {
+        await h.markRead('1', i);
+      }
+      expect(storage.saves, 1); // 最初の 1 回だけ書き、あとは間隔待ちで見送る
+      expect(h.lastSeen('1'), 60); // 覚えている中身はその場で最新
+
+      // 見送ったぶんは flush で出す（画面を離れるときに呼ばれる）。
+      await h.flush();
+      expect(storage.saves, 2);
+      expect((await storage.load()).seen['1'], 60);
+
+      // 書き残しが無ければ、flush しても書かない。
+      await h.flush();
+      expect(storage.saves, 2);
+    });
+
+    test('見送った既読位置は、他の記録の保存に相乗りして出る', () async {
+      final storage = _CountingStorage();
+      final h = ReadHistory(storage);
+      await h.markRead('1', 10);
+      await h.markRead('1', 20); // 間隔が明けていないので見送られる
+
+      // 一度きりの記録はすぐ書く。保存は控えを丸ごと書き出すので、見送られていた
+      // 既読位置もここで一緒に出る（＝取り残されにくい）。
+      await h.setFavorite('2', true);
+      expect((await storage.load()).seen['1'], 20);
     });
 
     test('markPosition は読んでいた場所を覚え、下がりもする', () async {
@@ -233,6 +280,9 @@ void main() {
       final a = ReadHistory(FileReadHistoryStorage(directory: dir));
       await a.markRead('123', 50);
       await a.markRead('456', 10);
+      // 既読位置の書き出しは間隔を空けてまとめられる（スクロール中に毎フレーム
+      // 書かないため）。続けて記録したぶんは flush で出させる。
+      await a.flush();
 
       final b = ReadHistory(FileReadHistoryStorage(directory: dir));
       await b.load();
