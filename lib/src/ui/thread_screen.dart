@@ -190,6 +190,10 @@ class _ThreadScreenState extends State<ThreadScreen>
   /// 初回表示で合わせる位置の決め方（前回位置 / 末尾 / 先頭）。
   _Landing _landing = _Landing.top;
 
+  /// 前回このスレを離れたとき、画面のいちばん上に見えていたレス番号。
+  /// [_landing] より優先して着地に使う（[_landingIndex]）。
+  int? _landingRes;
+
   /// 初回表示で合わせるインデックス。行を組んだ時点で一度だけ決める。
   int _initialIndex = 0;
   bool _landingResolved = false;
@@ -353,6 +357,7 @@ class _ThreadScreenState extends State<ThreadScreen>
   void _leave() {
     _timer?.cancel();
     _persistReadPosition();
+    _persistViewPosition();
     // 見えていない画面が入力を持ったままだとキーボードが残るので手放す。
     if (_composerFocus.hasFocus) _composerFocus.unfocus();
     if (_searchFocus.hasFocus) _searchFocus.unfocus();
@@ -380,6 +385,7 @@ class _ThreadScreenState extends State<ThreadScreen>
     if (_furthestRead > 0) {
       unawaited(_history.markRead(widget.threadKey, _furthestRead));
     }
+    _persistViewPosition();
     _ng.removeListener(_onNgChanged);
     _view.removeListener(_onViewSettingsChanged);
     _positions.itemPositions.removeListener(_onPositions);
@@ -406,6 +412,7 @@ class _ThreadScreenState extends State<ThreadScreen>
       case AppLifecycleState.hidden:
         _timer?.cancel();
         _persistReadPosition();
+        _persistViewPosition();
       case AppLifecycleState.inactive:
       case AppLifecycleState.detached:
         break;
@@ -490,6 +497,7 @@ class _ThreadScreenState extends State<ThreadScreen>
         _openCount = entry.openCount;
         _furthestRead = lastSeen ?? 0;
         _landing = entry.landing;
+        _landingRes = _history.lastPosition(widget.threadKey);
         _loading = false;
         _error = null;
       });
@@ -541,9 +549,22 @@ class _ThreadScreenState extends State<ThreadScreen>
 
   /// 組み上がった行から初回の着地インデックスを出す。新着ラインへ合わせる場合は
   /// 少し手前に寄せて、直前の流れを思い出せるようにする。
+  ///
+  /// **最後に見ていたレスを覚えているなら、そちらを基準にする**（[_landingRes]）。
+  /// 新着ラインの位置は「どこまで読んだか」（[ReadHistory.lastSeen]）から引いて
+  /// いて、これは一覧の未読件数のための数字でもあるので、読んでいた場所とは
+  /// 必ずしも一致しない——ツリー表示では読む順と番号順が違うし、一気に飛ばせば
+  /// 通り過ぎたぶんまで読んだ数に入る。**線は線として引いたまま、戻る先だけを
+  /// 実際に見ていた場所にする。** 寄せ方（[overlap] 行ぶん手前）は同じなので、
+  /// 番号順表示では今までと同じところに着く。
   int _landingIndex(List<Object> items) {
     const overlap = 3;
     if (items.isEmpty) return 0;
+    final saved = _landingRes;
+    if (saved != null) {
+      final index = _indexForResNumber(saved);
+      if (index != null) return index - overlap < 0 ? 0 : index - overlap;
+    }
     switch (_landing) {
       case _Landing.top:
         return 0;
@@ -727,6 +748,53 @@ class _ThreadScreenState extends State<ThreadScreen>
     final count = resCount ?? _furthestRead;
     if (count <= 0) return;
     unawaited(_history.markRead(widget.threadKey, count));
+  }
+
+  /// いま読んでいた場所（画面のいちばん上のレス）を控える。次に開いたときの
+  /// 着地に使う（[_landingIndex]）。
+  ///
+  /// **どこまで読んだか（[_persistReadPosition]）とは別に持つ。** あちらは一覧の
+  /// 未読件数のもとで、下がらないうえ、ツリー表示では読む順と番号順が違う・
+  /// 一気に飛ばせば通り過ぎたぶんも数に入る、と「実際に見ていた場所」からは
+  /// ずれていく。戻る先はこちらで覚える。
+  void _persistViewPosition() {
+    final number = _resumeResNumber();
+    if (number == null) return;
+    unawaited(_history.markPosition(widget.threadKey, number));
+  }
+
+  /// 次に開いたときの続きにするレスの番号。行が無ければ null。
+  ///
+  /// **上端ではなく下端を採る。** 読み進めた人が最後に目を通したのは画面の下端で、
+  /// 次はその少し手前から続きに入りたい（新着ラインの手前へ寄せるのと同じ考え）。
+  /// 上端を覚えると、戻るたびに 1 画面ぶん読み直しになる。
+  ///
+  /// **ただし既読ぶん（[_furthestRead] 以下）から選ぶ。** ツリー表示の画面には
+  /// ずっと下の番号のレスが返信として混ざる。それを目印にすると、開き直して
+  /// 新着ラインが引かれたときに**そのレスだけ線の下へ移る**ので、間の未読を
+  /// 飛び越えた先へ着地してしまう。線より上に残るレスなら、どう組み替わっても
+  /// 読んだところの続きに着く。
+  int? _resumeResNumber() {
+    if (_items.isEmpty) return null;
+    final visible =
+        [
+          for (final p in _positions.itemPositions.value)
+            if (p.itemTrailingEdge > 0 &&
+                p.itemLeadingEdge < 1 &&
+                p.index >= 0 &&
+                p.index < _items.length)
+              p.index,
+        ]..sort();
+    int? resume;
+    int? fallback; // 既読ぶんが 1 つも見えていないとき用
+    for (final i in visible) {
+      final item = _items[i];
+      // 引用行（返信先の再掲）と新着ラインは目印にならない。
+      if (item is! ThreadTreeRow || item.quote) continue;
+      fallback = item.res.number;
+      if (item.res.number <= _furthestRead) resume = item.res.number;
+    }
+    return resume ?? fallback;
   }
 
   /// 行が組み上がってから末尾へ運ぶ。返る Future はスクロールが終わったところ
