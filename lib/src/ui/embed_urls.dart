@@ -28,7 +28,8 @@ class EmbedVideo {
   /// タップ時に外部で開く正規化済み URL。
   final Uri url;
 
-  /// アプリ内 WebView で開く URL。YouTube は埋め込みプレーヤー URL。
+  /// アプリ内 WebView で開く URL。どちらのサービスも**埋め込みプレーヤー**の
+  /// URL で、視聴ページそのものではない。
   final Uri playerUrl;
 
   /// サムネイル画像 URL。取得手段が無い場合（ニコニコ）は null。
@@ -122,6 +123,17 @@ EmbedVideo? _niconico(String rawId) {
     kind: EmbedKind.niconico,
     id: id,
     url: Uri.parse('https://www.nicovideo.jp/watch/$id'),
-    playerUrl: Uri.parse('https://www.nicovideo.jp/watch/$id'),
+    // **視聴ページではなく埋め込みプレーヤーを開く。** `www.nicovideo.jp/watch/`
+    // はスマホの UA だと `sp.nicovideo.jp` へ 302 で飛ばされ、そこは「アプリで
+    // 視聴」と会員登録の導線が付いた視聴ページなので、WebView に出しても素直に
+    // 再生できない。`embed.nicovideo.jp/watch/` はニコニコ自身が視聴ページの
+    // `og:video` に載せている埋め込み用のプレーヤーで、スマホの UA で開くと
+    // プレーヤー側も小さい画面向けの姿（`isSp`）になる。
+    //
+    // `?autoplay=1` も `og:video` と同じ形。ただし**効くとは限らない**——この
+    // 引数はプレーヤーがサーバから受け取る初期値には現れず、実際に鳴るかどうかは
+    // 端末側の自動再生の許し方しだい（`embed_player.dart` で WebView の側からも
+    // 許してある）。
+    playerUrl: Uri.parse('https://embed.nicovideo.jp/watch/$id?autoplay=1'),
   );
 }
