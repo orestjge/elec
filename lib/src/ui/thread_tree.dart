@@ -42,6 +42,35 @@ class ThreadTreeRow {
   final bool quote;
 }
 
+/// [index] の行の上に引く**レスの区切り線の深さ**。引かないなら null。
+///
+/// [items] は一覧に並べる行（[ThreadTreeRow] か、新着ラインのような目印）。
+/// 返り値は [ThreadTreeTier] に渡す深さで、そのぶん線が内寄せされる。
+///
+/// 引くのは「新しいレスが始まるところ」だけ。1 行のレスが続くと、レスの上下の
+/// 余白（6dp ずつ）が本文の行間と近く、どこまでが 1 人の発言か読み取りにくい
+/// ——そこに線を 1 本入れて切れ目をはっきりさせる。
+///
+/// 返すのは**線の下に来る行**の深さ。線はその行の上端の縁として読まれるので、
+/// 行の中身の左端から始めると「このレスはここから」が形で分かる。上下の浅い
+/// ほうに合わせると、線だけが下のレスからはみ出して宙に浮く。
+///
+/// 引かないのは次の 3 つ:
+/// - **先頭**（[index] が 0）。上に何も無い。
+/// - **引用行（返信先の再掲）とその本体の間**。引用行はそのレスの手前に付く
+///   前置きなので、切れ目は引用行の**手前**にある。引用行が複数続く場合も同じ。
+/// - **新着ラインの直後**。ラインそのものが切れ目を表している。
+int? resDividerDepth(List<Object> items, int index) {
+  if (index <= 0) return null;
+  final row = items[index];
+  if (row is! ThreadTreeRow) return null;
+  final previous = items[index - 1];
+  if (previous is! ThreadTreeRow) return null;
+  // 同じ深さの引用行が直前にあるなら、まだ同じ固まりの中にいる。
+  if (previous.quote && previous.depth == row.depth) return null;
+  return row.depth;
+}
+
 /// 一覧の行。境界（新着ライン）を挟んで [settled] と [arrivals] に分かれる。
 class ThreadTreeLayout {
   const ThreadTreeLayout({required this.settled, required this.arrivals});
@@ -267,23 +296,37 @@ ThreadTreeLayout layOutThreadTree(List<Res> res, {required int settledCount}) {
 
 /// ツリーの字下げ。深さ 0 では何も足さない（番号順表示と同じ見た目）。
 ///
-/// **レスの左アクセント帯（自分宛・検索の現在位置）はこの帯に移す**（[accent]）。
-/// レス側（[PostItem]）にも描かせると、字下げ帯の数 px 右にもう 1 本縦線が走って
-/// 「揃っていない 2 本」に見える。色を持つのが 1 本だけなら、深さの筋と目印が
-/// 同じ列に乗る。深さ 0 では字下げ帯そのものが無いので、レス側に任せる
-/// （番号順表示と同じ見た目＝左端に帯）。
+/// 字下げは余白で表す。深さの筋としての縦帯は [band] を立てたときだけ引く。
+///
+/// **柱の組み方（`ResLayout.gutter`）では引かない。** 深さごとに位置のずれた
+/// 縦線が何本も並び、レス間の横線と交わって画面が格子になっていた。あちらは
+/// ID の絵が各レスの左に柱として立っているので、その位置がそのまま深さの目盛りに
+/// なり、線が無くても段は読める。
+///
+/// **ヘッダにまとめる組み方（`ResLayout.header`）では引く。** ID の絵は小さく
+/// なってヘッダの行に入っており、左に柱が立っていない。レス間の横線も入れて
+/// いないので、帯を外すと縦の手掛かりが何も残らない。
 class ThreadTreeTier extends StatelessWidget {
   const ThreadTreeTier({
     super.key,
     required this.depth,
     required this.child,
+    this.band = false,
     this.accent,
   });
 
   final int depth;
   final Widget child;
 
+  /// 深さの筋として縦帯を引くか。
+  final bool band;
+
   /// 字下げ帯に移してきた目印の色。無ければ深さの筋として淡く描く。
+  ///
+  /// **[band] を立てた行では、レスの左アクセント帯（自分宛・検索の現在位置）を
+  /// この帯に移す。** レス側（[PostItem]）にも描かせると、帯の数 px 右にもう
+  /// 1 本縦線が走って「揃っていない 2 本」に見える。帯を引かない組み方では
+  /// 移す先が無いので、レス側がそのまま描く。
   final Color? accent;
 
   /// 字下げを増やす上限。これ以上深くなっても下げない。深いツリーで本文幅が
@@ -291,22 +334,35 @@ class ThreadTreeTier extends StatelessWidget {
   static const _maxIndentLevels = 6;
   static const _indentStep = 14.0;
 
-  /// 帯と本文の間。**帯の太さと足して一定**にしてあり、目印が付いた行でも本文の
-  /// 位置は動かない（[PostItem] が帯の分だけ左パディングを詰めるのと同じ理屈）。
+  /// 1 段あたりの字下げに足す分（帯の太さ＋帯と中身の間）。
   ///
-  /// ここを広く取る必要はない。この先には [PostItem] 自身の左パディング（16）が
-  /// 続くので、帯から中身までは足し算で空く。深さ 0 の行が画面端から 16 で始まる
-  /// のに対し、字下げした行のほうが余白が広い、という逆転を作らない値にする。
+  /// **帯の太さと足して一定**にしてあるので、目印が付いて帯が太くなった行でも
+  /// 中身の位置は動かない。帯を引かない組み方でも同じだけ空けて、[band] の
+  /// 有無で字下げ量が変わらないようにする。
   static const _barAndGap = 4.0;
+
+  /// 深さ [depth] の行の中身が、外枠の左端から何 dp のところで始まるか。
+  ///
+  /// レス間の区切り線をその行の中身に合わせて引くために要る（[resDividerDepth]）。
+  static double indentOf(int depth) {
+    if (depth <= 0) return 0;
+    final levels = depth < _maxIndentLevels ? depth : _maxIndentLevels;
+    return levels * _indentStep + _barAndGap;
+  }
 
   @override
   Widget build(BuildContext context) {
     if (depth <= 0) return child;
+    if (!band) {
+      return Padding(
+        padding: EdgeInsets.only(left: indentOf(depth)),
+        child: child,
+      );
+    }
     final scheme = Theme.of(context).colorScheme;
-    final levels = depth < _maxIndentLevels ? depth : _maxIndentLevels;
     final width = accent != null ? 3.0 : 2.0;
     return Padding(
-      padding: EdgeInsets.only(left: levels * _indentStep),
+      padding: EdgeInsets.only(left: indentOf(depth) - _barAndGap),
       child: Container(
         decoration: BoxDecoration(
           border: Border(

@@ -776,15 +776,14 @@ class _ThreadScreenState extends State<ThreadScreen>
   /// 読んだところの続きに着く。
   int? _resumeResNumber() {
     if (_items.isEmpty) return null;
-    final visible =
-        [
-          for (final p in _positions.itemPositions.value)
-            if (p.itemTrailingEdge > 0 &&
-                p.itemLeadingEdge < 1 &&
-                p.index >= 0 &&
-                p.index < _items.length)
-              p.index,
-        ]..sort();
+    final visible = [
+      for (final p in _positions.itemPositions.value)
+        if (p.itemTrailingEdge > 0 &&
+            p.itemLeadingEdge < 1 &&
+            p.index >= 0 &&
+            p.index < _items.length)
+          p.index,
+    ]..sort();
     int? resume;
     int? fallback; // 既読ぶんが 1 つも見えていないとき用
     for (final i in visible) {
@@ -2661,6 +2660,107 @@ class _ThreadScreenState extends State<ThreadScreen>
         : searchMatches[math.min(_currentSearchIndex, searchMatches.length - 1)]
               .number;
 
+    // 一覧の 1 行。区切り線は外側（[itemBuilder]）で足す。
+    Widget buildRow(BuildContext context, int i) {
+      final row = items[i];
+      if (row is! ThreadTreeRow) return const _NewArrivalLine();
+      final item = row.res;
+      final ngHidden = _isNgHidden(item);
+      // 深さの筋（字下げ帯）はヘッダにまとめる組み方だけ。柱の組み方は ID の絵が
+      // 各レスの左に立っていて、そちらが深さの目盛りになる（[ThreadTreeTier]）。
+      final band = _view.resLayout == ResLayout.header;
+      // 返信先の再掲。NG のレスはここでも出さない（行だけ畳む）。
+      if (row.quote) {
+        if (ngHidden) return const SizedBox.shrink();
+        // 直前も引用行なら詰めて重ねる（複数に返しているレス）。
+        // NG で畳んだ行の下では詰めない——上に何も無いので、間が
+        // 空くのではなく前のレスに貼り付いてしまう。
+        final previous = i > 0 ? items[i - 1] : null;
+        final joins =
+            previous is ThreadTreeRow &&
+            previous.quote &&
+            !_isNgHidden(previous.res);
+        // 引用行もそのレスと同じ深さに置く（ツリーの途中に挟まる
+        // 「親以外の返信先」が、どのレスに付いているかを揃える）。
+        return ThreadTreeTier(
+          depth: row.depth,
+          band: band,
+          child: QuotedResRow(
+            res: item,
+            joinsPrevious: joins,
+            onTap: () =>
+                _showConversation(item.number, focusNumber: item.number),
+            blurImages: guroMasked.contains(item.number),
+          ),
+        );
+      }
+      if (ngHidden) {
+        return ThreadTreeTier(
+          depth: row.depth,
+          band: band,
+          child: _NgPlaceholder(
+            number: item.number,
+            onReveal: () => setState(() => _revealedNg.add(item.number)),
+            onLongPress: () => _showResActions(item),
+          ),
+        );
+      }
+      // 帯を引く組み方では、目印（自分宛・検索の現在位置）を帯の色に移す。
+      // 深さ 0 には帯が無いので、そこだけはレス側に描かせる。
+      final isMatch = item.number == currentMatchNumber;
+      final isToOwn =
+          _isReplyToOwnPost(item) &&
+          !_history.isOwnPost(widget.threadKey, item.number);
+      final scheme = Theme.of(context).colorScheme;
+      final accent = !band || row.depth <= 0
+          ? null
+          : isMatch
+          ? scheme.tertiary
+          : isToOwn
+          ? scheme.primary
+          : null;
+      // 字下げは行の持ち物なので、スワイプはツリーの外側から掛ける。
+      // PostItem だけを包むと本文が字下げの下から抜け出す。
+      return SwipeToReply(
+        onReply: () => _reply(item.number),
+        child: ThreadTreeTier(
+          depth: row.depth,
+          band: band,
+          accent: accent,
+          child: PostItem(
+            res: item,
+            nested: row.depth > 0,
+            idCount: idCounts[item.id] ?? 1,
+            idOrdinal: idOrdinals[item.number] ?? 1,
+            onTapId: _showIdPosts,
+            onTapWacchoi: _showWacchoiPosts,
+            onTapRes: _showResPopup,
+            onTapResRange: _showConversationRange,
+            onTapUrl: _openUrl,
+            replyCount: replies[item.number] ?? 0,
+            onTapReplies: _showReplies,
+            onLongPress: () => _showResActions(item),
+            isOwn: _history.isOwnPost(widget.threadKey, item.number),
+            isThreadOwner: _isThreadOwnerPost(item, threadOwnerId),
+            isReplyToOwn: _isReplyToOwnPost(item),
+            // 帯へ色を移した行だけ、レス側の帯は消す（縦線を 2 本にしない）。
+            showAccentBar: accent == null,
+            blurImages: guroMasked.contains(item.number),
+            linkPreviews: _view.linkPreviews,
+            resLayout: _view.resLayout,
+            highlightQuery: searchQuery,
+            isCurrentMatch: item.number == currentMatchNumber,
+            defaultName: widget.defaultName,
+            // 長いレスを畳むのは一覧だけ。会話シートや同一 ID の
+            // 一覧は、そのレスを見たくて開いた場所なので畳まない。
+            collapseLongBody: true,
+            bodyExpanded: _expandedPosts.contains(item.number),
+            onExpandBody: () => setState(() => _expandedPosts.add(item.number)),
+          ),
+        ),
+      );
+    }
+
     return Stack(
       children: [
         RefreshIndicator(
@@ -2678,102 +2778,34 @@ class _ThreadScreenState extends State<ThreadScreen>
                 initialScrollIndex: _initialIndex,
                 itemCount: items.length,
                 itemBuilder: (context, i) {
-                  final row = items[i];
-                  if (row is! ThreadTreeRow) return const _NewArrivalLine();
-                  final item = row.res;
-                  final ngHidden = _isNgHidden(item);
-                  // 返信先の再掲。NG のレスはここでも出さない（行だけ畳む）。
-                  if (row.quote) {
-                    if (ngHidden) return const SizedBox.shrink();
-                    // 直前も引用行なら詰めて重ねる（複数に返しているレス）。
-                    // NG で畳んだ行の下では詰めない——上に何も無いので、間が
-                    // 空くのではなく前のレスに貼り付いてしまう。
-                    final previous = i > 0 ? items[i - 1] : null;
-                    final joins =
-                        previous is ThreadTreeRow &&
-                        previous.quote &&
-                        !_isNgHidden(previous.res);
-                    // 引用行もそのレスと同じ深さに置く（ツリーの途中に挟まる
-                    // 「親以外の返信先」が、どのレスに付いているかを揃える）。
-                    return ThreadTreeTier(
-                      depth: row.depth,
-                      child: QuotedResRow(
-                        res: item,
-                        joinsPrevious: joins,
-                        onTap: () => _showConversation(
-                          item.number,
-                          focusNumber: item.number,
-                        ),
-                        blurImages: guroMasked.contains(item.number),
-                      ),
-                    );
-                  }
-                  // レス間は線を引かず、スレ一覧と同じく余白だけで区切る。各レスは
-                  // 番号・名前の見出し行が始点の目印になる。
-                  if (ngHidden) {
-                    return ThreadTreeTier(
-                      depth: row.depth,
-                      child: _NgPlaceholder(
-                        number: item.number,
-                        onReveal: () =>
-                            setState(() => _revealedNg.add(item.number)),
-                        onLongPress: () => _showResActions(item),
-                      ),
-                    );
-                  }
-                  // 目印（自分宛・検索の現在位置）は字下げ帯の色に移す。深さ 0
-                  // には字下げ帯が無いので、そこだけはレス側に描かせる。
-                  final isMatch = item.number == currentMatchNumber;
-                  final isToOwn =
-                      _isReplyToOwnPost(item) &&
-                      !_history.isOwnPost(widget.threadKey, item.number);
-                  final scheme = Theme.of(context).colorScheme;
-                  final accent = isMatch
-                      ? scheme.tertiary
-                      : isToOwn
-                      ? scheme.primary
+                  final child = buildRow(context, i);
+                  // レスとレスの間の区切り線（[resDividerDepth]）は**柱の組み方
+                  // だけ**。ヘッダにまとめる組み方は、時刻まで含めて 1 行目に
+                  // 収まっていて切れ目が読めるので要らない。柱の組み方は時刻が
+                  // レスの足元・右端にあり、線が無いと上下どちらのレスの時刻か
+                  // 迷う——そこを線が決める。
+                  final depth = _view.resLayout == ResLayout.gutter
+                      ? resDividerDepth(items, i)
                       : null;
-                  // 字下げ帯は行の持ち物なので、スワイプはツリーの外側から掛ける。
-                  // PostItem だけを包むと本文が自分の帯の下から抜け出す。
-                  return SwipeToReply(
-                    onReply: () => _reply(item.number),
-                    child: ThreadTreeTier(
-                      depth: row.depth,
-                      accent: row.depth > 0 ? accent : null,
-                      child: PostItem(
-                        res: item,
-                        nested: row.depth > 0,
-                        idCount: idCounts[item.id] ?? 1,
-                        idOrdinal: idOrdinals[item.number] ?? 1,
-                        onTapId: _showIdPosts,
-                        onTapWacchoi: _showWacchoiPosts,
-                        onTapRes: _showResPopup,
-                        onTapResRange: _showConversationRange,
-                        onTapUrl: _openUrl,
-                        replyCount: replies[item.number] ?? 0,
-                        onTapReplies: _showReplies,
-                        onLongPress: () => _showResActions(item),
-                        isOwn: _history.isOwnPost(
-                          widget.threadKey,
-                          item.number,
-                        ),
-                        isThreadOwner: _isThreadOwnerPost(item, threadOwnerId),
-                        isReplyToOwn: _isReplyToOwnPost(item),
-                        showAccentBar: row.depth <= 0,
-                        blurImages: guroMasked.contains(item.number),
-                        linkPreviews: _view.linkPreviews,
-                        resLayout: _view.resLayout,
-                        highlightQuery: searchQuery,
-                        isCurrentMatch: item.number == currentMatchNumber,
-                        defaultName: widget.defaultName,
-                        // 長いレスを畳むのは一覧だけ。会話シートや同一 ID の
-                        // 一覧は、そのレスを見たくて開いた場所なので畳まない。
-                        collapseLongBody: true,
-                        bodyExpanded: _expandedPosts.contains(item.number),
-                        onExpandBody: () =>
-                            setState(() => _expandedPosts.add(item.number)),
+                  if (depth == null) return child;
+                  return Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Divider(
+                        height: 1,
+                        // **線の左端は、下に来るレスの中身の左端に揃える。**
+                        // 端から端まで引くと仕切りというより枠に見えて硬く、
+                        // 揃えておくと線が下のレスの上端の縁として読める。
+                        // 返信の行は左余白がもともと狭い（字下げがすぐ左に
+                        // あるため）ので、線もそのぶん詰まる。
+                        indent:
+                            ThreadTreeTier.indentOf(depth) +
+                            (depth > 0 ? nestedResLeftPadding : resLeftPadding),
+                        endIndent: resLeftPadding,
                       ),
-                    ),
+                      child,
+                    ],
                   );
                 },
               ),

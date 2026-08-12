@@ -510,22 +510,101 @@ void main() {
     });
   });
 
-  group('ThreadTreeTier（字下げ帯）', () {
-    testWidgets('目印を帯に乗せても本文の位置は動かない', (tester) async {
-      // 帯の太さと本文までの隙間は足して一定。目印が付いた行だけ本文がずれると、
-      // ツリーの縦の筋が折れて見える。
+  group('resDividerDepth（レス間の区切り線）', () {
+    /// 各行の手前に引く線の深さ（引かないなら null）。[shape] と並べて読める
+    /// よう同じ長さで返す。
+    List<int?> lines(List<Object> items) => [
+      for (var i = 0; i < items.length; i++) resDividerDepth(items, i),
+    ];
+
+    test('番号順では先頭を除く各レスの手前に、深さ 0 で入る', () {
+      final res = [post(1, 'OP'), post(2, 'ふつう'), post(3, 'ふつう')];
+      final rows = layOutFlatRows(res, settledCount: 3).settled;
+      expect(shape(rows), ['1:0', '2:0', '3:0']);
+      expect(lines(rows), [null, 0, 0]);
+    });
+
+    test('引用行はその本体と地続き。切れ目は引用行の手前', () {
+      final res = [post(1, 'OP'), post(2, 'ふつう'), post(3, '>>1 レス')];
+      final rows = layOutFlatRows(res, settledCount: 3).settled;
+      expect(shape(rows), ['1:0', '2:0', '1:0:引用', '3:0']);
+      expect(lines(rows), [null, 0, 0, null]);
+    });
+
+    test('引用行が複数続いても、その間には入らない', () {
+      final res = [post(1, 'OP'), post(2, 'ふつう'), post(3, '>>2 >>1 まとめて')];
+      final rows = layOutFlatRows(res, settledCount: 3).settled;
+      expect(shape(rows), ['1:0', '2:0', '2:0:引用', '1:0:引用', '3:0']);
+      expect(lines(rows), [null, 0, 0, null, null]);
+    });
+
+    // 深さは上下の浅いほうに合わせる。字下げしていないレスとその返信の間は
+    // 線は下に来るレスの上端の縁として読ませるので、深さもその行に合わせる。
+    // 返信の手前では 1 段下げ、ツリーを抜けて次の根へ移るところでは 0 に戻る。
+    test('ツリーでは下に来る行の深さで入る', () {
+      final res = [
+        post(1, 'OP'),
+        post(2, '>>1 レス'),
+        post(3, '>>2 その返信'),
+        post(4, '無関係'),
+      ];
+      final rows = layOutThreadTree(res, settledCount: 4).settled;
+      expect(shape(rows), ['1:0', '2:1', '3:2', '4:0']);
+      expect(lines(rows), [null, 1, 2, 0]);
+    });
+
+    test('ツリーの途中に挟まる引用行も、その本体との間には入らない', () {
+      final res = [post(1, 'OP'), post(2, 'ふつう'), post(3, '>>1 >>2 レス')];
+      final rows = layOutThreadTree(res, settledCount: 3).settled;
+      expect(shape(rows), ['1:0', '2:1:引用', '3:1', '2:0']);
+      expect(lines(rows), [null, 1, null, 0]);
+    });
+
+    test('新着ラインの前後には入らない（ラインが切れ目そのもの）', () {
+      final res = [post(1, 'OP'), post(2, 'ふつう')];
+      final layout = layOutFlatRows(res, settledCount: 1);
+      // 一覧は行の間に新着ラインの目印を挟む（[ThreadTreeRow] ではない）。
+      final items = <Object>[...layout.settled, Object(), ...layout.arrivals];
+      expect(lines(items), [null, null, null]);
+    });
+  });
+
+  group('ThreadTreeTier（字下げ）', () {
+    testWidgets('深さのぶん中身を右へ送る。縦線は引かない', (tester) async {
       await tester.pumpWidget(
         const MaterialApp(
           home: Scaffold(
             body: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                ThreadTreeTier(depth: 1, child: Text('ふつう')),
-                ThreadTreeTier(
-                  depth: 1,
-                  accent: Colors.red,
-                  child: Text('目印つき'),
-                ),
+                ThreadTreeTier(depth: 0, child: Text('根')),
+                ThreadTreeTier(depth: 1, child: Text('1段')),
+                ThreadTreeTier(depth: 2, child: Text('2段')),
+                ThreadTreeTier(depth: 3, child: Text('3段')),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      double x(String text) => tester.getTopLeft(find.text(text)).dx;
+      expect(x('根'), 0);
+      expect(x('1段'), ThreadTreeTier.indentOf(1));
+      expect(x('2段'), ThreadTreeTier.indentOf(2));
+      // 段は等間隔。縦線を引かなくても深さが読めるのはこれが理由なので、
+      // 「1 段目だけ広い」のような刻みのばらつきを作らない。
+      expect(x('2段') - x('1段'), x('3段') - x('2段'));
+    });
+
+    testWidgets('字下げは上限で止まる（深いツリーで本文幅が潰れない）', (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ThreadTreeTier(depth: 6, child: Text('6段')),
+                ThreadTreeTier(depth: 12, child: Text('12段')),
               ],
             ),
           ),
@@ -533,13 +612,42 @@ void main() {
       );
 
       expect(
-        tester.getTopLeft(find.text('目印つき')).dx,
-        tester.getTopLeft(find.text('ふつう')).dx,
+        tester.getTopLeft(find.text('12段')).dx,
+        tester.getTopLeft(find.text('6段')).dx,
       );
     });
 
-    testWidgets('帯は 1 本だけ——レス側の目印は消して字下げ帯に移す', (tester) async {
-      // 2 本並べると、数 px ずれた縦線が 2 本走って「揃っていない」に見える。
+    testWidgets('帯を出しても字下げ量は変わらない', (tester) async {
+      // 帯の有無は組み方で切り替わる（`ResLayout`）。切り替えたときに本文の
+      // 位置まで動くと、同じスレが別物に見える。
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ThreadTreeTier(depth: 2, child: Text('帯なし')),
+                ThreadTreeTier(depth: 2, band: true, child: Text('帯あり')),
+                ThreadTreeTier(
+                  depth: 2,
+                  band: true,
+                  accent: Colors.red,
+                  child: Text('帯あり・目印つき'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      double x(String text) => tester.getTopLeft(find.text(text)).dx;
+      expect(x('帯あり'), x('帯なし'));
+      // 目印が付くと帯は太くなるが、帯と中身の間を詰めて位置を保つ。
+      expect(x('帯あり・目印つき'), x('帯なし'));
+    });
+
+    // 帯を引かない組み方では、色を移せる帯が無いので目印はレス側が描く。
+    testWidgets('帯が無い行でも目印の帯はレス側が描く', (tester) async {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
@@ -557,7 +665,6 @@ void main() {
                 ),
                 ThreadTreeTier(
                   depth: 1,
-                  accent: Colors.red,
                   child: PostItem(
                     res: post(3, '自分宛のレス'),
                     idCount: 1,
@@ -565,7 +672,6 @@ void main() {
                     onTapId: null,
                     bodySelectable: false,
                     isReplyToOwn: true,
-                    showAccentBar: false,
                   ),
                 ),
               ],
@@ -574,8 +680,8 @@ void main() {
         ),
       );
 
-      // 本文の左端が揃っている＝レス側は帯を描いていない（描くと 3px ぶん
-      // 左パディングを詰めるので、ここがずれる）。
+      // 帯を描く行は左パディングを帯の太さ（3）ぶん詰めるので、本文の左端は
+      // 動かない——字下げした行でも深さ 0 と同じ理屈で揃う。
       expect(
         tester.getTopLeft(find.text('自分宛のレス')).dx,
         tester.getTopLeft(find.text('ふつうのレス')).dx,
