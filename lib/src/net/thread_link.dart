@@ -165,12 +165,20 @@ class ThreadLinks {
     return future;
   }
 
+  /// 既に取れているスレの中身。まだ取っていない・取れなかったときは null。
+  ///
+  /// 待たずに引けるので、カードを作り直すとき（スレをスクロールして画面外へ出た
+  /// レスが戻ってきたときなど）に **URL からの差し替えを踏み直さない**ために使う。
+  /// 完了済みの Future でも `FutureBuilder` は 1 フレーム「まだ無い」を返すので、
+  /// それだけで URL が一瞬ちらついて見える。
+  static ThreadLinkInfo? cached(ThreadLinkTarget target) =>
+      _resolved[target.cacheKey];
+
   /// 既に取れているスレタイ。まだ取っていない・取れなかったときは null。
   ///
   /// スレを開くときに使う。待たずに分かるぶんだけ使い、無ければ空のまま開いて
   /// dat から埋めさせる（開くのを通信で待たせない）。
-  static String? cachedTitle(ThreadLinkTarget target) =>
-      _resolved[target.cacheKey]?.title;
+  static String? cachedTitle(ThreadLinkTarget target) => cached(target)?.title;
 
   /// テスト用に通信を差し替える。null に戻すと素の実装へ戻る。
   @visibleForTesting
