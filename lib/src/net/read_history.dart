@@ -16,6 +16,7 @@ class ReadHistorySnapshot {
   const ReadHistorySnapshot({
     this.seen = const {},
     this.seenAt = const {},
+    this.positions = const {},
     this.listed = const {},
     this.favorites = const {},
     this.threads = const {},
@@ -32,6 +33,10 @@ class ReadHistorySnapshot {
 
   /// スレを最後に開いた時刻（エポックミリ秒）。履歴の「最後に見た順」に使う。
   final Map<String, int> seenAt;
+
+  /// 最後に画面のいちばん上に見えていたレス番号。開き直したときの着地に使う。
+  /// **[seen] とは別物**——あちらは「どこまで読んだか」で、下がらない数字。
+  final Map<String, int> positions;
   final Set<String> favorites;
   final Map<String, StoredThread> threads;
   final Set<String> ownThreads;
@@ -106,6 +111,7 @@ class FileReadHistoryStorage implements ReadHistoryStorage {
       final seenJson = json['seen'];
       if (seenJson is Map<String, dynamic>) {
         final seenAtJson = json['seenAt'];
+        final positionsJson = json['positions'];
         final listedJson = json['listed'];
         final favoritesJson = json['favorites'];
         final threadsJson = json['threads'];
@@ -115,6 +121,9 @@ class FileReadHistoryStorage implements ReadHistoryStorage {
           seen: seenJson.map((k, v) => MapEntry(k, (v as num).toInt())),
           seenAt: seenAtJson is Map<String, dynamic>
               ? seenAtJson.map((k, v) => MapEntry(k, (v as num).toInt()))
+              : const {},
+          positions: positionsJson is Map<String, dynamic>
+              ? positionsJson.map((k, v) => MapEntry(k, (v as num).toInt()))
               : const {},
           listed: listedJson is List
               ? listedJson.whereType<String>().toSet()
@@ -152,6 +161,7 @@ class FileReadHistoryStorage implements ReadHistoryStorage {
       jsonEncode({
         'seen': snapshot.seen,
         'seenAt': snapshot.seenAt,
+        'positions': snapshot.positions,
         'listed': snapshot.listed.toList()..sort(),
         'favorites': snapshot.favorites.toList()..sort(),
         'threads': snapshot.threads.map((k, v) => MapEntry(k, v.toJson())),
@@ -191,6 +201,7 @@ class FileReadHistoryStorage implements ReadHistoryStorage {
 class MemoryReadHistoryStorage implements ReadHistoryStorage {
   Map<String, int> _seen;
   Map<String, int> _seenAt;
+  Map<String, int> _positions = {};
   Set<String> _listed = {};
   Set<String> _favorites;
   Map<String, StoredThread> _threads;
@@ -217,6 +228,7 @@ class MemoryReadHistoryStorage implements ReadHistoryStorage {
   Future<ReadHistorySnapshot> load() async => ReadHistorySnapshot(
     seen: Map.of(_seen),
     seenAt: Map.of(_seenAt),
+    positions: Map.of(_positions),
     listed: Set.of(_listed),
     favorites: Set.of(_favorites),
     threads: Map.of(_threads),
@@ -229,6 +241,7 @@ class MemoryReadHistoryStorage implements ReadHistoryStorage {
   Future<void> save(ReadHistorySnapshot snapshot) async {
     _seen = Map.of(snapshot.seen);
     _seenAt = Map.of(snapshot.seenAt);
+    _positions = Map.of(snapshot.positions);
     _listed = Set.of(snapshot.listed);
     _favorites = Set.of(snapshot.favorites);
     _threads = Map.of(snapshot.threads);
@@ -280,6 +293,7 @@ class ReadHistory {
   final DateTime Function() _now;
   Map<String, int> _seen = {};
   Map<String, int> _seenAt = {};
+  Map<String, int> _positions = {};
   Set<String> _listed = {};
   Set<String> _favorites = {};
   Map<String, StoredThread> _threads = {};
@@ -292,6 +306,7 @@ class ReadHistory {
     final snapshot = await _storage.load();
     _seen = Map.of(snapshot.seen);
     _seenAt = Map.of(snapshot.seenAt);
+    _positions = Map.of(snapshot.positions);
     _listed = Set.of(snapshot.listed);
     _favorites = Set.of(snapshot.favorites);
     _threads = Map.of(snapshot.threads);
@@ -340,6 +355,20 @@ class ReadHistory {
 
   /// スレを最後に開いた時刻（エポックミリ秒）。開いた記録が無ければ null。
   int? lastSeenAt(String threadKey) => _seenAt[threadKey];
+
+  /// 最後に画面のいちばん上に見えていたレス番号。記録が無ければ null。
+  int? lastPosition(String threadKey) => _positions[threadKey];
+
+  /// 読んでいた場所を覚える。
+  ///
+  /// **[markRead] と違って下がる。** あちらは「どこまで読んだか」（一覧の未読
+  /// 件数のもと）なので進むだけだが、こちらは「最後にどこを見ていたか」なので、
+  /// 読み返して上へ戻ったならその場所が正しい。
+  Future<void> markPosition(String threadKey, int resNumber) async {
+    if (resNumber <= 0 || _positions[threadKey] == resNumber) return;
+    _positions[threadKey] = resNumber;
+    await _save();
+  }
 
   Iterable<StoredThread> get storedThreads => _threads.values;
 
@@ -442,6 +471,7 @@ class ReadHistory {
   Future<void> forgetThread(String threadKey) async {
     var changed = _seen.remove(threadKey) != null;
     if (_seenAt.remove(threadKey) != null) changed = true;
+    if (_positions.remove(threadKey) != null) changed = true;
     if (!_favorites.contains(threadKey)) {
       if (_threads.remove(threadKey) != null) changed = true;
     }
@@ -456,6 +486,7 @@ class ReadHistory {
     final snapshot = ReadHistorySnapshot(
       seen: Map.of(_seen),
       seenAt: Map.of(_seenAt),
+      positions: Map.of(_positions),
       listed: Set.of(_listed),
       favorites: Set.of(_favorites),
       threads: Map.of(_threads),

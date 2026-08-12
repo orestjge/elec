@@ -399,6 +399,42 @@ void main() {
     expect(find.text('ここから新着'), findsOneWidget);
   });
 
+  testWidgets('読み返して離れたら、既読位置ではなく読み返していた場所へ戻る', (tester) async {
+    // 着地を「どこまで読んだか」だけで決めると、末尾まで目を通したあとに戻って
+    // 読み返している最中に離れたとき、次はまた末尾へ運ばれる。読んでいた場所は
+    // 既読位置とは別に覚える。
+    final history = ReadHistory(MemoryReadHistoryStorage());
+    await history.markRead(threadKey, 300); // 末尾まで読み終えている
+    final f = QueueFetcher([ok(dat(300))]);
+    final view = await treeSettings();
+
+    await tester.pumpWidget(app(f, history: history, view: view));
+    await tester.pumpAndSettle();
+    expect(shownNumbers(tester).last, 300, reason: '続き＝末尾から');
+
+    // 少し戻って読み返す。
+    for (var i = 0; i < 5; i++) {
+      await tester.drag(
+        find.byType(PostItem).at(1),
+        const Offset(0, 300),
+        warnIfMissed: false, // 端まで戻ると掴む行が画面から外れる
+      );
+      await tester.pump();
+    }
+    await tester.pumpAndSettle();
+    final stopped = shownNumbers(tester);
+    expect(stopped.last, lessThan(295), reason: '末尾からは離れていること');
+
+    // 閉じて開き直す。既読位置は 300 のままだが、着地はそこではない。
+    await tester.pumpWidget(const MaterialApp(home: SizedBox()));
+    await tester.pumpAndSettle();
+    expect(history.lastSeen(threadKey), 300);
+    await tester.pumpWidget(app(f, history: history, view: view));
+    await tester.pumpAndSettle();
+
+    expect(shownNumbers(tester), contains(stopped.last));
+  });
+
   testWidgets('ツリーの上に出てきた新しい番号では既読位置を進めない', (tester) async {
     // 30 は 1 への返信なので 1 のすぐ下に並ぶ。画面に出たからといって
     // 2〜29 を読んだことにはしない（間の未読を読み飛ばしてしまう）。

@@ -23,6 +23,16 @@ void main() {
       expect(h.lastSeen('1'), 120);
     });
 
+    test('markPosition は読んでいた場所を覚え、下がりもする', () async {
+      final h = ReadHistory(MemoryReadHistoryStorage());
+      expect(h.lastPosition('1'), isNull);
+      await h.markPosition('1', 300);
+      expect(h.lastPosition('1'), 300);
+      // 読み返して上へ戻ったならそこが正しい。lastSeen と違って下げる。
+      await h.markPosition('1', 260);
+      expect(h.lastPosition('1'), 260);
+    });
+
     test('markListed で「一覧で見た」になり、開いたスレも見た扱い', () async {
       final h = ReadHistory(MemoryReadHistoryStorage());
       expect(h.isListed('1'), isFalse);
@@ -229,6 +239,18 @@ void main() {
       expect(b.lastSeen('123'), 50);
       expect(b.lastSeen('456'), 10);
       expect(b.isRead('789'), isFalse);
+    });
+
+    test('読んでいた場所も保存される', () async {
+      final a = ReadHistory(FileReadHistoryStorage(directory: dir));
+      await a.markRead('123', 300);
+      await a.markPosition('123', 260);
+
+      final b = ReadHistory(FileReadHistoryStorage(directory: dir));
+      await b.load();
+      expect(b.lastSeen('123'), 300);
+      expect(b.lastPosition('123'), 260);
+      expect(b.lastPosition('456'), isNull);
     });
 
     test('一覧で見たスレも保存される', () async {
