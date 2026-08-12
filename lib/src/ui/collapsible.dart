@@ -15,7 +15,6 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
-import 'package:flutter/scheduler.dart';
 
 /// レスを畳む高さ。端末の画面のおよそ 3/4。
 ///
@@ -29,46 +28,62 @@ const double _fadeHeight = 40;
 /// 「続きを読む」の帯の高さ。指の的の下限に合わせる。
 const double _footerHeight = 48;
 
-/// 中身が [maxHeight] を超えたら、そこで切る。
+/// [Collapsible] の子の役どころ。
+enum CollapsibleSlot { body, footer }
+
+/// 中身が [maxHeight] を超えたら、そこで切り、下端に [footer] を重ねる。
 ///
 /// **高さは中身を組んでみるまで分からない**ので、ふつうのウィジェットの組み方
 /// では「畳めるかどうか」が決められない。ここは自前で測る——子には高さの制約を
-/// 渡さずに組ませ、本来の高さを [onMeasured] で知らせたうえで、自分の高さだけ
-/// [maxHeight] で頭打ちにする。
+/// 渡さずに組ませ、自分の高さだけ [maxHeight] で頭打ちにする。
 ///
-/// **頭打ちは最初の組み立てから効く**（測った結果を待たない）ので、一瞬だけ
-/// 伸びきった姿が出てから縮む、ということは起きない。[onMeasured] が効くのは
-/// 「続きを読む」を出すかどうかだけで、そちらは 1 フレーム遅れて現れる。
-class Collapsible extends SingleChildRenderObjectWidget {
+/// **切ったかどうかも同じ組み立て（layout）の中で決める。** 測った高さを状態に
+/// 持ち帰って次のフレームで帯を出す、という作りにすると、帯が 1 拍遅れて現れる
+/// ——一覧の行は画面外へ出ると捨てられるので、スクロールで戻ってくるたびに測り
+/// 直しになり、そのたびに「無い→出る」がちらつく。ここでは [footer] を最初から
+/// 子として持っておき、中身を組んだその場で描くか描かないかを決める。
+class Collapsible
+    extends SlottedMultiChildRenderObjectWidget<CollapsibleSlot, RenderBox> {
   const Collapsible({
     super.key,
     required this.maxHeight,
-    required this.onMeasured,
-    required Widget super.child,
+    required this.child,
+    this.footer,
   });
 
   /// 畳む高さ。[double.infinity] を渡せば畳まない。
   final double maxHeight;
 
-  /// 組んでみた結果の**本来の高さ**。組み立ての最中には呼ばれない
-  /// （フレームの切れ目まで遅らせる）。
-  final ValueChanged<double> onMeasured;
+  final Widget child;
+
+  /// 切ったときだけ下端に出すもの。切っていなければ描かれない（触れもしない）。
+  final Widget? footer;
 
   @override
-  RenderObject createRenderObject(BuildContext context) =>
-      RenderCollapsible(maxHeight: maxHeight, onMeasured: onMeasured);
+  Iterable<CollapsibleSlot> get slots => CollapsibleSlot.values;
 
   @override
-  void updateRenderObject(BuildContext context, RenderObject renderObject) {
-    (renderObject as RenderCollapsible)
-      ..maxHeight = maxHeight
-      ..onMeasured = onMeasured;
+  Widget? childForSlot(CollapsibleSlot slot) => switch (slot) {
+    CollapsibleSlot.body => child,
+    CollapsibleSlot.footer => footer,
+  };
+
+  @override
+  RenderCollapsible createRenderObject(BuildContext context) =>
+      RenderCollapsible(maxHeight: maxHeight);
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    RenderCollapsible renderObject,
+  ) {
+    renderObject.maxHeight = maxHeight;
   }
 }
 
-class RenderCollapsible extends RenderProxyBox {
-  RenderCollapsible({required double maxHeight, required this.onMeasured})
-    : _maxHeight = maxHeight;
+class RenderCollapsible extends RenderBox
+    with SlottedContainerRenderObjectMixin<CollapsibleSlot, RenderBox> {
+  RenderCollapsible({required double maxHeight}) : _maxHeight = maxHeight;
 
   double _maxHeight;
   set maxHeight(double value) {
@@ -77,69 +92,154 @@ class RenderCollapsible extends RenderProxyBox {
     markNeedsLayout();
   }
 
-  ValueChanged<double> onMeasured;
+  RenderBox? get _body => childForSlot(CollapsibleSlot.body);
+  RenderBox? get _footer => childForSlot(CollapsibleSlot.footer);
 
-  /// 直前に知らせた高さ。同じ値を繰り返し知らせて組み直しを誘わないため。
-  double? _reported;
+  /// 中身を切ったか。切ったときだけ帯を描き、触れるようにする。
+  bool _collapsed = false;
+
+  BoxConstraints _childConstraints(BoxConstraints constraints) => BoxConstraints(
+    minWidth: constraints.minWidth,
+    maxWidth: constraints.maxWidth,
+  );
 
   @override
   void performLayout() {
-    final child = this.child;
-    if (child == null) {
+    final body = _body;
+    if (body == null) {
+      _collapsed = false;
       size = constraints.smallest;
       return;
     }
     // 高さは縛らずに組ませる。縛ると中身が上限に合わせて自分を縮めてしまい、
     // 「本来どれだけ高いか」が分からなくなる。
-    child.layout(
-      BoxConstraints(
-        minWidth: constraints.minWidth,
-        maxWidth: constraints.maxWidth,
-      ),
+    body.layout(_childConstraints(constraints), parentUsesSize: true);
+    final natural = body.size.height;
+    // 切った以上は必ず帯を出す。**上限を少し超えただけなら畳まない**といった
+    // 手心を加えると、その帯（上限〜上限＋手心）のレスが、ボタンも出ないまま
+    // 黙って切れる。
+    _collapsed = natural > _maxHeight;
+    size = constraints.constrain(
+      Size(body.size.width, math.min(natural, _maxHeight)),
+    );
+    final footer = _footer;
+    if (footer == null) return;
+    // 幅は自分と同じ、高さは中身なり。位置は下端に揃える。切っていないときは
+    // 潰した枠を渡す——帯の側（[CollapsingBody]）がそれを見て中身を作らないので、
+    // 畳まないふつうのレスにボタン一式を組ませずに済む。
+    footer.layout(
+      _collapsed
+          ? BoxConstraints.tightFor(width: size.width)
+          : BoxConstraints.tight(Size.zero),
       parentUsesSize: true,
     );
-    final natural = child.size.height;
-    size = constraints.constrain(
-      Size(child.size.width, math.min(natural, _maxHeight)),
+    (footer.parentData! as BoxParentData).offset = Offset(
+      0,
+      size.height - footer.size.height,
     );
-    if (_reported == natural) return;
-    _reported = natural;
-    final report = onMeasured;
-    // 組み立ての最中に外へ知らせると、そのフレームで作り直しに入って怒られる。
-    SchedulerBinding.instance.addPostFrameCallback((_) => report(natural));
   }
 
   @override
+  Size computeDryLayout(BoxConstraints constraints) {
+    final body = _body;
+    if (body == null) return constraints.smallest;
+    final natural = body.getDryLayout(_childConstraints(constraints));
+    return constraints.constrain(
+      Size(natural.width, math.min(natural.height, _maxHeight)),
+    );
+  }
+
+  // 寸法の問い合わせは中身に丸投げする（高さだけ頭打ちにする）。帯は問い合わせ
+  // に含めない——出るかどうかが中身の高さ次第で、含めると堂々巡りになる。
+  @override
+  double computeMinIntrinsicWidth(double height) =>
+      _body?.getMinIntrinsicWidth(height) ?? 0;
+
+  @override
+  double computeMaxIntrinsicWidth(double height) =>
+      _body?.getMaxIntrinsicWidth(height) ?? 0;
+
+  @override
+  double computeMinIntrinsicHeight(double width) =>
+      math.min(_body?.getMinIntrinsicHeight(width) ?? 0, _maxHeight);
+
+  @override
+  double computeMaxIntrinsicHeight(double width) =>
+      math.min(_body?.getMaxIntrinsicHeight(width) ?? 0, _maxHeight);
+
+  @override
   void paint(PaintingContext context, Offset offset) {
-    final child = this.child;
-    if (child == null) return;
-    // はみ出したぶんは切る。切らないと下のレスに重なって描かれる。
-    if (child.size.height <= size.height) {
-      context.paintChild(child, offset);
+    final body = _body;
+    if (body == null) return;
+    if (!_collapsed) {
+      context.paintChild(body, offset);
       return;
     }
+    // はみ出したぶんは切る。切らないと下のレスに重なって描かれる。
     context.pushClipRect(
       needsCompositing,
       offset,
       Offset.zero & size,
-      (context, offset) => context.paintChild(child, offset),
+      (context, offset) => context.paintChild(body, offset),
     );
+    final footer = _footer;
+    if (footer == null) return;
+    context.paintChild(
+      footer,
+      offset + (footer.parentData! as BoxParentData).offset,
+    );
+  }
+
+  @override
+  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) {
+    final footer = _footer;
+    if (_collapsed &&
+        footer != null &&
+        _hitTestChild(footer, result, position)) {
+      return true;
+    }
+    final body = _body;
+    return body != null && _hitTestChild(body, result, position);
+  }
+
+  bool _hitTestChild(RenderBox child, BoxHitTestResult result, Offset position) {
+    final childOffset = (child.parentData! as BoxParentData).offset;
+    return result.addWithPaintOffset(
+      offset: childOffset,
+      position: position,
+      hitTest: (result, transformed) =>
+          child.hitTest(result, position: transformed),
+    );
+  }
+
+  @override
+  void applyPaintTransform(RenderBox child, Matrix4 transform) {
+    final childOffset = (child.parentData! as BoxParentData).offset;
+    transform.translateByDouble(childOffset.dx, childOffset.dy, 0, 1);
+  }
+
+  @override
+  void visitChildrenForSemantics(RenderObjectVisitor visitor) {
+    final body = _body;
+    if (body != null) visitor(body);
+    // 切っていないときの帯は画面に無いのと同じ。読み上げにも出さない。
+    final footer = _footer;
+    if (_collapsed && footer != null) visitor(footer);
   }
 }
 
 /// 長いときだけ畳む本文の入れ物。
 ///
-/// 畳むかどうかは中身の高さを測ってから決まるので、**開いているかどうかは外が
-/// 持つ**（[expanded] / [onExpand]）。一覧の行は画面外へ出ると捨てられるため、
-/// ここで覚えると戻ってきたときに畳み直されてしまう。
-class CollapsingBody extends StatefulWidget {
+/// 畳むかどうかは中身の高さ次第なので、**開いているかどうかは外が持つ**
+/// （[expanded] / [onExpand]）。一覧の行は画面外へ出ると捨てられるため、ここで
+/// 覚えると戻ってきたときに畳み直されてしまう。
+class CollapsingBody extends StatelessWidget {
   const CollapsingBody({
     super.key,
     required this.child,
     required this.expanded,
     required this.onExpand,
     this.maxHeight = collapsedPostMaxHeight,
-    this.showLineCount = true,
   });
 
   final Widget child;
@@ -151,117 +251,83 @@ class CollapsingBody extends StatefulWidget {
 
   final double maxHeight;
 
-  /// 隠した量を「あと◯行ほど」で出すか。**絵や札が隠れているときは false**
-  /// ——行数は文章にしか意味が無く、画像 2 枚を「あと 11 行」と言われても
-  /// 何のことか分からない。
-  final bool showLineCount;
-
   @override
-  State<CollapsingBody> createState() => _CollapsingBodyState();
-}
-
-class _CollapsingBodyState extends State<CollapsingBody> {
-  /// 中身の本来の高さ。測る前は null（そのあいだ「続きを読む」は出さない）。
-  double? _natural;
-
-  /// 隠れているぶんを行に直すときの 1 行の高さ。本文（15px・行高 1.4）の目安で、
-  /// 「あと◯行ほど」の**ほど**が引き受ける精度でよい。
-  static const double _lineHeight = 21;
-
-  @override
-  Widget build(BuildContext context) {
-    final natural = _natural;
-    // 切った以上は必ず「続きを読む」を出す。**上限を少し超えただけなら畳まない**
-    // ——といった手心を加えると、その帯（上限〜上限＋手心）のレスが、ボタンも
-    // 出ないまま黙って切れる。頭打ちは測る前から効いているので、切るかどうかを
-    // 後から緩めることはできない。
-    final collapses =
-        !widget.expanded && natural != null && natural > widget.maxHeight;
-    return Stack(
-      children: [
-        Collapsible(
-          // 開いていない間は常に頭打ちにする。測り終わるのを待つと、一瞬だけ
-          // 伸びきった姿が出てから縮むことになる。
-          maxHeight: widget.expanded ? double.infinity : widget.maxHeight,
-          onMeasured: (height) {
-            if (!mounted || _natural == height) return;
-            setState(() => _natural = height);
-          },
-          child: widget.child,
-        ),
-        if (collapses)
-          _MoreFooter(
-            onTap: widget.onExpand,
-            label: widget.showLineCount
-                ? 'あと${((natural - widget.maxHeight) / _lineHeight).ceil()}行ほど'
-                : '続きを読む',
+  Widget build(BuildContext context) => Collapsible(
+    // 開いていない間は常に頭打ちにする。測り終わるのを待つと、一瞬だけ伸びきった
+    // 姿が出てから縮むことになる。
+    maxHeight: expanded ? double.infinity : maxHeight,
+    // 帯を組み立てるのは切ったときだけ。切ったかどうかは中身を組んでみるまで
+    // 分からないので、**組み立ての中で聞く**（[LayoutBuilder]）——潰した枠が
+    // 来たら切っていない、というのが [RenderCollapsible] との約束。状態に
+    // 持ち帰って次のフレームで出す作りと違い、1 拍遅れてちらつくことがない。
+    footer: expanded
+        ? null
+        : LayoutBuilder(
+            builder: (context, constraints) => constraints.maxHeight == 0
+                ? const SizedBox.shrink()
+                : _MoreFooter(onTap: onExpand),
           ),
-      ],
-    );
-  }
+    child: child,
+  );
 }
 
 /// 畳まれた本文の下端に敷く「続きがある」合図。
 ///
 /// ボタンだけでも用は足りるが、**どこで切れたか**が分からないと文章が途中で
 /// 消えたように見える。地色へ溶ける階調を掛けて切れ目をぼかす。
+///
+/// 文言は「続きを読む」で固定。隠れた量を「あと◯行」と添えていたことがあるが、
+/// **その数字で何かを決める人はいない**（開くか飛ばすかは、行数ではなくレスの
+/// 見えている頭で決まる）わりに、行に直せるのが文章だけのレスに限られて出し
+/// 分けが要るうえ、中身が伸び縮みするたびに数字が動く。
 class _MoreFooter extends StatelessWidget {
-  const _MoreFooter({required this.onTap, required this.label});
+  const _MoreFooter({required this.onTap});
 
   final VoidCallback onTap;
-  final String label;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Positioned(
-      left: 0,
-      right: 0,
-      bottom: 0,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // 階調は下端だけ。上まで掛けると本文が読みにくくなる。
-          Container(
-            height: _fadeHeight,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [scheme.surface.withValues(alpha: 0), scheme.surface],
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // 階調は下端だけ。上まで掛けると本文が読みにくくなる。
+        Container(
+          height: _fadeHeight,
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [scheme.surface.withValues(alpha: 0), scheme.surface],
+            ),
+          ),
+        ),
+        // **幅いっぱいの帯にする。** 隠れているものを見るためのボタンは、
+        // レスの中で一番押される的になる——小さな字の脇を狙わせる理由がない。
+        // 高さも指の的の下限（48）に合わせてある。
+        ColoredBox(
+          color: scheme.surface,
+          child: SizedBox(
+            width: double.infinity,
+            height: _footerHeight,
+            child: TextButton.icon(
+              onPressed: onTap,
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                alignment: Alignment.centerLeft,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              icon: const Icon(Icons.expand_more, size: 20),
+              label: const Text(
+                '続きを読む',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
               ),
             ),
           ),
-          // **幅いっぱいの帯にする。** 隠れているものを見るためのボタンは、
-          // レスの中で一番押される的になる——小さな字の脇を狙わせる理由がない。
-          // 高さも指の的の下限（48）に合わせてある。
-          ColoredBox(
-            color: scheme.surface,
-            child: SizedBox(
-              width: double.infinity,
-              height: _footerHeight,
-              child: TextButton.icon(
-                onPressed: onTap,
-                style: TextButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  alignment: Alignment.centerLeft,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-                icon: const Icon(Icons.expand_more, size: 20),
-                label: Text(
-                  label,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
