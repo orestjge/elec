@@ -358,6 +358,7 @@ class _ThreadScreenState extends State<ThreadScreen>
     _timer?.cancel();
     _persistReadPosition();
     _persistViewPosition();
+    unawaited(_history.flush());
     // 見えていない画面が入力を持ったままだとキーボードが残るので手放す。
     if (_composerFocus.hasFocus) _composerFocus.unfocus();
     if (_searchFocus.hasFocus) _searchFocus.unfocus();
@@ -386,6 +387,8 @@ class _ThreadScreenState extends State<ThreadScreen>
       unawaited(_history.markRead(widget.threadKey, _furthestRead));
     }
     _persistViewPosition();
+    // 既読位置の書き出しはまとめられているので、閉じる前に書き残しを出させる。
+    unawaited(_history.flush());
     _ng.removeListener(_onNgChanged);
     _view.removeListener(_onViewSettingsChanged);
     _positions.itemPositions.removeListener(_onPositions);
@@ -413,6 +416,8 @@ class _ThreadScreenState extends State<ThreadScreen>
         _timer?.cancel();
         _persistReadPosition();
         _persistViewPosition();
+        // 落とされる前に書き残しを出させる。
+        unawaited(_history.flush());
       case AppLifecycleState.inactive:
       case AppLifecycleState.detached:
         break;

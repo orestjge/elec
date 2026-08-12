@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -302,6 +303,16 @@ class ReadHistory {
   String? _lastViewedThreadKey;
   Future<void> _pendingSave = Future.value();
 
+  /// まとめ書きの間隔。[_saveSoon] はこれより細かくは書かない。
+  static const _saveInterval = Duration(milliseconds: 500);
+
+  /// 前回書き出してからの経過。間隔を測るだけのものなので、記録する時刻に使う
+  /// 時計（[_now]。テストで差し替わる）とは別に持つ。
+  final _sinceWrite = Stopwatch();
+
+  /// 見送った書き残しがあるか（[_saveSoon] が間隔待ちで送らなかったぶん）。
+  bool _unsaved = false;
+
   Future<void> load() async {
     final snapshot = await _storage.load();
     _seen = Map.of(snapshot.seen);
@@ -417,6 +428,9 @@ class ReadHistory {
   }
 
   /// [resCount] までを既読にする。前回より小さい値では下げない。
+  ///
+  /// **スレを送っている間ほぼ毎フレーム呼ばれる**（見えている最大レス番号が進む
+  /// たび）。覚えるのはその場、書き出しは [_saveSoon] に任せる。
   Future<void> markRead(String threadKey, int resCount) async {
     final prev = _seen[threadKey];
     if (prev != null && prev >= resCount) return;
@@ -430,7 +444,7 @@ class ReadHistory {
         capName: thread.capName,
       );
     }
-    await _save();
+    await _saveSoon();
   }
 
   bool isFavorite(String threadKey) => _favorites.contains(threadKey);
@@ -482,7 +496,36 @@ class ReadHistory {
     if (changed) await _save();
   }
 
+  /// 間隔を空けて保存する。**何度も続けて動く記録用**（[markRead]）。
+  ///
+  /// 1 回ぶんの支度——控えの複製と JSON への変換——はメインアイソレートで走り、
+  /// 覚えている量（「一覧で見た」だけで最大 [_maxListed] 件）に比例して重くなる。
+  /// スクロールのたびに書いていると、そのぶんがまるごとコマ落ちになる。
+  ///
+  /// 間隔が明けていればその場で書く。明けていなければ**印を付けるだけ**にして、
+  /// 時計は仕掛けない。仕掛けると、書くものが無くても起きて回るうえ、消し忘れれば
+  /// 画面が閉じた後まで残る。見送ったぶんは次の [_saveSoon]、他の記録の保存
+  /// （[_save] はいつも全部を書き出す）、画面を離れるときの [flush] が拾う。
+  Future<void> _saveSoon() {
+    if (_sinceWrite.isRunning && _sinceWrite.elapsed < _saveInterval) {
+      _unsaved = true;
+      return _pendingSave;
+    }
+    return _save();
+  }
+
+  /// 見送った書き残しをいま書き出す。書き残しが無ければ、走っている書き込みの
+  /// 終わりを返すだけ。
+  ///
+  /// **画面を離れるとき・裏に回るときに呼ぶ。** [_saveSoon] は時計を持たないので、
+  /// 最後に見送ったぶんを書き出す機会はここだけになる。
+  Future<void> flush() => _unsaved ? _save() : _pendingSave;
+
   Future<void> _save() async {
+    _unsaved = false;
+    _sinceWrite
+      ..reset()
+      ..start();
     final snapshot = ReadHistorySnapshot(
       seen: Map.of(_seen),
       seenAt: Map.of(_seenAt),
