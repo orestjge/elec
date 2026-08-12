@@ -316,6 +316,18 @@ void main() {
     );
   });
 
+  // ヘッダにまとめる組み方のツリー表示。**字下げ帯を残しているのはこちらだけ**
+  // （柱の組み方では ID の絵が深さの目盛りになるので帯を引かない）。
+  testWidgets('header layout tree', (tester) async {
+    await _shoot(
+      tester,
+      ElecTheme.light(),
+      '$dir/thread_header_layout_tree.png',
+      resLayout: ResLayout.header,
+      layout: ThreadLayout.tree,
+    );
+  });
+
   testWidgets('header layout plain', (tester) async {
     await _shoot(
       tester,

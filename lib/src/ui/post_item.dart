@@ -131,9 +131,10 @@ class PostItem extends StatelessWidget {
 
   /// 左のアクセント帯（自分宛・検索の現在位置）をこのレス内で描くか。
   ///
-  /// **外側に自前の帯を持つ入れ物では false にする。** ツリーの字下げ帯
-  /// （[ThreadTreeTier]）や会話シートの枠は、その帯自体に色を移して 1 本に
-  /// まとめる——2 本並べると数 px ずれた縦線が 2 本走ることになる。
+  /// **外側に自前の帯を持つ入れ物では false にする。** 会話シートの枠は、その
+  /// 帯自体に色を移して 1 本にまとめる——2 本並べると数 px ずれた縦線が 2 本
+  /// 走ることになる。一覧では字下げした行（[ThreadTreeTier]）でもレス側が
+  /// 描く。字下げは余白だけで表していて、色を移せる帯が無いため。
   final bool showAccentBar;
 
   /// この画像に「グロ」注意が付いており、サムネイルへモザイクを掛けるか。
@@ -426,23 +427,23 @@ class PostItem extends StatelessWidget {
             ? Border(left: BorderSide(color: scheme.tertiary, width: 3))
             : Border(left: BorderSide(color: scheme.primary, width: 3)),
       ),
-      // ぶら下がった返信の左は詰める。字下げ帯がその行の左端を作っているので、
-      // 画面端からの余白として決めた 16 をそのまま使うと、深さ 0 の行（画面端
-      // から 16）より字下げした行のほうが余白が広い逆転になる。
+      // ぶら下がった返信の左は詰める。字下げ（[ThreadTreeTier]）がその行の
+      // 左端をすでに右へ送っているので、画面端からの余白として決めた 16 を
+      // そのまま使うと、深さ 0 の行（画面端から 16）より字下げした行のほうが
+      // 余白が広い逆転になる。
       //
       // アクセント帯を自分で描くときは、その太さ（3）ぶん詰めて中身の位置を
-      // 保つ。字下げされた行では帯は外側（[ThreadTreeTier]）が描くので、この
-      // 調整は掛からない。
+      // 保つ。
       padding: EdgeInsets.fromLTRB(
-        (nested ? _nestedLeftPadding : _leftPadding) - (showAccent ? 3 : 0),
+        (nested ? nestedResLeftPadding : resLeftPadding) - (showAccent ? 3 : 0),
         6,
-        _leftPadding,
+        resLeftPadding,
         6,
       ),
       child: column,
     );
 
-    // 返信の左スワイプ（`SwipeToReply`）はここでは掛けない。字下げ帯や会話の枠
+    // 返信の左スワイプ（`SwipeToReply`）はここでは掛けない。字下げや会話の枠
     // ごと動かしたいので、行を組み立てる側が外から包む。
     if (onLongPress == null) return content;
     return _PressableRes(onLongPress: onLongPress!, child: content);
@@ -1312,11 +1313,15 @@ class _IdChip extends StatelessWidget {
 const double _idGutterSize = 24;
 
 /// レスの左右の余白。画面端から本文までの距離。
-const double _leftPadding = 16;
+///
+/// レス間の区切り線もここに合わせて引く（`thread_screen.dart`）ので公開して
+/// ある——線がレスの中身の左端から始まると、その線が下のレスの上端の縁として
+/// 読める。
+const double resLeftPadding = 16;
 
-/// ぶら下がった返信（[PostItem.nested]）での左の余白。字下げ帯がすぐ左にある
-/// ぶん、画面端から始まる行より詰める。
-const double _nestedLeftPadding = 8;
+/// ぶら下がった返信（[PostItem.nested]）での左の余白。字下げがすぐ左にあるぶん、
+/// 画面端から始まる行より詰める。[resLeftPadding] と同じ理由で公開してある。
+const double nestedResLeftPadding = 8;
 
 /// ぶら下がった返信（[PostItem.nested]）での柱の一辺。
 ///
