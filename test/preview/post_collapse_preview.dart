@@ -201,7 +201,6 @@ class _ResTileState extends State<_ResTile> {
                   CollapsingBody(
                     maxHeight: cap,
                     expanded: _open,
-                    showLineCount: widget.res.images.isEmpty,
                     onExpand: () => setState(() => _open = true),
                     child: body,
                   ),

@@ -329,10 +329,6 @@ class PostItem extends StatelessWidget {
     final hasAsciiArt = segments.any(
       (segment) => segment is PostBodyText && looksLikeAsciiArt(segment.text),
     );
-    // 隠れるのが文章だけなら「あと◯行ほど」と量を言える。絵や札が混じる
-    // レスでは行数に意味が無いので、ただの「続きを読む」にする。
-    final textOnly = segments.every((segment) => segment is PostBodyText);
-
     // 現在ジャンプ中の一致レスは、左のアクセント帯と薄い背景でひと目で分かる
     // ようにする（左パディングを帯の分だけ詰めて本文位置は揃える）。
     final showAccent =
@@ -364,7 +360,6 @@ class PostItem extends StatelessWidget {
           CollapsingBody(
             expanded: bodyExpanded,
             onExpand: () => onExpandBody?.call(),
-            showLineCount: textOnly,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
