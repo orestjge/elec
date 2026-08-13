@@ -13,6 +13,7 @@ import '../net/http_fetcher.dart';
 import '../net/ng_store.dart';
 import '../net/read_history.dart';
 import '../net/thread_sort_settings.dart';
+import 'back_swipe.dart';
 import 'board_catalog_screen.dart';
 import 'new_thread_screen.dart';
 import 'settings_screen.dart';
@@ -722,9 +723,12 @@ class _ThreadListScreenState extends State<ThreadListScreen>
   }
 
   void _openSettings() {
-    Navigator.of(
-      context,
-    ).push(MaterialPageRoute<void>(builder: (_) => const SettingsScreen()));
+    // スレを開いたときと同じく、右へのスワイプで一覧へ戻れるルートで開く。
+    Navigator.of(context).push(
+      SwipeBackPageRoute<void>(
+        pageBuilder: (_, _, _) => const SettingsScreen(),
+      ),
+    );
   }
 
   Future<void> _copyThreadUrl(ThreadSummary thread) async {

@@ -2,6 +2,7 @@ import 'package:edge_core/edge_core.dart';
 import 'package:flutter/material.dart';
 
 import '../net/ng_store.dart';
+import 'back_swipe.dart';
 import 'format.dart';
 
 /// NG ワード追加ダイアログを開く。追加されたら [NgWord]、取り消しなら null。
@@ -23,116 +24,119 @@ class NgScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('NG設定')),
-      body: ListenableBuilder(
-        listenable: store,
-        builder: (context, _) {
-          final words = store.words;
-          final ids = store.ids;
-          final wacchois = store.wacchois;
-          final creators = store.creators;
-          final images = store.images;
-          return ListView(
-            children: [
-              _SectionHeader(title: 'NGワード', onAdd: () => _addWord(context)),
-              if (words.isEmpty)
-                const _EmptyHint('本文・名前に含まれると非表示にする語句を追加します')
-              else
-                for (final word in words)
-                  ListTile(
-                    leading: Icon(
-                      word.isRegex ? Icons.data_object : Icons.notes,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+      // 設定画面と同じく、右へのスワイプで前の画面へ戻る。
+      body: BackSwipe(
+        child: ListenableBuilder(
+          listenable: store,
+          builder: (context, _) {
+            final words = store.words;
+            final ids = store.ids;
+            final wacchois = store.wacchois;
+            final creators = store.creators;
+            final images = store.images;
+            return ListView(
+              children: [
+                _SectionHeader(title: 'NGワード', onAdd: () => _addWord(context)),
+                if (words.isEmpty)
+                  const _EmptyHint('本文・名前に含まれると非表示にする語句を追加します')
+                else
+                  for (final word in words)
+                    ListTile(
+                      leading: Icon(
+                        word.isRegex ? Icons.data_object : Icons.notes,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                      title: Text(word.pattern),
+                      subtitle: word.isRegex ? const Text('正規表現') : null,
+                      trailing: IconButton(
+                        icon: const Icon(Icons.delete_outline),
+                        tooltip: '削除',
+                        onPressed: () => store.removeWord(word),
+                      ),
                     ),
-                    title: Text(word.pattern),
-                    subtitle: word.isRegex ? const Text('正規表現') : null,
-                    trailing: IconButton(
-                      icon: const Icon(Icons.delete_outline),
-                      tooltip: '削除',
-                      onPressed: () => store.removeWord(word),
+                const Divider(height: 1),
+                _SectionHeader(title: 'NG ID', onAdd: () => _addId(context)),
+                if (ids.isEmpty)
+                  const _EmptyHint('この ID の書き込みを非表示にします')
+                else
+                  for (final id in ids)
+                    ListTile(
+                      leading: Icon(
+                        Icons.badge_outlined,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                      title: Text('ID:$id'),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.delete_outline),
+                        tooltip: '削除',
+                        onPressed: () => store.removeId(id),
+                      ),
                     ),
-                  ),
-              const Divider(height: 1),
-              _SectionHeader(title: 'NG ID', onAdd: () => _addId(context)),
-              if (ids.isEmpty)
-                const _EmptyHint('この ID の書き込みを非表示にします')
-              else
-                for (final id in ids)
-                  ListTile(
-                    leading: Icon(
-                      Icons.badge_outlined,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                const Divider(height: 1),
+                _SectionHeader(
+                  title: 'NG ワッチョイ',
+                  onAdd: () => _addWacchoi(context),
+                ),
+                if (wacchois.isEmpty)
+                  const _EmptyHint(
+                    '名前欄のワッチョイで非表示にします。ID は日付が変わると別物に'
+                    'なりますが、ワッチョイは数日変わらないので、スレをまたいで効きます。'
+                    'レスの名前をタップして「ワッチョイをNG」からも追加できます',
+                  )
+                else
+                  for (final wacchoi in wacchois)
+                    ListTile(
+                      leading: Icon(
+                        Icons.fingerprint,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                      title: Text(wacchoi),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.delete_outline),
+                        tooltip: '削除',
+                        onPressed: () => store.removeWacchoi(wacchoi),
+                      ),
                     ),
-                    title: Text('ID:$id'),
-                    trailing: IconButton(
-                      icon: const Icon(Icons.delete_outline),
-                      tooltip: '削除',
-                      onPressed: () => store.removeId(id),
+                const Divider(height: 1),
+                _SectionHeader(
+                  title: 'NG スレ主',
+                  onAdd: () => _addCreator(context),
+                ),
+                if (creators.isEmpty)
+                  const _EmptyHint(
+                    'スレ立て人（metadent）のスレを一覧から隠します。'
+                    'スレを長押しして「このスレ主を NG」からも追加できます',
+                  )
+                else
+                  for (final metadent in creators)
+                    ListTile(
+                      leading: Icon(
+                        Icons.person_off_outlined,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                      title: Text('[$metadent★]'),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.delete_outline),
+                        tooltip: '削除',
+                        onPressed: () => store.removeCreator(metadent),
+                      ),
                     ),
-                  ),
-              const Divider(height: 1),
-              _SectionHeader(
-                title: 'NG ワッチョイ',
-                onAdd: () => _addWacchoi(context),
-              ),
-              if (wacchois.isEmpty)
-                const _EmptyHint(
-                  '名前欄のワッチョイで非表示にします。ID は日付が変わると別物に'
-                  'なりますが、ワッチョイは数日変わらないので、スレをまたいで効きます。'
-                  'レスの名前をタップして「ワッチョイをNG」からも追加できます',
-                )
-              else
-                for (final wacchoi in wacchois)
-                  ListTile(
-                    leading: Icon(
-                      Icons.fingerprint,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                    title: Text(wacchoi),
-                    trailing: IconButton(
-                      icon: const Icon(Icons.delete_outline),
-                      tooltip: '削除',
-                      onPressed: () => store.removeWacchoi(wacchoi),
-                    ),
-                  ),
-              const Divider(height: 1),
-              _SectionHeader(
-                title: 'NG スレ主',
-                onAdd: () => _addCreator(context),
-              ),
-              if (creators.isEmpty)
-                const _EmptyHint(
-                  'スレ立て人（metadent）のスレを一覧から隠します。'
-                  'スレを長押しして「このスレ主を NG」からも追加できます',
-                )
-              else
-                for (final metadent in creators)
-                  ListTile(
-                    leading: Icon(
-                      Icons.person_off_outlined,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                    title: Text('[$metadent★]'),
-                    trailing: IconButton(
-                      icon: const Icon(Icons.delete_outline),
-                      tooltip: '削除',
-                      onPressed: () => store.removeCreator(metadent),
-                    ),
-                  ),
-              const Divider(height: 1),
-              // 手では足せない（中身の指紋で見分けるため）ので「追加」は出さない。
-              const _SectionHeader(title: 'NG画像'),
-              if (images.isEmpty)
-                const _EmptyHint(
-                  '画像を長押し、または全画面表示の「この画像をNG」から追加します。'
-                  'URL が違っても、同じ画像・貼り直しで少し変わった画像を隠します',
-                )
-              else
-                for (final image in images)
-                  _NgImageTile(image: image, store: store),
-              const SizedBox(height: 24),
-            ],
-          );
-        },
+                const Divider(height: 1),
+                // 手では足せない（中身の指紋で見分けるため）ので「追加」は出さない。
+                const _SectionHeader(title: 'NG画像'),
+                if (images.isEmpty)
+                  const _EmptyHint(
+                    '画像を長押し、または全画面表示の「この画像をNG」から追加します。'
+                    'URL が違っても、同じ画像・貼り直しで少し変わった画像を隠します',
+                  )
+                else
+                  for (final image in images)
+                    _NgImageTile(image: image, store: store),
+                const SizedBox(height: 24),
+              ],
+            );
+          },
+        ),
       ),
     );
   }

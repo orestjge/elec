@@ -5,6 +5,7 @@ import '../net/image_cache_store.dart';
 import '../net/image_upload_settings.dart';
 import '../net/ng_store.dart';
 import '../net/thread_view_settings.dart';
+import 'back_swipe.dart';
 import 'file_upload_settings_screen.dart';
 import 'format.dart';
 import 'image_upload_settings_screen.dart';
@@ -180,112 +181,116 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('設定')),
-      body: ListView(
-        children: [
-          ListTile(
-            key: const ValueKey('settings-thread-layout'),
-            leading: Icon(_layoutIcon(_threadView.layout)),
-            title: const Text('レスの並べ方'),
-            subtitle: Text(
-              '${_layoutLabel(_threadView.layout)} ・ '
-              '${_layoutDescription(_threadView.layout)}',
+      // 右へのスワイプでスレ一覧へ戻る。縦スクロールとは競り合いに任せるので、
+      // 設定の並びをなぞる操作は今までどおり。
+      body: BackSwipe(
+        child: ListView(
+          children: [
+            ListTile(
+              key: const ValueKey('settings-thread-layout'),
+              leading: Icon(_layoutIcon(_threadView.layout)),
+              title: const Text('レスの並べ方'),
+              subtitle: Text(
+                '${_layoutLabel(_threadView.layout)} ・ '
+                '${_layoutDescription(_threadView.layout)}',
+              ),
+              onTap: _pickThreadLayout,
             ),
-            onTap: _pickThreadLayout,
-          ),
-          const Divider(height: 1),
-          ListTile(
-            key: const ValueKey('settings-res-layout'),
-            leading: Icon(_resLayoutIcon(_threadView.resLayout)),
-            title: const Text('レス 1 件の見せ方'),
-            subtitle: Text(
-              '${_resLayoutLabel(_threadView.resLayout)} ・ '
-              '${_resLayoutDescription(_threadView.resLayout)}',
+            const Divider(height: 1),
+            ListTile(
+              key: const ValueKey('settings-res-layout'),
+              leading: Icon(_resLayoutIcon(_threadView.resLayout)),
+              title: const Text('レス 1 件の見せ方'),
+              subtitle: Text(
+                '${_resLayoutLabel(_threadView.resLayout)} ・ '
+                '${_resLayoutDescription(_threadView.resLayout)}',
+              ),
+              onTap: _pickResLayout,
             ),
-            onTap: _pickResLayout,
-          ),
-          const Divider(height: 1),
-          SwitchListTile(
-            key: const ValueKey('settings-link-previews'),
-            secondary: const Icon(Icons.link),
-            title: const Text('リンクをカードで見せる'),
-            // 端末から直接リンク先を読みに行くことを隠さない。相手のサーバに
-            // アクセスが残る（＝IP が渡る）ので、承知のうえで選べるようにする。
-            // 貼られたスレのカードは切っても出る（読みに行くのは元から見ている
-            // 掲示板サーバなので、この設定の理由に当たらない）ことも書いておく。
-            subtitle: const Text(
-              '行に URL だけがあるとき、その場でリンク先を読んで見出しと絵を出す。'
-              '知っている板のスレは、切っていてもスレタイを出す',
+            const Divider(height: 1),
+            SwitchListTile(
+              key: const ValueKey('settings-link-previews'),
+              secondary: const Icon(Icons.link),
+              title: const Text('リンクをカードで見せる'),
+              // 端末から直接リンク先を読みに行くことを隠さない。相手のサーバに
+              // アクセスが残る（＝IP が渡る）ので、承知のうえで選べるようにする。
+              // 貼られたスレのカードは切っても出る（読みに行くのは元から見ている
+              // 掲示板サーバなので、この設定の理由に当たらない）ことも書いておく。
+              subtitle: const Text(
+                '行に URL だけがあるとき、その場でリンク先を読んで見出しと絵を出す。'
+                '知っている板のスレは、切っていてもスレタイを出す',
+              ),
+              value: _threadView.linkPreviews,
+              onChanged: (enabled) async {
+                await _threadView.setLinkPreviews(enabled);
+                if (mounted) setState(() {});
+              },
             ),
-            value: _threadView.linkPreviews,
-            onChanged: (enabled) async {
-              await _threadView.setLinkPreviews(enabled);
-              if (mounted) setState(() {});
-            },
-          ),
-          const Divider(height: 1),
-          ListTile(
-            leading: const Icon(Icons.cloud_upload_outlined),
-            title: const Text('画像アップロード設定'),
-            subtitle: const Text('Imgur / ImgBB のアップロード先と API キー'),
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => ImageUploadSettingsScreen(
-                    store: ImageUploadSettings.shared,
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.cloud_upload_outlined),
+              title: const Text('画像アップロード設定'),
+              subtitle: const Text('Imgur / ImgBB のアップロード先と API キー'),
+              onTap: () {
+                Navigator.of(context).push(
+                  SwipeBackPageRoute<void>(
+                    pageBuilder: (_, _, _) => ImageUploadSettingsScreen(
+                      store: ImageUploadSettings.shared,
+                    ),
                   ),
-                ),
-              );
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.attach_file),
-            title: const Text('ファイルアップロード設定'),
-            subtitle: const Text('catbox.moe / uguu.se の任意ファイル送信先'),
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => FileUploadSettingsScreen(
-                    store: FileUploadSettings.shared,
-                  ),
-                ),
-              );
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.block),
-            title: const Text('NG設定'),
-            subtitle: const Text('NGワード・ID・スレ主の管理'),
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => NgScreen(store: NgStore.shared),
-                ),
-              );
-            },
-          ),
-          const Divider(height: 1),
-          ListTile(
-            key: const ValueKey('settings-clear-image-cache'),
-            leading: const Icon(Icons.cleaning_services_outlined),
-            title: const Text('画像キャッシュを削除'),
-            // 見た画像は端末に残る。中身によっては消したいことがあるので、
-            // 手で消せる場所を用意しておく。
-            subtitle: Text(
-              _cacheBytes == null
-                  ? '一度見た画像を端末に残して、開き直しを速くしています'
-                  : 'いま ${formatBytes(_cacheBytes!)} 使っています',
+                );
+              },
             ),
-            trailing: _clearing
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : null,
-            enabled: !_clearing && (_cacheBytes ?? 0) > 0,
-            onTap: _clearCache,
-          ),
-        ],
+            ListTile(
+              leading: const Icon(Icons.attach_file),
+              title: const Text('ファイルアップロード設定'),
+              subtitle: const Text('catbox.moe / uguu.se の任意ファイル送信先'),
+              onTap: () {
+                Navigator.of(context).push(
+                  SwipeBackPageRoute<void>(
+                    pageBuilder: (_, _, _) => FileUploadSettingsScreen(
+                      store: FileUploadSettings.shared,
+                    ),
+                  ),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.block),
+              title: const Text('NG設定'),
+              subtitle: const Text('NGワード・ID・スレ主の管理'),
+              onTap: () {
+                Navigator.of(context).push(
+                  SwipeBackPageRoute<void>(
+                    pageBuilder: (_, _, _) => NgScreen(store: NgStore.shared),
+                  ),
+                );
+              },
+            ),
+            const Divider(height: 1),
+            ListTile(
+              key: const ValueKey('settings-clear-image-cache'),
+              leading: const Icon(Icons.cleaning_services_outlined),
+              title: const Text('画像キャッシュを削除'),
+              // 見た画像は端末に残る。中身によっては消したいことがあるので、
+              // 手で消せる場所を用意しておく。
+              subtitle: Text(
+                _cacheBytes == null
+                    ? '一度見た画像を端末に残して、開き直しを速くしています'
+                    : 'いま ${formatBytes(_cacheBytes!)} 使っています',
+              ),
+              trailing: _clearing
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : null,
+              enabled: !_clearing && (_cacheBytes ?? 0) > 0,
+              onTap: _clearCache,
+            ),
+          ],
+        ),
       ),
     );
   }
