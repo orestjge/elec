@@ -1,6 +1,8 @@
 import 'package:edge_core/edge_core.dart';
 import 'package:elec/src/net/auth_launcher.dart';
 import 'package:elec/src/net/auth_store.dart';
+import 'package:elec/src/net/board.dart';
+import 'package:elec/src/net/endpoints.dart';
 import 'package:elec/src/net/read_history.dart';
 import 'package:elec/src/net/thread_view_settings.dart';
 import 'package:elec/src/net/token_storage.dart';
@@ -25,6 +27,21 @@ List<int> unauthBody(String code) => sjis(
 List<int> successBody() =>
     sjis('<html><!-- 2ch_X:true --><body>書きこみました</body></html>');
 
+final _eucJp = EucJpEncoder();
+List<int> eucDatLine(String s) => [..._eucJp.convert(s), 0x0A];
+
+/// したらばの成功ページ（EUC-JP・5ch と同じ `2ch_X:true`）。
+List<int> shitarabaSuccessBody() =>
+    _eucJp.convert('<html><!-- 2ch_X:true --><body>書きこみました。</body></html>');
+
+/// したらばの板（カテゴリ `otaku` / 掲示板 ID `18550`）。
+const shitarabaBoard = Board(
+  host: 'jbbs.shitaraba.net',
+  boardKey: 'otaku/18550',
+  title: 'したらばの板',
+  kind: BoardKind.shitaraba,
+);
+
 /// GET は固定の dat、POST は「呼び出し回数で切り替わる」フェイク。
 class ScriptedClient implements HttpFetcher, HttpPoster {
   ScriptedClient(this._postResponses, {this.dat});
@@ -32,6 +49,8 @@ class ScriptedClient implements HttpFetcher, HttpPoster {
   final List<int>? dat;
   int posts = 0;
   String? lastBody;
+  Uri? lastPostUrl;
+  Map<String, String> lastPostHeaders = const {};
 
   @override
   Future<FetchResponse> get(
@@ -50,6 +69,8 @@ class ScriptedClient implements HttpFetcher, HttpPoster {
     required String body,
   }) async {
     lastBody = body;
+    lastPostUrl = url;
+    lastPostHeaders = headers;
     final i = posts < _postResponses.length ? posts : _postResponses.length - 1;
     posts++;
     return _postResponses[i];
@@ -656,6 +677,52 @@ void main() {
       client.lastBody,
       buildBbsCgiBody(board: 'liveedge', threadKey: '123', message: aa),
     );
+  });
+
+  testWidgets('したらばのレス投稿は write.cgi へ EUC-JP で送る', (tester) async {
+    final client = ScriptedClient([
+      FetchResponse(statusCode: 200, bodyBytes: shitarabaSuccessBody()),
+    ], dat: eucDatLine('1<>名無しの紋さん<>sage<>2024/09/02(月) 04:37:47<>本文<>スレタイ<>'));
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadScreen(
+          threadKey: '1700000000',
+          threadTitle: 'テスト',
+          fetcher: client,
+          endpoints: EdgeEndpoints.forBoard(shitarabaBoard),
+          authStore: AuthStore(MemoryTokenStorage()),
+          authLauncher: FakeLauncher(),
+          pollInterval: const Duration(seconds: 60),
+          readHistory: ReadHistory(MemoryReadHistoryStorage()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField), 'みんないる');
+    await tester.tap(find.byIcon(Icons.send));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(
+      client.lastPostUrl.toString(),
+      'https://jbbs.shitaraba.net/bbs/write.cgi/otaku/18550/1700000000/',
+    );
+    expect(client.lastBody, contains('DIR=otaku'));
+    expect(client.lastBody, contains('BBS=18550'));
+    expect(client.lastBody, contains('KEY=1700000000'));
+    // 本文は EUC-JP（SJIS なら %82%DD... になる）。
+    expect(client.lastBody, contains('MESSAGE=%A4%DF%A4%F3%A4%CA%A4%A4%A4%EB'));
+    expect(client.lastBody, matches(RegExp(r'&TIME=\d+')));
+    expect(
+      client.lastPostHeaders['Referer'],
+      'https://jbbs.shitaraba.net/bbs/read.cgi/otaku/18550/1700000000/',
+    );
+    expect(client.lastPostHeaders['User-Agent'], startsWith('Monazilla/'));
+
+    // 受理されたことがそのまま画面に出る（EUC-JP の応答を化けずに読めている）。
+    expect(find.text('書き込みました'), findsOneWidget);
   });
 
   testWidgets('画像アップロード後に Imgur URL をレス本文へ挿入する', (tester) async {

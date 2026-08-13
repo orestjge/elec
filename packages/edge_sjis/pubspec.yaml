@@ -1,6 +1,6 @@
 name: edge_sjis
 description: >-
-  エッヂ (eddist) / 5ch 互換掲示板のワイヤフォーマットである Windows-31J (CP932) の
+  掲示板のワイヤ文字コード（5ch 系は Windows-31J (CP932)、したらばは EUC-JP）の
   エンコード・デコード。Flutter 非依存の純 Dart。
 version: 0.1.0
 publish_to: none

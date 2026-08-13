@@ -1,6 +1,6 @@
 # edge_sjis
 
-エッヂ (eddist) / 5ch 互換掲示板のワイヤフォーマットである **Windows-31J (CP932)** のエンコード・デコード。Flutter 非依存の純 Dart。
+エッヂ (eddist) / 5ch 互換掲示板のワイヤフォーマットである **Windows-31J (CP932)** のエンコード・デコード。したらばだけは **EUC-JP** なので、そちらも同じ入口（`BbsTextEncoding`）で扱う。Flutter 非依存の純 Dart。
 
 `dart:convert` は utf8 / latin1 / ascii しか持たない。一方エッヂはプロトコル全体が Shift_JIS（`subject.txt`、`dat`、`SETTING.TXT`、`bbs.cgi` のボディ）なので、この層は避けて通れない。
 
@@ -11,6 +11,12 @@ final body  = encodeFormBody({                // bbs.cgi のボディ
   'submit': '書き込む', 'MESSAGE': '本文',
   'bbs': 'liveedge', 'key': '1749045135',
 });
+
+// したらば（EUC-JP）は同じ関数に文字コードを渡す。
+final euc = encodeFormBody({
+  'submit': '書き込む', 'MESSAGE': '本文',
+  'DIR': 'otaku', 'BBS': '18550', 'KEY': '1700000000',
+}, encoding: BbsTextEncoding.eucJp);
 ```
 
 ## なぜ `charset` ではなく `jis0208` なのか

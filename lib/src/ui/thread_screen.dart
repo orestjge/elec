@@ -450,7 +450,7 @@ class _ThreadScreenState extends State<ThreadScreen>
   bool get _isStopped => _statusLabel != null;
 
   /// 書き込み可能か。停止スレ（dat落ち・完走）でなく、かつ板が書き込みに対応
-  /// している（現状 eddist のみ。5ch 書き込みは Phase 2）こと。
+  /// していること。
   bool get _canWrite => _canWriteWith(widget.initialStatusLabel);
 
   bool _canWriteWith(String? inherited) =>
@@ -2462,16 +2462,18 @@ class _ThreadScreenState extends State<ThreadScreen>
       );
     }
     // HttpPoster は HttpFetcher の部分型ではないので明示キャストが要る。
-    final result = await BbsWriter(fetcher as HttpPoster).post(
-      bbsCgi: widget.endpoints.bbsCgi,
+    final writer = BbsWriter(
+      fetcher as HttpPoster,
+      dialect: widget.endpoints.writeDialect,
+    );
+    final result = await writer.post(
+      bbsCgi: widget.endpoints.writeUrl(threadKey: widget.threadKey),
       board: widget.endpoints.boardKey,
       threadKey: widget.threadKey,
       message: text,
       tokens: _authStore.tokensFor(widget.endpoints.host),
       referer: widget.endpoints.writeReferer(threadKey: widget.threadKey),
-      time: widget.endpoints.isFivech
-          ? '${DateTime.now().millisecondsSinceEpoch ~/ 1000}'
-          : null,
+      time: widget.endpoints.writeTime(DateTime.now()),
       userAgent: widget.endpoints.writeUserAgent,
     );
     // ホスト単位で Cookie（edge/tinker・MonaTicket）を持ち回して永続化。

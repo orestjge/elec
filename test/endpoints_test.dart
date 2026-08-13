@@ -1,3 +1,4 @@
+import 'package:edge_core/edge_core.dart';
 import 'package:elec/src/net/board.dart';
 import 'package:elec/src/net/endpoints.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -65,15 +66,8 @@ void main() {
       expect(e.writeReferer(threadKey: '1'), isNull);
     });
 
-    test('したらばは読み取り URL を専用経路にし書き込みは無効', () {
-      final e = EdgeEndpoints.forBoard(
-        const Board(
-          host: 'jbbs.shitaraba.net',
-          boardKey: 'otaku/18550',
-          title: 'x',
-          kind: BoardKind.shitaraba,
-        ),
-      );
+    test('したらばは読み取り URL を専用経路にする', () {
+      final e = _shitaraba;
       expect(
         e.subjectTxt.toString(),
         'https://jbbs.shitaraba.net/otaku/18550/subject.txt',
@@ -90,8 +84,47 @@ void main() {
         e.thread('1700000000').toString(),
         'https://jbbs.shitaraba.net/bbs/read.cgi/otaku/18550/1700000000/',
       );
-      expect(e.supportsWrite, isFalse);
       expect(e.supportsHissi, isFalse);
+    });
+
+    test('したらばの書き込み先は write.cgi（スレ立ては new）', () {
+      final e = _shitaraba;
+      expect(e.supportsWrite, isTrue);
+      expect(e.writeDialect, BbsDialect.shitaraba);
+      expect(
+        e.writeUrl(threadKey: '1700000000').toString(),
+        'https://jbbs.shitaraba.net/bbs/write.cgi/otaku/18550/1700000000/',
+      );
+      expect(
+        e.writeUrl().toString(),
+        'https://jbbs.shitaraba.net/bbs/write.cgi/otaku/18550/new/',
+      );
+    });
+
+    test('したらばの Referer はフォームと同じスレ URL・板トップ', () {
+      final e = _shitaraba;
+      expect(
+        e.writeReferer(threadKey: '1700000000'),
+        'https://jbbs.shitaraba.net/bbs/read.cgi/otaku/18550/1700000000/',
+      );
+      expect(e.writeReferer(), 'https://jbbs.shitaraba.net/otaku/18550/');
+      expect(e.writeUserAgent, startsWith('Monazilla/'));
+    });
+
+    test('TIME は eddist だけ送らない', () {
+      final now = DateTime.fromMillisecondsSinceEpoch(1700000000000);
+      expect(_shitaraba.writeTime(now), '1700000000');
+      expect(const EdgeEndpoints().writeTime(now), isNull);
     });
   });
 }
+
+/// したらばの板（カテゴリ `otaku` / 掲示板 ID `18550`）。
+EdgeEndpoints get _shitaraba => EdgeEndpoints.forBoard(
+  const Board(
+    host: 'jbbs.shitaraba.net',
+    boardKey: 'otaku/18550',
+    title: 'x',
+    kind: BoardKind.shitaraba,
+  ),
+);

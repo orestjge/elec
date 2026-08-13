@@ -1,7 +1,6 @@
 import 'package:edge_sjis/edge_sjis.dart';
 
 import 'models.dart';
-import 'subject_parser.dart' show BbsTextEncoding, decodeBbsText;
 
 /// dat の日付+ID 欄をパースするための正規表現。
 ///
