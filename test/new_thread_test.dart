@@ -17,7 +17,13 @@ List<int> successBody() =>
 
 /// createThread の POST を記録するフェイク。
 class RecordingPoster implements HttpFetcher, HttpPoster {
+  RecordingPoster({this.response});
+
+  /// POST への応答。既定は 5ch 互換の成功ページ。
+  final FetchResponse? response;
+
   String? lastBody;
+  Uri? lastUrl;
 
   @override
   Future<FetchResponse> get(
@@ -32,7 +38,8 @@ class RecordingPoster implements HttpFetcher, HttpPoster {
     required String body,
   }) async {
     lastBody = body;
-    return FetchResponse(statusCode: 200, bodyBytes: successBody());
+    lastUrl = url;
+    return response ?? FetchResponse(statusCode: 200, bodyBytes: successBody());
   }
 }
 
@@ -101,6 +108,53 @@ void main() {
       poster.lastBody,
       buildBbsCgiThreadBody(board: 'liveedge', title: 'テストスレ', message: aa),
     );
+  });
+
+  testWidgets('したらばのスレ立ては write.cgi/new へ EUC-JP で送る', (tester) async {
+    final poster = RecordingPoster(
+      response: FetchResponse(
+        statusCode: 200,
+        bodyBytes: EucJpEncoder().convert(
+          '<html><!-- 2ch_X:true --><body>書きこみました。</body></html>',
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NewThreadScreen(
+          fetcher: poster,
+          endpoints: EdgeEndpoints.forBoard(
+            const Board(
+              host: 'jbbs.shitaraba.net',
+              boardKey: 'otaku/18550',
+              title: 'したらばの板',
+              kind: BoardKind.shitaraba,
+            ),
+          ),
+          authStore: AuthStore(MemoryTokenStorage()),
+          authLauncher: FakeLauncher(),
+        ),
+      ),
+    );
+
+    await tester.enterText(find.byType(TextField).at(0), 'テストスレ');
+    await tester.enterText(find.byType(TextField).at(1), 'みんないる');
+    await tester.pump();
+
+    await tester.tap(find.byKey(const ValueKey('new-thread-submit')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(
+      poster.lastUrl.toString(),
+      'https://jbbs.shitaraba.net/bbs/write.cgi/otaku/18550/new/',
+    );
+    expect(poster.lastBody, contains('SUBJECT=%A5%C6%A5%B9%A5%C8%A5%B9%A5%EC'));
+    expect(poster.lastBody, contains('MESSAGE=%A4%DF%A4%F3%A4%CA%A4%A4%A4%EB'));
+    expect(poster.lastBody, contains('DIR=otaku'));
+    expect(poster.lastBody, contains('BBS=18550'));
+    expect(poster.lastBody, isNot(contains('KEY=')));
   });
 
   testWidgets('本文に AA を書くと、AA の字で・幅に収めて見せる', (tester) async {

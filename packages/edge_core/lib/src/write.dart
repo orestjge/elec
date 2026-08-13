@@ -156,6 +156,21 @@ DateTime? _parseHttpDate(String s) {
   );
 }
 
+/// 書き込みフォームの方言。
+///
+/// 5ch / eddist の `bbs.cgi`（`bbs`・`key`、Windows-31J）と、したらばの
+/// `write.cgi`（`DIR`・`BBS`・`KEY`、EUC-JP）でフィールド名も文字コードも
+/// 違うので、body の組み立てと応答のデコードをこれ 1 つで切り替える。
+enum BbsDialect {
+  fivechCompat(BbsTextEncoding.sjis),
+  shitaraba(BbsTextEncoding.eucJp);
+
+  const BbsDialect(this.encoding);
+
+  /// フォームの値・応答本文のワイヤ文字コード。
+  final BbsTextEncoding encoding;
+}
+
 /// bbs.cgi の POST ボディを組み立てる。
 ///
 /// フィールド順・名前はブラウザのフォーム送信に合わせる
@@ -202,6 +217,61 @@ String buildBbsCgiThreadBody({
     if (time != null) 'time': time,
     'bbs': board,
   });
+}
+
+/// したらばの write.cgi へのレス書き込みボディ。
+///
+/// フィールド名・順は read.cgi のレスフォームの実測に合わせる（`submit` /
+/// `NAME` / `MAIL` / `MESSAGE` / `DIR` / `BBS` / `KEY` / `TIME`）。5ch 系と違い
+/// **大文字**で、板は [dir]（カテゴリ）と [bbs]（掲示板 ID）の 2 つに割れる。
+/// 値は EUC-JP でパーセントエンコードする。
+///
+/// [time] はフォームの hidden `TIME`（ページを出した UNIX 秒）。現在時刻でよい。
+String buildShitarabaBody({
+  required String dir,
+  required String bbs,
+  required String threadKey,
+  required String message,
+  String name = '',
+  String mail = '',
+  String? time,
+}) {
+  return encodeFormBody({
+    'submit': '書き込む',
+    'NAME': name,
+    'MAIL': mail,
+    'MESSAGE': message,
+    'DIR': dir,
+    'BBS': bbs,
+    'KEY': threadKey,
+    if (time != null) 'TIME': time,
+  }, encoding: BbsTextEncoding.eucJp);
+}
+
+/// したらばの新規スレッド作成ボディ（板トップのスレ立てフォームの実測）。
+///
+/// レス書き込みとの違いは `SUBJECT`（スレタイ）を持ち `KEY` を持たないこと。
+/// 投げ先も `.../write.cgi/{DIR}/{BBS}/new/` と別（[BbsDialect] 側では扱わない
+/// ので、URL は呼び出し側が決める）。
+String buildShitarabaThreadBody({
+  required String dir,
+  required String bbs,
+  required String title,
+  required String message,
+  String name = '',
+  String mail = '',
+  String? time,
+}) {
+  return encodeFormBody({
+    'submit': '新規書き込み',
+    'SUBJECT': title,
+    'NAME': name,
+    'MAIL': mail,
+    'MESSAGE': message,
+    'DIR': dir,
+    'BBS': bbs,
+    if (time != null) 'TIME': time,
+  }, encoding: BbsTextEncoding.eucJp);
 }
 
 /// bbs.cgi の応答の判定結果。
@@ -266,12 +336,16 @@ final _hiddenInputRe = RegExp(
 ///
 /// [headers] を渡すと、成功時に `x-resnum`（サーバが返す書き込んだレス番号）を
 /// [PostAccepted.resNum] に載せる。キーは小文字で引く。
+///
+/// [encoding] は応答本文のワイヤ文字コード。したらばの write.cgi は EUC-JP で
+/// 返す（`2ch_X:` マーカーは 5ch と同じものを吐く）。
 BbsCgiResult parseBbsCgiResult(
   int status,
   List<int> bodyBytes, {
   Map<String, String> headers = const {},
+  BbsTextEncoding encoding = BbsTextEncoding.sjis,
 }) {
-  final body = decodeSjis(bodyBytes);
+  final body = decodeBbsText(bodyBytes, encoding);
   final marker = _twoChXRe.firstMatch(body)?.group(1);
   if (marker == 'true' ||
       body.contains('2ch_X:true') ||
@@ -365,12 +439,40 @@ String? _attr(String tag, String attr) {
   return bare?.group(1);
 }
 
-/// エラー本文から利用者向けメッセージを取り出す。`エラー！` の後ろを拾う。
+/// 見出しに使われる文字列。5ch / eddist は `エラー！`、したらばは `ERROR!!`。
+/// したらばの `ERROR:` で始まる**説明文**を見出しと取り違えないよう `!!` まで見る。
+const _errorHeadings = ['エラー！', 'ERROR!!'];
+
+/// ページの体裁だけで、説明として読ませる意味を持たない行。
+final _errorNoiseRe = RegExp(r'したらば掲示板');
+
+/// エラー本文から利用者向けメッセージを取り出す。見出しの後ろを拾う。
+///
+/// したらばは `<title>` と本文の両方に `ERROR!!` を出すので、**最後の**見出しを
+/// 起点にする（`<title>` から採ると見出しが 2 回並ぶ）。末尾に付く運営サイトへの
+/// リンク行は説明ではないので落とす。
 String _errorMessage(String body) {
-  final text = htmlToText(body);
-  final idx = text.indexOf('エラー！');
-  final rest = idx >= 0 ? text.substring(idx + 'エラー！'.length) : text;
-  return rest.trim().replaceAll(RegExp(r'\n{2,}'), '\n');
+  final lines = htmlToText(
+    body,
+  ).split('\n').map((l) => l.trim()).where((l) => l.isNotEmpty).toList();
+  final heading = lines.lastIndexWhere((l) => _errorHeadings.any(l.startsWith));
+  final rest = heading < 0
+      ? lines
+      : [
+          // 見出しと同じ行に説明が続くことがある（`エラー！ 〜〜`）。
+          _stripHeading(lines[heading]),
+          ...lines.skip(heading + 1),
+        ];
+  return rest
+      .where((l) => l.isNotEmpty && !_errorNoiseRe.hasMatch(l))
+      .join('\n');
+}
+
+String _stripHeading(String line) {
+  for (final h in _errorHeadings) {
+    if (line.startsWith(h)) return line.substring(h.length).trim();
+  }
+  return line;
 }
 
 /// 1 回の書き込み結果と、更新後のトークン。
@@ -382,13 +484,21 @@ class WriteResult {
   final AuthTokens tokens;
 }
 
-/// bbs.cgi への書き込み（レス・スレ立て）を行う。純ロジックで、通信は
-/// [HttpPoster] 越し。
+/// bbs.cgi（したらばは write.cgi）への書き込み（レス・スレ立て）を行う。
+/// 純ロジックで、通信は [HttpPoster] 越し。
+///
+/// [dialect] でフォームの形と応答の文字コードを切り替える。投げ先の URL だけは
+/// 板ごとに違う（したらばはスレキーを URL に含む）ので呼び出し側が決める。
 class BbsWriter {
-  const BbsWriter(this.poster);
+  const BbsWriter(this.poster, {this.dialect = BbsDialect.fivechCompat});
   final HttpPoster poster;
+  final BbsDialect dialect;
 
   /// スレッドへのレス書き込み。
+  ///
+  /// [board] は板キー。したらばだけは `カテゴリ/掲示板ID`（板 URL がその 2 階層
+  /// なので、アプリはこの形で 1 つの板キーとして持っている）で、フォームの
+  /// `DIR` / `BBS` に割り直す。
   ///
   /// [referer] は 5ch がレス投稿に要求する read.cgi のスレ URL。eddist では不要
   /// （null）。
@@ -404,16 +514,28 @@ class BbsWriter {
     String? time,
     String? userAgent,
   }) {
+    final (dir, bbs) = _splitBoard(board);
     return _send(
       bbsCgi,
-      buildBbsCgiBody(
-        board: board,
-        threadKey: threadKey,
-        message: message,
-        name: name,
-        mail: mail,
-        time: time,
-      ),
+      switch (dialect) {
+        BbsDialect.fivechCompat => buildBbsCgiBody(
+          board: board,
+          threadKey: threadKey,
+          message: message,
+          name: name,
+          mail: mail,
+          time: time,
+        ),
+        BbsDialect.shitaraba => buildShitarabaBody(
+          dir: dir,
+          bbs: bbs,
+          threadKey: threadKey,
+          message: message,
+          name: name,
+          mail: mail,
+          time: time,
+        ),
+      },
       tokens,
       referer: referer,
       userAgent: userAgent,
@@ -433,20 +555,39 @@ class BbsWriter {
     String? time,
     String? userAgent,
   }) {
+    final (dir, bbs) = _splitBoard(board);
     return _send(
       bbsCgi,
-      buildBbsCgiThreadBody(
-        board: board,
-        title: title,
-        message: message,
-        name: name,
-        mail: mail,
-        time: time,
-      ),
+      switch (dialect) {
+        BbsDialect.fivechCompat => buildBbsCgiThreadBody(
+          board: board,
+          title: title,
+          message: message,
+          name: name,
+          mail: mail,
+          time: time,
+        ),
+        BbsDialect.shitaraba => buildShitarabaThreadBody(
+          dir: dir,
+          bbs: bbs,
+          title: title,
+          message: message,
+          name: name,
+          mail: mail,
+          time: time,
+        ),
+      },
       tokens,
       referer: referer,
       userAgent: userAgent,
     );
+  }
+
+  /// したらばの板キー `カテゴリ/掲示板ID` を割る。5ch 系では使わない。
+  (String, String) _splitBoard(String board) {
+    final slash = board.indexOf('/');
+    if (slash < 0) return (board, board);
+    return (board.substring(0, slash), board.substring(slash + 1));
   }
 
   Future<WriteResult> _send(
@@ -463,6 +604,7 @@ class BbsWriter {
       resp.statusCode,
       resp.bodyBytes,
       headers: resp.headers,
+      encoding: dialect.encoding,
     );
 
     // 5ch の書き込み確認（どんぐり/クッキー）は hidden を詰め直して 1 回だけ
@@ -471,13 +613,14 @@ class BbsWriter {
       final confirmBody = encodeFormBody({
         ...outcome.hiddenFields,
         'submit': '上記全てを承諾して書き込む',
-      });
+      }, encoding: dialect.encoding);
       resp = await _post(bbsCgi, confirmBody, current, referer, userAgent);
       current = current.updatedFrom(resp.setCookies);
       outcome = parseBbsCgiResult(
         resp.statusCode,
         resp.bodyBytes,
         headers: resp.headers,
+        encoding: dialect.encoding,
       );
     }
 

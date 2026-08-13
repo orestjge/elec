@@ -183,4 +183,43 @@ void main() {
       }
     });
   });
+
+  group('EUC-JP（したらば）', () {
+    const eucJp = BbsTextEncoding.eucJp;
+
+    test('漢字・かなを EUC-JP のバイト列でエンコードする', () {
+      expect(
+        encodeFormValue('書き込む', encoding: eucJp),
+        '%BD%F1%A4%AD%B9%FE%A4%E0',
+      );
+    });
+
+    test('半角カナは 0x8E 付きの 2 バイト', () {
+      expect(encodeFormValue('ｶ', encoding: eucJp), '%8E%B6');
+    });
+
+    test('フォームの規約は Windows-31J と同じ', () {
+      expect(encodeFormValue('a b', encoding: eucJp), 'a+b');
+      expect(encodeFormValue('a\r\nb', encoding: eucJp), 'a%0D%0Ab');
+      expect(
+        encodeFormValue('abcXYZ019-_.*~', encoding: eucJp),
+        'abcXYZ019-_.*~',
+      );
+    });
+
+    test('EUC-JP に無い文字は数値文字参照になる', () {
+      expect(encodeFormValue('🍣', encoding: eucJp), '%26%23127843%3B');
+      expect(encodeFormValue('𠮷', encoding: eucJp), '%26%23134071%3B');
+      // 表現できる・できないの境目は Windows-31J と揃っている（jis0208 が
+      // どちらも WHATWG の変換表で引くため）。`〜` U+301C は両方とも無い。
+      expect(isEncodable('〜', encoding: eucJp), isFalse);
+      expect(isEncodable('～', encoding: eucJp), isTrue);
+    });
+
+    test('decodeBbsText は文字コードで読み分ける', () {
+      final bytes = EucJpEncoder().convert('あいうえお');
+      expect(decodeBbsText(bytes, eucJp), 'あいうえお');
+      expect(decodeBbsText(bytes, BbsTextEncoding.sjis), isNot('あいうえお'));
+    });
+  });
 }

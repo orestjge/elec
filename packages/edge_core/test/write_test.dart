@@ -5,6 +5,28 @@ import 'package:test/test.dart';
 final _win31j = Windows31JCodec();
 List<int> sjis(String s) => _win31j.encode(s);
 
+final _eucJp = EucJpEncoder();
+List<int> eucJp(String s) => _eucJp.convert(s);
+
+/// 実サーバ（jbbs.shitaraba.net）が返したエラーページ。EUC-JP・`2ch_X:error`
+/// つきで、見出しは `<title>` と本文の 2 箇所に出る。
+List<int> shitarabaErrorBody(String message) => eucJp(
+  '<!DOCTYPE html>\n<html lang="ja">\n<head>\n'
+  '<meta charset="EUC-JP">\n<title>ERROR!!</title>\n</head>\n'
+  '<body bgcolor="#FFFFFF">\n<!-- 2ch_X:error -->\n'
+  '<table width="100%" border="1"><tr><td><b>\n'
+  'ERROR!!\n<br>\n<br>\n$message\n</b></td></tr></table>\n'
+  '<hr size="1">\n<div align="right">'
+  '<a href="http://rentalbbs.shitaraba.com/">したらば掲示板 (無料レンタル)</a>'
+  '</div>\n</body>\n</html>',
+);
+
+/// したらばの成功ページ（5ch と同じ `2ch_X:true` マーカーを吐く）。
+List<int> shitarabaSuccessBody() => eucJp(
+  '<html><!-- 2ch_X:true --><head><title>書きこみました。</title></head>'
+  '<body>書きこみました。</body></html>',
+);
+
 /// 実サーバ（experiment 板）が返した未認証レスポンスの本文を再現。
 List<int> unauthBody(String code) => sjis(
   '<html><!-- 2ch_X:error -->\n'
@@ -492,6 +514,107 @@ void main() {
       // 2 回で打ち切り、最後の確認結果をそのまま返す（成功にはならない）。
       expect(poster.calls, hasLength(2));
       expect(result.outcome, isA<PostNeedsConfirm>());
+    });
+  });
+
+  group('したらば（write.cgi）', () {
+    final writeCgi = Uri.parse(
+      'https://jbbs.shitaraba.net/bbs/write.cgi/otaku/18550/1700000000/',
+    );
+
+    test('レスの body は大文字フィールド・EUC-JP', () {
+      final body = buildShitarabaBody(
+        dir: 'otaku',
+        bbs: '18550',
+        threadKey: '1700000000',
+        message: 'みんないる',
+        time: '1700000001',
+      );
+      expect(
+        body,
+        'submit=%BD%F1%A4%AD%B9%FE%A4%E0&NAME=&MAIL=&'
+        'MESSAGE=%A4%DF%A4%F3%A4%CA%A4%A4%A4%EB&'
+        'DIR=otaku&BBS=18550&KEY=1700000000&TIME=1700000001',
+      );
+    });
+
+    test('スレ立ての body は SUBJECT を持ち KEY を持たない', () {
+      final body = buildShitarabaThreadBody(
+        dir: 'otaku',
+        bbs: '18550',
+        title: 'テストスレ',
+        message: '本文',
+        time: '1700000001',
+      );
+      expect(
+        body,
+        'submit=%BF%B7%B5%AC%BD%F1%A4%AD%B9%FE%A4%DF&'
+        'SUBJECT=%A5%C6%A5%B9%A5%C8%A5%B9%A5%EC&NAME=&MAIL=&'
+        'MESSAGE=%CB%DC%CA%B8&DIR=otaku&BBS=18550&TIME=1700000001',
+      );
+      expect(body, isNot(contains('KEY=')));
+    });
+
+    test('EUC-JP に無い文字は数値文字参照になる', () {
+      final body = buildShitarabaBody(
+        dir: 'otaku',
+        bbs: '18550',
+        threadKey: '1',
+        message: '🍣',
+      );
+      expect(body, contains('MESSAGE=%26%23127843%3B'));
+    });
+
+    test('BbsWriter が板キーを DIR / BBS に割る', () async {
+      final poster = FakePoster(
+        FetchResponse(statusCode: 200, bodyBytes: shitarabaSuccessBody()),
+      );
+      final result = await BbsWriter(poster, dialect: BbsDialect.shitaraba)
+          .post(
+            bbsCgi: writeCgi,
+            board: 'otaku/18550',
+            threadKey: '1700000000',
+            message: 'x',
+            time: '1700000001',
+          );
+      expect(result.outcome, isA<PostAccepted>());
+      expect(poster.url, writeCgi);
+      expect(poster.body, contains('DIR=otaku'));
+      expect(poster.body, contains('BBS=18550'));
+      expect(poster.body, contains('KEY=1700000000'));
+    });
+
+    test('スレ立ても板キーを割る', () async {
+      final poster = FakePoster(
+        FetchResponse(statusCode: 200, bodyBytes: shitarabaSuccessBody()),
+      );
+      await BbsWriter(poster, dialect: BbsDialect.shitaraba).createThread(
+        bbsCgi: Uri.parse(
+          'https://jbbs.shitaraba.net/bbs/write.cgi/otaku/18550/new/',
+        ),
+        board: 'otaku/18550',
+        title: 't',
+        message: 'm',
+      );
+      expect(poster.body, contains('DIR=otaku'));
+      expect(poster.body, contains('BBS=18550'));
+      expect(poster.body, isNot(contains('KEY=')));
+    });
+
+    test('EUC-JP のエラーページを化けずに読む', () {
+      final r = parseBbsCgiResult(
+        404,
+        shitarabaErrorBody('該当スレッドは存在しません'),
+        encoding: BbsTextEncoding.eucJp,
+      );
+      expect(r, isA<PostRejected>());
+      final message = (r as PostRejected).message;
+      expect(message, '該当スレッドは存在しません');
+    });
+
+    test('SJIS として読むと化けるので encoding を渡し忘れない', () {
+      final r = parseBbsCgiResult(404, shitarabaErrorBody('該当スレッドは存在しません'));
+      expect((r as PostRejected).message, isNot(contains('該当スレッド')));
     });
   });
 }

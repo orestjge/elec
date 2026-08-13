@@ -60,14 +60,25 @@ class EdgeEndpoints {
   bool get supportsHissi =>
       kind == BoardKind.eddist || kind == BoardKind.fivech;
 
-  /// 書き込み（レス・スレ立て）に対応しているか。したらばは bbs.cgi フローが
-  /// 異なるため、現時点では読み取り専用にする。
-  bool get supportsWrite => !isShitaraba;
+  /// 書き込み（レス・スレ立て）に対応しているか。
+  bool get supportsWrite => true;
 
-  /// 5ch が書き込み時に要求する `Referer`。レスは read.cgi のスレ URL（末尾
-  /// スラッシュ無し・Slevo に合わせる）、スレ立ては板トップ。板の host（bbsmenu
-  /// 由来の `.io`）をそのまま使う。eddist は Referer 不要なので null。
+  /// 書き込みフォームの方言。したらばだけ `write.cgi`（大文字フィールド・EUC-JP）。
+  BbsDialect get writeDialect =>
+      isShitaraba ? BbsDialect.shitaraba : BbsDialect.fivechCompat;
+
+  /// 書き込み時に付ける `Referer`。レスはスレ URL、スレ立ては板トップ。
+  ///
+  /// 5ch は**要求する**（無いと landing へ飛ばされる。末尾スラッシュ無しの
+  /// read.cgi URL＝Slevo に合わせる）。したらばは要求しないが、ブラウザの
+  /// フォーム送信に合わせて付ける（フォームの action と同じスレの URL）。
+  /// eddist は不要なので null。
   String? writeReferer({String? threadKey}) {
+    if (isShitaraba) {
+      return threadKey != null
+          ? thread(threadKey).toString()
+          : Uri.https(host, '/$boardKey/').toString();
+    }
     if (kind != BoardKind.fivech) return null;
     if (threadKey != null) {
       return Uri.https(host, '/test/read.cgi/$boardKey/$threadKey').toString();
@@ -76,9 +87,19 @@ class EdgeEndpoints {
   }
 
   /// 書き込み時の User-Agent。5ch の bbs.cgi は **Monazilla 系 UA を要求**する
-  /// （非 Monazilla は landing へ弾かれる）。eddist は既定 UA のままなので null。
-  String? get writeUserAgent =>
-      kind == BoardKind.fivech ? 'Monazilla/1.00 (elec/0.1)' : null;
+  /// （非 Monazilla は landing へ弾かれる）。したらばも専ブラを Monazilla で
+  /// 見分ける（応答が `Vary: User-Agent`）ので同じものを名乗る。eddist は既定
+  /// UA のままなので null。
+  String? get writeUserAgent => kind == BoardKind.fivech || isShitaraba
+      ? 'Monazilla/1.00 (elec/0.1)'
+      : null;
+
+  /// 書き込みが要求する投稿時刻（UNIX 秒）。フォームの hidden `time` / `TIME`。
+  ///
+  /// 5ch は無いと弾かれ、したらばはフォームがページ生成時刻を持つ。eddist は
+  /// 受け取らないので null＝送らない。
+  String? writeTime(DateTime now) =>
+      kind == BoardKind.eddist ? null : '${now.millisecondsSinceEpoch ~/ 1000}';
 
   Uri get subjectTxt => Uri.https(host, '/$boardKey/subject.txt');
 
@@ -115,9 +136,20 @@ class EdgeEndpoints {
   /// `.io`）に `?guid=ON`（Slevo・PROJECT.md の実測に合わせる）。body の `bbs=`
   /// で板を指定する。**成否は Monazilla UA・guid・time・Referer が揃うかで決まる**
   /// （どれか欠けると 302 で landing へ飛ばされる）。
+  ///
+  /// したらばだけは板ではなく**書き込み先そのもの**を URL で指す（レスは
+  /// スレキー、スレ立ては `new`）ので [writeUrl] を使う。
   Uri get bbsCgi => kind == BoardKind.fivech
       ? Uri.https(host, '/test/bbs.cgi', {'guid': 'ON'})
       : Uri.https(host, '/test/bbs.cgi');
+
+  /// 書き込みの POST 先。[threadKey] が null ならスレ立て。
+  ///
+  /// 5ch 系はレスもスレ立ても同じ bbs.cgi（宛先は body で指定）。したらばは
+  /// `/bbs/write.cgi/{カテゴリ}/{掲示板ID}/{スレキー or new}/`。
+  Uri writeUrl({String? threadKey}) => isShitaraba
+      ? Uri.https(host, '/bbs/write.cgi/$boardKey/${threadKey ?? 'new'}/')
+      : bbsCgi;
 
   /// 認証コード入力ページ（WebView で開く）。エッヂの auth-code 方式のみ。
   Uri get authCode => Uri.https(host, '/auth-code');

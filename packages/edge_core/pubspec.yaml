@@ -10,7 +10,8 @@ environment:
   sdk: ^3.9.0
 
 dependencies:
-  # したらばの EUC-JP デコードに EucJpDecoder を直接使う。
+  # テストで EUC-JP / Windows-31J のバイト列を作るのに使う（本体のエンコード・
+  # デコードは edge_sjis 越し）。
   jis0208: ^1.0.1
   edge_sjis:
     path: ../edge_sjis

@@ -1,18 +1,11 @@
 import 'package:edge_sjis/edge_sjis.dart';
-import 'package:jis0208/jis0208.dart';
 
 import 'models.dart';
 
-enum BbsTextEncoding { sjis, eucJp }
-
-final _eucJpDecoder = EucJpDecoder(allowMalformed: true);
-
-String decodeBbsText(List<int> bytes, BbsTextEncoding encoding) {
-  return switch (encoding) {
-    BbsTextEncoding.sjis => decodeSjis(bytes),
-    BbsTextEncoding.eucJp => _eucJpDecoder.convert(bytes),
-  };
-}
+// ワイヤ文字コードの軸（[BbsTextEncoding]）とデコードは、書き込み側の
+// エンコードと同じ表を使うため edge_sjis が持つ。edge_core の利用者が
+// edge_sjis を直接 import せずに済むよう、ここから再輸出する。
+export 'package:edge_sjis/edge_sjis.dart' show BbsTextEncoding, decodeBbsText;
 
 /// `title [cap★] (resCount)` の末尾を分解する正規表現。
 ///

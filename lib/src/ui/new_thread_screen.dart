@@ -290,8 +290,12 @@ class _NewThreadScreenState extends State<NewThreadScreen> {
         message: 'この環境では書き込みに未対応です',
       );
     }
-    final result = await BbsWriter(fetcher as HttpPoster).createThread(
-      bbsCgi: widget.endpoints.bbsCgi,
+    final writer = BbsWriter(
+      fetcher as HttpPoster,
+      dialect: widget.endpoints.writeDialect,
+    );
+    final result = await writer.createThread(
+      bbsCgi: widget.endpoints.writeUrl(),
       board: widget.endpoints.boardKey,
       title: _title.text.trim(),
       // URL 挿入で末尾に付く改行は残さない。AA の末尾空白は保持したいので、
@@ -299,9 +303,7 @@ class _NewThreadScreenState extends State<NewThreadScreen> {
       message: _body.text.replaceAll(RegExp(r'\n+$'), ''),
       tokens: _authStore.tokensFor(widget.endpoints.host),
       referer: widget.endpoints.writeReferer(),
-      time: widget.endpoints.isFivech
-          ? '${DateTime.now().millisecondsSinceEpoch ~/ 1000}'
-          : null,
+      time: widget.endpoints.writeTime(DateTime.now()),
       userAgent: widget.endpoints.writeUserAgent,
     );
     await _authStore.setTokensFor(widget.endpoints.host, result.tokens);
