@@ -3,6 +3,10 @@ import 'dart:async';
 import 'package:edge_core/edge_core.dart';
 import 'package:elec/src/net/read_history.dart';
 import 'package:elec/src/ui/back_swipe.dart';
+import 'package:elec/src/ui/file_upload_settings_screen.dart';
+import 'package:elec/src/ui/image_upload_settings_screen.dart';
+import 'package:elec/src/ui/ng_screen.dart';
+import 'package:elec/src/ui/settings_screen.dart';
 import 'package:elec/src/ui/thread_list_screen.dart';
 import 'package:elec/src/ui/thread_screen.dart';
 import 'package:elec/src/ui/thread_tile.dart';
@@ -318,6 +322,91 @@ void main() {
 
     // 同じスレが同じ位置にいる（先頭へ戻らない）。
     expect(tester.getTopLeft(find.widgetWithText(ThreadTile, title)).dy, top);
+  });
+
+  testWidgets('設定からも引けば一覧へ戻る', (tester) async {
+    fetcher = QueueFetcher([ok(_win31j.encode('1.dat<>スワイプスレ (1)\n'))]);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ThreadListScreen(
+          fetcher: fetcher,
+          pollInterval: const Duration(seconds: 60),
+          readHistory: ReadHistory(MemoryReadHistoryStorage()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // ⋮ メニューから設定を開く。
+    await tester.tap(find.byType(PopupMenuButton<int>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('設定').last);
+    await tester.pumpAndSettle();
+    expect(find.byType(SettingsScreen), findsOneWidget);
+
+    final width = tester.getSize(find.byType(SettingsScreen)).width;
+    await drag(
+      tester,
+      from: Offset(width * 0.3, 400),
+      distance: width * 0.7,
+      total: const Duration(milliseconds: 400),
+    );
+
+    expect(find.byType(SettingsScreen), findsNothing);
+    expect(find.text('スワイプスレ'), findsWidgets);
+  });
+
+  // 設定の中の画面も同じ引き方で戻れる（NG設定・各アップロード設定）。
+  testWidgets('設定の中の画面からも引けば設定へ戻る', (tester) async {
+    await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
+    await tester.pumpAndSettle();
+
+    final screens = <String, Type>{
+      'NG設定': NgScreen,
+      '画像アップロード設定': ImageUploadSettingsScreen,
+      'ファイルアップロード設定': FileUploadSettingsScreen,
+    };
+    for (final MapEntry(key: title, value: screen) in screens.entries) {
+      await tester.tap(find.text(title));
+      await tester.pumpAndSettle();
+      expect(find.byType(screen), findsOneWidget);
+
+      final width = tester.getSize(find.byType(screen)).width;
+      await drag(
+        tester,
+        from: Offset(width * 0.3, 200),
+        distance: width * 0.7,
+        total: const Duration(milliseconds: 400),
+      );
+
+      // 設定に戻っている。
+      expect(find.byType(screen), findsNothing);
+      expect(find.text('設定'), findsOneWidget);
+    }
+  });
+
+  // スレの入力欄と同じ扱い。入力中の横なぞりで画面が退くと、書きかけのキーが
+  // 消える。文字を触る側に譲る。
+  testWidgets('キーの入力欄の上では戻らない', (tester) async {
+    await tester.pumpWidget(const MaterialApp(home: SettingsScreen()));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('画像アップロード設定'));
+    await tester.pumpAndSettle();
+
+    // 自分の Imgur Client ID を選ぶと入力欄が触れるようになる。
+    await tester.tap(find.text('自分の Imgur Client ID'));
+    await tester.pumpAndSettle();
+    final field = find.widgetWithText(TextField, 'Imgur Client ID');
+    expect(field, findsOneWidget);
+
+    await drag(
+      tester,
+      from: tester.getCenter(field),
+      distance: 200,
+      total: const Duration(milliseconds: 400),
+    );
+
+    expect(find.byType(ImageUploadSettingsScreen), findsOneWidget);
   });
 
   testWidgets('縦スクロールでは戻らない', (tester) async {

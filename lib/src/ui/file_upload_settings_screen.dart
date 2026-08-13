@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../net/file_upload_settings.dart';
+import 'back_swipe.dart';
 
 class FileUploadSettingsScreen extends StatefulWidget {
   const FileUploadSettingsScreen({super.key, required this.store});
@@ -42,54 +43,57 @@ class _FileUploadSettingsScreenState extends State<FileUploadSettingsScreen> {
           ),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-        children: [
-          Text(
-            '投稿欄の添付ボタンで、任意ファイルをアップロードして URL を貼り付けられます。'
-            '送信先を選んでください。',
-            style: theme.textTheme.bodyMedium,
-          ),
-          const SizedBox(height: 12),
-          for (final provider in FileUploadProvider.values)
-            ListTile(
-              leading: Icon(
-                _provider == provider
-                    ? Icons.radio_button_checked
-                    : Icons.radio_button_unchecked,
-              ),
-              title: Text(provider.label),
-              subtitle: Text(_description(provider)),
-              selected: _provider == provider,
-              onTap: () => setState(() => _provider = provider),
+      // 設定画面と同じく、右へのスワイプで前の画面へ戻る。
+      body: BackSwipe(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+          children: [
+            Text(
+              '投稿欄の添付ボタンで、任意ファイルをアップロードして URL を貼り付けられます。'
+              '送信先を選んでください。',
+              style: theme.textTheme.bodyMedium,
             ),
-          const SizedBox(height: 12),
-          Card(
-            color: theme.colorScheme.surfaceContainerHighest,
-            elevation: 0,
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(
-                    Icons.info_outline,
-                    size: 18,
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'uguu.se は一時ホスティングのため、アップロードしたファイルは数時間〜数日で'
-                      '消えてリンク切れになります。あとから残したいものは catbox.moe を選んでください。',
-                      style: theme.textTheme.bodySmall,
+            const SizedBox(height: 12),
+            for (final provider in FileUploadProvider.values)
+              ListTile(
+                leading: Icon(
+                  _provider == provider
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_unchecked,
+                ),
+                title: Text(provider.label),
+                subtitle: Text(_description(provider)),
+                selected: _provider == provider,
+                onTap: () => setState(() => _provider = provider),
+              ),
+            const SizedBox(height: 12),
+            Card(
+              color: theme.colorScheme.surfaceContainerHighest,
+              elevation: 0,
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      Icons.info_outline,
+                      size: 18,
+                      color: theme.colorScheme.onSurfaceVariant,
                     ),
-                  ),
-                ],
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'uguu.se は一時ホスティングのため、アップロードしたファイルは数時間〜数日で'
+                        '消えてリンク切れになります。あとから残したいものは catbox.moe を選んでください。',
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

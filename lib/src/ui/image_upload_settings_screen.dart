@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../net/auth_launcher.dart';
 import '../net/image_upload_settings.dart';
+import 'back_swipe.dart';
 
 class ImageUploadSettingsScreen extends StatefulWidget {
   const ImageUploadSettingsScreen({super.key, required this.store});
@@ -75,95 +76,103 @@ class _ImageUploadSettingsScreenState extends State<ImageUploadSettingsScreen> {
           ),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-        children: [
-          Text('投稿欄の画像ボタンで使うアップロード先を選びます。', style: theme.textTheme.bodyMedium),
-          const SizedBox(height: 8),
-          ExpansionTile(
-            tilePadding: EdgeInsets.zero,
-            title: const Text('どれを選べばいい？'),
-            childrenPadding: const EdgeInsets.only(bottom: 8),
-            children: [
-              _HelpText(
-                spans: [
-                  const TextSpan(text: '迷ったら「既定の Imgur」を選んでください。\n\n'),
-                  const TextSpan(
-                    text:
-                        'Imgur Client ID を既に持っている場合は「自分の Imgur Client ID」を選ぶと、'
-                        'アプリ同梱 ID のレート制限を避けられます。\n\n',
-                  ),
-                  const TextSpan(
-                    text:
-                        'Imgur ID を持っていない場合や新規発行できない場合は、ImgBB のアカウントを作って '
-                        'API Key を使うのが分かりやすい代替です。',
-                  ),
-                ],
-                onTap: _openLink,
-              ),
-            ],
-          ),
-          ExpansionTile(
-            tilePadding: EdgeInsets.zero,
-            title: const Text('Imgur Client ID / ImgBB API Key とは？'),
-            childrenPadding: const EdgeInsets.only(bottom: 8),
-            children: [
-              _HelpText(
-                spans: [
-                  const TextSpan(
-                    text:
-                        'Imgur Client ID は Imgur API で匿名アップロードするためのアプリ識別子です。'
-                        '取得済みの ID があれば入力してください。\n'
-                        '詳しくは ',
-                  ),
-                  LinkTextSpan(text: 'Imgur API ドキュメント', url: _imgurApiDocs),
-                  const TextSpan(text: ' を確認してください。\n\n'),
-                  const TextSpan(
-                    text:
-                        'ImgBB API Key は ImgBB に画像をアップロードするためのキーです。'
-                        'まず ',
-                  ),
-                  LinkTextSpan(text: 'ImgBB', url: _imgbbHome),
-                  const TextSpan(text: ' でアカウントを作成し、'),
-                  LinkTextSpan(text: 'ImgBB API ページ', url: _imgbbApiDocs),
-                  const TextSpan(text: ' から取得します。'),
-                ],
-                onTap: _openLink,
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          for (final provider in ImageUploadProvider.values)
-            ListTile(
-              leading: Icon(
-                _provider == provider
-                    ? Icons.radio_button_checked
-                    : Icons.radio_button_unchecked,
-              ),
-              title: Text(provider.label),
-              subtitle: Text(_description(provider)),
-              selected: _provider == provider,
-              onTap: () => setState(() => _provider = provider),
+      // 設定画面と同じく、右へのスワイプで前の画面へ戻る。キーの入力欄の上では
+      // 文字を触る側（カーソル移動・選択）が競り合いに勝つので、入力中に横へ
+      // なぞって画面が退くことはない。
+      body: BackSwipe(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+          children: [
+            Text(
+              '投稿欄の画像ボタンで使うアップロード先を選びます。',
+              style: theme.textTheme.bodyMedium,
             ),
-          const SizedBox(height: 16),
-          TextField(
-            controller: _imgur,
-            enabled: _provider == ImageUploadProvider.imgur,
-            decoration: const InputDecoration(
-              labelText: 'Imgur Client ID',
-              border: OutlineInputBorder(),
+            const SizedBox(height: 8),
+            ExpansionTile(
+              tilePadding: EdgeInsets.zero,
+              title: const Text('どれを選べばいい？'),
+              childrenPadding: const EdgeInsets.only(bottom: 8),
+              children: [
+                _HelpText(
+                  spans: [
+                    const TextSpan(text: '迷ったら「既定の Imgur」を選んでください。\n\n'),
+                    const TextSpan(
+                      text:
+                          'Imgur Client ID を既に持っている場合は「自分の Imgur Client ID」を選ぶと、'
+                          'アプリ同梱 ID のレート制限を避けられます。\n\n',
+                    ),
+                    const TextSpan(
+                      text:
+                          'Imgur ID を持っていない場合や新規発行できない場合は、ImgBB のアカウントを作って '
+                          'API Key を使うのが分かりやすい代替です。',
+                    ),
+                  ],
+                  onTap: _openLink,
+                ),
+              ],
             ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _imgbb,
-            enabled: _provider == ImageUploadProvider.imgbb,
-            decoration: const InputDecoration(
-              labelText: 'ImgBB API Key',
-              border: OutlineInputBorder(),
+            ExpansionTile(
+              tilePadding: EdgeInsets.zero,
+              title: const Text('Imgur Client ID / ImgBB API Key とは？'),
+              childrenPadding: const EdgeInsets.only(bottom: 8),
+              children: [
+                _HelpText(
+                  spans: [
+                    const TextSpan(
+                      text:
+                          'Imgur Client ID は Imgur API で匿名アップロードするためのアプリ識別子です。'
+                          '取得済みの ID があれば入力してください。\n'
+                          '詳しくは ',
+                    ),
+                    LinkTextSpan(text: 'Imgur API ドキュメント', url: _imgurApiDocs),
+                    const TextSpan(text: ' を確認してください。\n\n'),
+                    const TextSpan(
+                      text:
+                          'ImgBB API Key は ImgBB に画像をアップロードするためのキーです。'
+                          'まず ',
+                    ),
+                    LinkTextSpan(text: 'ImgBB', url: _imgbbHome),
+                    const TextSpan(text: ' でアカウントを作成し、'),
+                    LinkTextSpan(text: 'ImgBB API ページ', url: _imgbbApiDocs),
+                    const TextSpan(text: ' から取得します。'),
+                  ],
+                  onTap: _openLink,
+                ),
+              ],
             ),
-          ),
-        ],
+            const SizedBox(height: 12),
+            for (final provider in ImageUploadProvider.values)
+              ListTile(
+                leading: Icon(
+                  _provider == provider
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_unchecked,
+                ),
+                title: Text(provider.label),
+                subtitle: Text(_description(provider)),
+                selected: _provider == provider,
+                onTap: () => setState(() => _provider = provider),
+              ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _imgur,
+              enabled: _provider == ImageUploadProvider.imgur,
+              decoration: const InputDecoration(
+                labelText: 'Imgur Client ID',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _imgbb,
+              enabled: _provider == ImageUploadProvider.imgbb,
+              decoration: const InputDecoration(
+                labelText: 'ImgBB API Key',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
