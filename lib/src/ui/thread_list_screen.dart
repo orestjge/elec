@@ -5,6 +5,7 @@ import 'package:edge_core/edge_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../theme.dart';
 import '../net/auth_store.dart';
 import '../net/board.dart';
 import '../net/board_store.dart';
@@ -1481,10 +1482,13 @@ class _NewThreadFab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    // 押すものなので無彩（[ElecColors.action]）。アクセントは意味のある印だけに
+    // 残す方針——ここを primary にすると画面でいちばん強い色になってしまう。
+    final elec = ElecColors.of(context);
     return Tooltip(
       message: 'スレを立てる',
       child: Material(
-        color: scheme.primary,
+        color: elec.action,
         elevation: 6,
         shadowColor: scheme.shadow,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -1493,7 +1497,7 @@ class _NewThreadFab extends StatelessWidget {
           onTap: onPressed,
           child: SizedBox.square(
             dimension: 48,
-            child: Icon(Icons.add, size: 22, color: scheme.onPrimary),
+            child: Icon(Icons.add, size: 22, color: elec.onAction),
           ),
         ),
       ),

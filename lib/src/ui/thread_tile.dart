@@ -1,6 +1,7 @@
 import 'package:edge_core/edge_core.dart';
 import 'package:flutter/material.dart';
 
+import 'emphasis.dart';
 import 'format.dart';
 
 /// もう書き込めないスレの状態。下段にアイコン＋短いラベルで出す。
@@ -32,7 +33,7 @@ enum ThreadSeen {
 }
 
 /// スレ一覧の 1 行。カードではなくフラットな行で、余白とタイポグラフィで
-/// 区切る。勢いが高いスレはアクセント色で強調する。
+/// 区切る。**メタ（勢い・レス数・停止状態）は全部同じ薄さ**で、強調しない。
 class ThreadTile extends StatelessWidget {
   const ThreadTile({
     super.key,
@@ -66,9 +67,6 @@ class ThreadTile extends StatelessWidget {
   /// このアプリから立てたスレか。
   final bool isOwn;
 
-  /// この勢い以上を「勢いのあるスレ」としてアクセント表示する（レス/日）。
-  static const _hotThreshold = 300;
-
   /// 新着バッジのために空けておく幅。
   ///
   /// バッジが出入りしたり桁が増えたりするとタイトルの使える幅が変わり、1 行で
@@ -85,10 +83,8 @@ class ThreadTile extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final momentum = momentumPerDay(thread);
-    final isHot = momentum >= _hotThreshold;
 
     final metaColor = scheme.onSurfaceVariant;
-    final momentumColor = isHot ? scheme.primary : metaColor;
     // 既読スレはタイトルを少し落ち着かせて未読と区別する。
     final titleColor = _isRead ? scheme.onSurfaceVariant : scheme.onSurface;
     final titleStyle = theme.textTheme.titleMedium?.copyWith(
@@ -186,12 +182,7 @@ class ThreadTile extends StatelessWidget {
                         // 背の低いものしか入れないので動かない。
                         child: Row(
                           children: [
-                            _Metric(
-                              icon: Icons.bolt,
-                              label: formatCompact(momentum),
-                              color: momentumColor,
-                              emphasized: isHot,
-                            ),
+                            _Momentum(perDay: momentum, color: metaColor),
                             const SizedBox(width: 10),
                             _Metric(
                               icon: Icons.forum_outlined,
@@ -356,17 +347,11 @@ class _NewBadge extends StatelessWidget {
 }
 
 class _Metric extends StatelessWidget {
-  const _Metric({
-    required this.icon,
-    required this.label,
-    required this.color,
-    this.emphasized = false,
-  });
+  const _Metric({required this.icon, required this.label, required this.color});
 
   final IconData icon;
   final String label;
   final Color color;
-  final bool emphasized;
 
   @override
   Widget build(BuildContext context) {
@@ -377,12 +362,58 @@ class _Metric extends StatelessWidget {
         const SizedBox(width: 3),
         Text(
           label,
-          style: TextStyle(
-            color: color,
-            fontWeight: emphasized ? FontWeight.w700 : FontWeight.w500,
-          ),
+          style: TextStyle(color: color, fontWeight: FontWeight.w500),
         ),
       ],
     );
   }
 }
+
+/// 勢い（レス/日）。数字は他のメタと**同じ薄さ・同じ太さ**で、下に細い棒を
+/// 敷いて量を絵にする。
+///
+/// **棒の色は動かさない。** 一覧は「探す」画面で、目立たせるべきはスレタイの
+/// ほう——既読／未読でタイトルの濃さを動かしているので、メタでも濃淡を使うと
+/// 2 つの合図が混ざる。速いスレを「強調」するのではなく、数字を読まなくても
+/// 桁の見当が付く程度の添え物に留める。
+///
+/// **下敷きは常に全長ぶん敷く**ので、棒が伸びていなくても行の高さは動かない。
+class _Momentum extends StatelessWidget {
+  const _Momentum({required this.perDay, required this.color});
+
+  final double perDay;
+  final Color color;
+
+  /// 棒の長さ。数字 3 桁ぶんに合わせてある。
+  static const _barWidth = 34.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final amount = momentumAmount(perDay);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _Metric(
+          icon: Icons.bolt,
+          label: formatCompact(perDay),
+          color: color,
+        ),
+        const SizedBox(height: 2),
+        Stack(
+          children: [
+            Container(
+              width: _barWidth,
+              height: 2,
+              color: emphasisTrack(scheme),
+            ),
+            Container(width: _barWidth * amount, height: 2, color: color),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+
