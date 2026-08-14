@@ -10,6 +10,54 @@ import 'link_urls.dart';
 String trimUnlessAsciiArt(String text) =>
     looksLikeAsciiArt(text) ? text : text.trim();
 
+/// 本文の改行。dat のまま（`<br>`）でも、表示用に直したあと（`\n`）でも拾う。
+final _bodyLineBreakRe = RegExp(r'<br\s*/?>|\r?\n', caseSensitive: false);
+
+/// `>>N` だけでできている行（`>>5 >>7` のように並んでいてもよい）。
+final _quoteLineRe = RegExp(
+  '^(?:(?:&gt;&gt;|>>)$resAnchorSpecPattern[ \\t　]*)+\$',
+);
+
+/// 行の中の `>>N` ひとつ。
+final _anchorRe = RegExp('(?:&gt;&gt;|>>)($resAnchorSpecPattern)');
+
+/// 本文の中で**行を単独で占めている `>>N`**（`>>5` だけで改行している行）。
+///
+/// 行を丸ごと使って相手を指しているなら、それは書いた人が「ここで誰かに返す」と
+/// 区切ったということ。返信先の再掲をレスの手前ではなく**その位置へ**差し込める
+/// （[PostBodyQuote]）ので、`>>5 それな` のように文の頭に付いているだけのものと
+/// 分けて拾う。
+///
+/// 返すのは行ごとの範囲（[start]–[end]。改行そのものは含まない）と、その行が
+/// 指しているレス番号。[text] は dat のまま（`<br>` 区切り・`&gt;&gt;`）でも、
+/// 表示用に直したあと（`\n` 区切り・`>>`）でもよい。
+List<({int start, int end, List<int> numbers})> quoteLinesIn(String text) {
+  final lines = <({int start, int end, List<int> numbers})>[];
+  var start = 0;
+  for (final br in [..._bodyLineBreakRe.allMatches(text), null]) {
+    final end = br?.start ?? text.length;
+    final line = text.substring(start, end).trim();
+    if (line.isNotEmpty && _quoteLineRe.hasMatch(line)) {
+      final numbers = [
+        for (final m in _anchorRe.allMatches(line))
+          ...resNumbersInAnchor(m.group(1)!),
+      ];
+      if (numbers.isNotEmpty) {
+        lines.add((start: start, end: end, numbers: numbers));
+      }
+    }
+    if (br == null) break;
+    start = br.end;
+  }
+  return lines;
+}
+
+/// [quoteLinesIn] が拾った番号だけを集めたもの。行の位置が要らない側（一覧の
+/// 行組み）はこちらを使う。
+Set<int> standaloneQuoteLineNumbers(String text) => {
+  for (final line in quoteLinesIn(text)) ...line.numbers,
+};
+
 /// AA を出すときの字。MS Pゴシック互換寄りの同梱フォント（Monapo）で、行間と
 /// 字送りを AA が組まれた前提（1 行 1 行が詰まって 1 枚の絵になる）に合わせる。
 ///
@@ -51,7 +99,11 @@ double asciiArtFitScale({
 /// 折り返さずに組んだとき、[text] が要る幅（いちばん長い行の幅）。
 ///
 /// リンクや ID の装飾は幅を変えないので、素の文字列のまま測ってよい。
-double asciiArtNaturalWidth(BuildContext context, String text, TextStyle style) {
+double asciiArtNaturalWidth(
+  BuildContext context,
+  String text,
+  TextStyle style,
+) {
   final painter = TextPainter(
     text: TextSpan(text: text, style: style),
     textDirection: Directionality.of(context),
@@ -373,6 +425,11 @@ class _ResBodyState extends State<ResBody> {
             theme.textTheme.bodyLarge?.fontSize ??
             15) *
         0.9;
+    // `>>N` だけでできている行。そこに書かれた `>>N` は「ここから誰かへの
+    // 返信」という宣言なので返信の矢印に替える。**文と同じ行にあるものは
+    // `>>` のまま**——`今日は>>5を>>6個食べる！` のように、安価を文の部品として
+    // 使う書き方があり、記号を絵にすると文が読み下せなくなる。
+    final quoteLines = quoteLinesIn(text);
     final queryLower = widget.highlightQuery.trim().toLowerCase();
     final highlightStyle = searchHighlightStyle(theme.colorScheme);
     void addPlain(String part) =>
@@ -429,14 +486,44 @@ class _ResBodyState extends State<ResBody> {
               }
             };
           _recognizers.add(recognizer);
-          spans.add(
-            TextSpan(
-              // 書かれた表記のまま出す（`&gt;&gt;` のエスケープだけ直す）。
-              text: '>>${m.group(2)}',
-              style: linkStyle,
-              recognizer: recognizer,
-            ),
+          final ownsLine = quoteLines.any(
+            (line) => m.start >= line.start && m.end <= line.end,
           );
+          if (ownsLine) {
+            // 行を丸ごと使った宣言。`>>` を返信の矢印（引用行の印と同じ形）
+            // に替える。
+            // 矢印と番号はひとかたまりの WidgetSpan にする——別々の span だと
+            // 行末で矢印だけが前の行に残る。
+            spans.add(
+              WidgetSpan(
+                alignment: PlaceholderAlignment.middle,
+                child: _InlineResAnchor(
+                  spec: m.group(2)!,
+                  style: (effectiveStyle ?? const TextStyle()).copyWith(
+                    // 行の高さ（1.4）を持ち込むと箱が字より高くなる。
+                    height: 1,
+                  ),
+                  onTap: () {
+                    final rangeHandler = widget.onTapResRange;
+                    if (numbers.length == 1 || rangeHandler == null) {
+                      widget.onTapRes(numbers.first);
+                    } else {
+                      rangeHandler(numbers);
+                    }
+                  },
+                ),
+              ),
+            );
+          } else {
+            spans.add(
+              TextSpan(
+                // 書かれた表記のまま出す（`&gt;&gt;` のエスケープだけ直す）。
+                text: '>>${m.group(2)}',
+                style: linkStyle,
+                recognizer: recognizer,
+              ),
+            );
+          }
         }
       }
       last = m.end;
@@ -567,6 +654,62 @@ class _BodyTextScale extends InheritedWidget {
 ///
 /// 柱にあるレス数のリング（`idColorForCount`）は付けない。本文に貼られた ID は
 /// 別スレのものかもしれず、このスレでの連投数を語れないため。
+/// **行を丸ごと使って書かれた** `>>N` を、返信の矢印＋番号にしたもの。
+///
+/// その行の `>>` は「これは誰への返信か」を言うためだけの記号で、引用行
+/// （`QuotedResRow`）の頭に置いた矢印と同じことを言っている。同じ形にすると、
+/// 返信先の中身が出せるとき（`PostBodyQuote`）と出せないときで見え方が揃う。
+///
+/// **文と同じ行にある `>>N` は替えない**（[quoteLinesIn]）。`今日は>>5を>>6個
+/// 食べる！` のように安価を文の部品として使う書き方があり、記号を絵にすると
+/// 文が読み下せなくなる。
+class _InlineResAnchor extends StatelessWidget {
+  const _InlineResAnchor({
+    required this.spec,
+    required this.style,
+    required this.onTap,
+  });
+
+  /// 番号の部分（`5` / `1-3` / `1,2`）。
+  final String spec;
+  final TextStyle style;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    // AA が幅に合わせて縮んでいるなら、矢印と字も同じ率で小さくする。
+    final scale = _BodyTextScale.of(context);
+    final base = scale == 1
+        ? style
+        : style.copyWith(fontSize: (style.fontSize ?? 15) * scale);
+    final size = (base.fontSize ?? 15) * 0.95;
+    return Semantics(
+      label: '>>$spec',
+      button: true,
+      excludeSemantics: true,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.reply, size: size, color: scheme.primary),
+            const SizedBox(width: 1),
+            Text(
+              spec,
+              style: base.copyWith(
+                color: scheme.primary,
+                decoration: TextDecoration.underline,
+                decorationColor: scheme.primary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _InlineId extends StatelessWidget {
   const _InlineId({
     required this.id,

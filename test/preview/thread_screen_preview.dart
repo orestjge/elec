@@ -105,6 +105,10 @@ List<int> _dat({bool watchoi = false, bool noId = false, bool plain = false}) {
         '6 エッヂの名無し 2025/11/03(月) 02:14:06.907 ID:${ids[6 % ids.length]}<br>'
             'ふつうのレス 6。本文はこのくらいの長さで折り返しを見る。<br>'
             'これ言ってるの誰？',
+      // 行を単独で占める `>>N`（`>>5` だけで改行）。返信先の再掲がレスの手前
+      // ではなく、書かれたこの位置に入る（`PostBodyQuote`）。
+      11 => '&gt;&gt;2<br>行を分けて返信するとここに引用が入る。',
+      12 => '&gt;&gt;2<br>&gt;&gt;3<br>2 人にまとめて返信するとこう。',
       _ when i > 10 && i <= 15 => '>>2 なるほど',
       _ when i > 30 && i <= 42 => '>>3 それな',
       _ => 'ふつうのレス $i。本文はこのくらいの長さで折り返しを見る。',
@@ -328,6 +332,62 @@ void main() {
     );
   });
 
+  // クラシックの組み方。絵を出さず、レス番号・名前・日時・ID を
+  // 文字のまま並べる。返信数は番号の直後、その ID の何本目かは ID の直後。
+  testWidgets('classic layout', (tester) async {
+    await _shoot(
+      tester,
+      ElecTheme.light(),
+      '$dir/thread_classic_layout.png',
+      resLayout: ResLayout.classic,
+    );
+  });
+
+  // クラシック＋新着。返信先の再掲（引用行）と、その下のレスの見出しの間隔を見る。
+  testWidgets('classic layout arrivals', (tester) async {
+    await _shoot(
+      tester,
+      ElecTheme.light(),
+      '$dir/thread_classic_layout_arrivals.png',
+      resLayout: ResLayout.classic,
+      layout: ThreadLayout.tree,
+      lastSeen: 10,
+    );
+  });
+
+  // ワッチョイ板でのクラシック。名前は省略しない組み方なので、既定名＋ワッチョイが
+  // まるごと出る——括弧の中だけ 1 段小さく落として添え物として読ませる。
+  testWidgets('classic layout watchoi', (tester) async {
+    await _shoot(
+      tester,
+      ElecTheme.light(),
+      '$dir/thread_classic_layout_watchoi.png',
+      resLayout: ResLayout.classic,
+      watchoi: true,
+    );
+  });
+
+  testWidgets('classic layout dark', (tester) async {
+    await _shoot(
+      tester,
+      ElecTheme.dark(),
+      '$dir/thread_classic_layout_dark.png',
+      resLayout: ResLayout.classic,
+    );
+  });
+
+  // クラシックのツリー表示。左に柱が立たないので、字下げ帯はヘッダにまとめる
+  // 組み方と同じく引く。
+  testWidgets('classic layout tree', (tester) async {
+    await _shoot(
+      tester,
+      ElecTheme.light(),
+      '$dir/thread_classic_layout_tree.png',
+      resLayout: ResLayout.classic,
+      layout: ThreadLayout.tree,
+    );
+  });
+
   testWidgets('header layout plain', (tester) async {
     await _shoot(
       tester,
@@ -407,6 +467,27 @@ void main() {
 　｜　　　　_人_　　　｜
 　＼　　　　　　　　／
 　　＼＿＿＿＿＿＿／　　　モナーだお''',
+    );
+  });
+
+  // 会話シート。**レスの組み方は一覧と同じ**（字下げも `ThreadTreeTier`）で、
+  // 「返信先 >>1」の見出しは出さない。
+  testWidgets('conversation', (tester) async {
+    await _shoot(
+      tester,
+      ElecTheme.light(),
+      '$dir/thread_conversation.png',
+      openConversation: true,
+    );
+  });
+
+  testWidgets('conversation header layout', (tester) async {
+    await _shoot(
+      tester,
+      ElecTheme.light(),
+      '$dir/thread_conversation_header_layout.png',
+      resLayout: ResLayout.header,
+      openConversation: true,
     );
   });
 

@@ -209,16 +209,6 @@ void main() {
     }
   }
 
-  TextSpan selectableTextSpanContaining(WidgetTester tester, String text) {
-    for (final selectable in tester.widgetList<SelectableText>(
-      find.byType(SelectableText),
-    )) {
-      final span = selectable.textSpan;
-      if (span != null && span.toPlainText().contains(text)) return span;
-    }
-    throw StateError('SelectableText span containing "$text" was not found');
-  }
-
   testWidgets('本文取得前でも開いたスレを履歴と既読にする', (tester) async {
     final f = PendingFetcher();
     final history = ReadHistory(MemoryReadHistoryStorage());
@@ -265,6 +255,7 @@ void main() {
   });
 
   testWidgets('>>1 と同じ ID のレスにスレ主の印が付く', (tester) async {
+    final handle = tester.ensureSemantics();
     final f = QueueFetcher([
       ok([...res1, ...res2, ...res3]),
     ]);
@@ -272,7 +263,10 @@ void main() {
     await tester.pumpAndSettle();
 
     // >>1（ID:aaa）とその ID の 2 つ目にだけ付き、別 ID の >>3 には付かない。
-    expect(find.text('スレ主'), findsNWidgets(2));
+    // 印は★だけで字は出さないので、読み上げラベルで数える。
+    expect(find.bySemanticsLabel(RegExp('スレ主')), findsNWidgets(2));
+    expect(find.text('スレ主'), findsNothing);
+    handle.dispose();
   });
 
   testWidgets('左スワイプでコンポーザに >>N が入る', (tester) async {
@@ -1304,13 +1298,14 @@ void main() {
     });
 
     final f = QueueFetcher([
-      ok([...res1]),
+      ok([...res1, ...res2, ...res3]),
     ]);
     await tester.pumpWidget(app(f));
     await tester.pumpAndSettle();
 
-    // 沈み込みは本文の後ろに広がる円として描く。
-    final body = find.textContaining('最初のレス', findRichText: true);
+    // 沈み込みは本文の後ろに広がる円として描く。**スレ主でないレスで見る**
+    // （>>3）——スレ主の印も円なので、>>1 で数えると印のぶんが混ざる。
+    final body = find.textContaining('あとから来た', findRichText: true);
     final spread = find
         .ancestor(of: body, matching: find.byType(CustomPaint))
         .first;
@@ -1344,12 +1339,13 @@ void main() {
   // 見える。長押しが外れる 18px を待たず、指が動いた時点で引っ込める。
   testWidgets('スワイプ中は沈み込みを広げない', (tester) async {
     final f = QueueFetcher([
-      ok([...res1]),
+      ok([...res1, ...res2, ...res3]),
     ]);
     await tester.pumpWidget(app(f));
     await tester.pumpAndSettle();
 
-    final body = find.textContaining('最初のレス', findRichText: true);
+    // 上と同じ理由で、印の付かない >>3 で見る。
+    final body = find.textContaining('あとから来た', findRichText: true);
     final spread = find
         .ancestor(of: body, matching: find.byType(CustomPaint))
         .first;
@@ -1391,7 +1387,12 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('レス全体をコピー'), findsOneWidget);
 
-    final body = selectableTextSpanContaining(tester, '>>1');
+    // 文と同じ行にある `>>1` は `>>` の表記のまま。その span を押す。
+    final body = tester
+        .widgetList<SelectableText>(find.byType(SelectableText))
+        .map((w) => w.textSpan!)
+        .whereType<TextSpan>()
+        .firstWhere((span) => span.toPlainText().contains('>>1'));
     final span = textSpans(body).firstWhere((span) => span.text == '>>1');
     (span.recognizer! as TapGestureRecognizer).onTap!();
     await tester.pumpAndSettle();
@@ -1446,8 +1447,11 @@ void main() {
     // 2・1 まで載せると、読みに来た 9 が下へ押し流される。
     expect(find.text('会話 #9  8件'), findsOneWidget);
     expect(
-      find.byWidgetPredicate(
-        (w) => w.runtimeType.toString() == '_ConversationPost',
+      find.descendant(
+        of: find.byWidgetPredicate(
+          (w) => w.runtimeType.toString() == '_ConversationSheet',
+        ),
+        matching: find.byType(PostItem),
       ),
       findsNWidgets(8),
     );
@@ -1467,10 +1471,15 @@ void main() {
     expect(find.text('最初のレス'), findsWidgets);
     expect(find.textContaining('同じIDの2つ目', findRichText: true), findsWidgets);
     expect(find.textContaining('あとから来た', findRichText: true), findsWidgets);
-    expect(find.text('返信先 >>1 >>2'), findsOneWidget);
+    // レスの組み方は一覧と同じ（字下げも [ThreadTreeTier]）。「返信先 >>1 >>2」の
+    // 見出しは出さない——誰への返信かは並びと本文が言う。
+    expect(find.textContaining('返信先'), findsNothing);
     expect(
-      find.byWidgetPredicate(
-        (w) => w.runtimeType.toString() == '_ConversationPost',
+      find.descendant(
+        of: find.byWidgetPredicate(
+          (w) => w.runtimeType.toString() == '_ConversationSheet',
+        ),
+        matching: find.byType(PostItem),
       ),
       findsNWidgets(3),
     );

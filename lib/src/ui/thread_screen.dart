@@ -1898,6 +1898,7 @@ class _ThreadScreenState extends State<ThreadScreen>
           guroMasked: guroMasked,
           linkPreviews: _view.linkPreviews,
           resLayout: _view.resLayout,
+          quotedRes: _resByNumber,
           onTapId: _showIdPosts,
           onTapWacchoi: _showWacchoiPosts,
           onTapRes: (_, target) {
@@ -1946,17 +1947,26 @@ class _ThreadScreenState extends State<ThreadScreen>
     final entries = <_ConversationEntry>[];
     final seen = <int>{};
 
-    void add(int n, int depth) {
+    /// 本文の中へ差し込む返信先。行を丸ごと使って指していて、かつ**この行が
+    /// ぶら下がっている相手（[under]）ではない**もの。並びが示している相手を
+    /// 再掲すると、同じものが上下に 2 度出る。
+    Set<int> inlineFor(Res post, {int? under}) {
+      final ownLine = standaloneQuoteLineNumbers(post.body);
+      return {
+        for (final n in _referencedNumbers(post))
+          if (n != under && ownLine.contains(n) && byNumber.containsKey(n)) n,
+      };
+    }
+
+    void add(int n, int depth, {int? under}) {
       final post = byNumber[n];
       if (post != null && seen.add(n)) {
         entries.add(
           _ConversationEntry(
             res: post,
             depth: depth,
-            refs: _referencedNumbers(
-              post,
-            ).where((ref) => byNumber.containsKey(ref)).toList(),
             highlighted: centers.contains(n),
+            inlineQuotes: inlineFor(post, under: under),
           ),
         );
       }
@@ -1981,7 +1991,7 @@ class _ThreadScreenState extends State<ThreadScreen>
 
     // 手前のレスは何世代さかのぼっても字下げしない。世代のぶんだけ下げると中心
     // レス——読みに来た当のもの——が右へ押し込まれて本文が潰れる。誰への返信かは
-    // 各レスの返信先の見出し（[_ConversationEntry.refs]）で読める。
+    // 並びと、本文の中に差し込まれる返信先の再掲（`PostBodyQuote`）で読める。
     final centerDepth = ancestorNumbers.isEmpty ? 0 : 1;
     for (final n in centerPosts) {
       add(n, centerDepth);
@@ -1994,10 +2004,8 @@ class _ThreadScreenState extends State<ThreadScreen>
             _ConversationEntry(
               res: r,
               depth: depth,
-              refs: _referencedNumbers(
-                r,
-              ).where((ref) => byNumber.containsKey(ref)).toList(),
               highlighted: centers.contains(r.number),
+              inlineQuotes: inlineFor(r, under: n),
             ),
           );
           addReplies(r.number, depth + 1);
@@ -2634,6 +2642,8 @@ class _ThreadScreenState extends State<ThreadScreen>
     final replies = replyCounts(res);
     final guroMasked = _guroMasked;
     final threadOwnerId = _threadOwnerId(res);
+    // 本文の中に差し込む返信先（`PostBodyQuote`）を引くための索引。
+    final resByNumber = {for (final r in res) r.number: r};
     // 「新着」の境界（前回位置）。0 か総数以上なら新着ライン無し。
     final hasNewArrival = _openCount > 0 && _openCount < res.length;
 
@@ -2673,9 +2683,10 @@ class _ThreadScreenState extends State<ThreadScreen>
       if (row is! ThreadTreeRow) return const _NewArrivalLine();
       final item = row.res;
       final ngHidden = _isNgHidden(item);
-      // 深さの筋（字下げ帯）はヘッダにまとめる組み方だけ。柱の組み方は ID の絵が
-      // 各レスの左に立っていて、そちらが深さの目盛りになる（[ThreadTreeTier]）。
-      final band = _view.resLayout == ResLayout.header;
+      // 深さの筋（字下げ帯）は柱の組み方以外。柱の組み方は ID の絵が各レスの左に
+      // 立っていて、そちらが深さの目盛りになる（[ThreadTreeTier]）。クラシックは
+      // 左に何も立たないので、ヘッダにまとめる組み方と同じく帯が要る。
+      final band = _view.resLayout != ResLayout.gutter;
       // 返信先の再掲。NG のレスはここでも出さない（行だけ畳む）。
       if (row.quote) {
         if (ngHidden) return const SizedBox.shrink();
@@ -2695,6 +2706,7 @@ class _ThreadScreenState extends State<ThreadScreen>
           child: QuotedResRow(
             res: item,
             joinsPrevious: joins,
+            resLayout: _view.resLayout,
             onTap: () =>
                 _showConversation(item.number, focusNumber: item.number),
             blurImages: guroMasked.contains(item.number),
@@ -2755,6 +2767,10 @@ class _ThreadScreenState extends State<ThreadScreen>
             blurImages: guroMasked.contains(item.number),
             linkPreviews: _view.linkPreviews,
             resLayout: _view.resLayout,
+            // 直前の引用行はこのレスのもの。間を詰めて繋げる。
+            attachedToQuote: followsQuotedRes(items, i),
+            quotedRes: (n) => resByNumber[n],
+            inlineQuotes: row.inlineQuotes,
             highlightQuery: searchQuery,
             isCurrentMatch: item.number == currentMatchNumber,
             defaultName: widget.defaultName,
@@ -3563,13 +3579,17 @@ class _ConversationEntry {
   const _ConversationEntry({
     required this.res,
     required this.depth,
-    required this.refs,
     required this.highlighted,
+    this.inlineQuotes = const {},
   });
   final Res res;
   final int depth;
-  final List<int> refs;
   final bool highlighted;
+
+  /// 本文の中へ返信先の再掲を差し込む相手（[PostItem.inlineQuotes]）。
+  /// **1 つ上の世代（この行がぶら下がっている相手）は入らない**——シートでも
+  /// 並びがそれを示しているので、再掲すると同じものが 2 度出る。
+  final Set<int> inlineQuotes;
 }
 
 class _ConversationSheet extends StatefulWidget {
@@ -3584,6 +3604,7 @@ class _ConversationSheet extends StatefulWidget {
     required this.guroMasked,
     required this.linkPreviews,
     required this.resLayout,
+    required this.quotedRes,
     required this.onTapId,
     required this.onTapWacchoi,
     required this.onTapRes,
@@ -3622,6 +3643,11 @@ class _ConversationSheet extends StatefulWidget {
 
   /// レス 1 件の組み方（[PostItem.resLayout]）。
   final ResLayout resLayout;
+
+  /// 本文の中に差し込む返信先を引くもの（[PostItem.quotedRes]）。一覧と同じ
+  /// 見え方にするため、シートでも同じ索引を渡す。
+  final Res? Function(int number) quotedRes;
+
   final ValueChanged<String> onTapId;
   final ValueChanged<String> onTapWacchoi;
   final void Function(int source, int target) onTapRes;
@@ -3797,13 +3823,25 @@ class _ConversationSheetState extends State<_ConversationSheet> {
                     final ngHidden =
                         widget.ng.matches(entry.res) &&
                         !widget.revealedNg.contains(entry.res.number);
-                    final post = _ConversationPost(
-                      highlighted: entry.highlighted,
-                      isReplyToOwn:
-                          widget.isReplyToOwn(entry.res) &&
-                          !widget.isOwnPost(entry.res.number),
+                    // 字下げも目印の出し方も一覧と同じ部品で組む
+                    // （[ThreadTreeTier]）。同じレスがシートで違う顔をして
+                    // いると、どれを見ているのか分からなくなる。
+                    final scheme = Theme.of(context).colorScheme;
+                    final band = widget.resLayout != ResLayout.gutter;
+                    final isToOwn =
+                        widget.isReplyToOwn(entry.res) &&
+                        !widget.isOwnPost(entry.res.number);
+                    final accent = !band || entry.depth <= 0
+                        ? null
+                        : entry.highlighted
+                        ? scheme.tertiary
+                        : isToOwn
+                        ? scheme.primary
+                        : null;
+                    final post = ThreadTreeTier(
                       depth: entry.depth,
-                      refs: entry.refs,
+                      band: band,
+                      accent: accent,
                       child: ngHidden
                           ? _NgPlaceholder(
                               number: entry.res.number,
@@ -3841,12 +3879,17 @@ class _ConversationSheetState extends State<_ConversationSheet> {
                               isOwn: widget.isOwnPost(entry.res.number),
                               isThreadOwner: widget.isThreadOwner(entry.res),
                               isReplyToOwn: widget.isReplyToOwn(entry.res),
-                              showAccentBar: false,
+                              // 読みに来た当のレス。一覧で検索の現在位置に使う
+                              // のと同じ強調（帯を引く組み方では帯へ移す）。
+                              isCurrentMatch: entry.highlighted,
+                              showAccentBar: accent == null,
                               blurImages: widget.guroMasked.contains(
                                 entry.res.number,
                               ),
                               linkPreviews: widget.linkPreviews,
                               resLayout: widget.resLayout,
+                              quotedRes: widget.quotedRes,
+                              inlineQuotes: entry.inlineQuotes,
                               defaultName: widget.defaultName,
                             ),
                     );
@@ -3903,86 +3946,6 @@ class _ConversationSheetState extends State<_ConversationSheet> {
             ),
           ),
       ],
-    );
-  }
-}
-
-class _ConversationPost extends StatelessWidget {
-  const _ConversationPost({
-    required this.child,
-    required this.depth,
-    required this.refs,
-    required this.highlighted,
-    required this.isReplyToOwn,
-  });
-  final Widget child;
-  final int depth;
-  final List<int> refs;
-  final bool highlighted;
-  final bool isReplyToOwn;
-
-  /// インデントを付ける最大の深さ。これ以上深くなっても字下げは増やさない。
-  /// 深いツリーで本文幅（＝ヘッダ行）が潰れて表示が破綻するのを防ぐ。
-  static const _maxIndentLevels = 6;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final indent = math.min(depth, _maxIndentLevels) * 18.0;
-    final accentColor = highlighted
-        ? scheme.primary
-        : isReplyToOwn
-        ? scheme.primary
-        : null;
-    final borderColor =
-        accentColor ?? scheme.outlineVariant.withValues(alpha: 0.8);
-    final borderWidth = accentColor != null
-        ? 4.0
-        : depth > 0
-        ? 2.0
-        : 0.0;
-    final contentLeftPadding = accentColor != null
-        ? (depth > 0 ? 6.0 : 12.0)
-        : depth > 0
-        ? 8.0
-        : 0.0;
-
-    return Padding(
-      padding: EdgeInsets.only(left: indent),
-      child: Container(
-        decoration: BoxDecoration(
-          color: highlighted
-              ? scheme.primaryContainer.withValues(alpha: 0.18)
-              : isReplyToOwn
-              ? scheme.primaryContainer.withValues(alpha: 0.2)
-              : Colors.transparent,
-          border: borderWidth > 0
-              ? Border(
-                  left: BorderSide(color: borderColor, width: borderWidth),
-                )
-              : null,
-        ),
-        child: Padding(
-          padding: EdgeInsets.only(left: contentLeftPadding),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (refs.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                  child: Text(
-                    '返信先 ${refs.map((n) => '>>$n').join(' ')}',
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              child,
-            ],
-          ),
-        ),
-      ),
     );
   }
 }

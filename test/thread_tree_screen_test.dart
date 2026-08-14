@@ -202,10 +202,11 @@ void main() {
     // 5 の指し先（1）は画面のずっと上なので、手前に薄く再掲する。
     final quote = tester.widget<QuotedResRow>(find.byType(QuotedResRow));
     expect(quote.res.number, 1);
-    // 番号は裸で出す（`>>1` だとこの行が 1 への返信に見えてしまう）。
+    // 番号は出さない（この組み方はレス本体にも番号を出していない）。誰への
+    // 返信かは ID の絵と本文の頭で見せる。
     expect(
       find.descendant(of: find.byType(QuotedResRow), matching: find.text('1')),
-      findsOneWidget,
+      findsNothing,
     );
     expect(
       find.descendant(
@@ -241,13 +242,12 @@ void main() {
     expect(shownQuotedNumbers(tester), [1, 2]);
 
     // 続く引用行は間を空けずに重ねる。空けると 1 本ずつ別の何かに見える。
-    final rows =
-        [
-          for (final w in tester.widgetList<QuotedResRow>(
-            find.byType(QuotedResRow),
-          ))
-            tester.getRect(find.byWidget(w)),
-        ]..sort((a, b) => a.top.compareTo(b.top));
+    final rows = [
+      for (final w in tester.widgetList<QuotedResRow>(
+        find.byType(QuotedResRow),
+      ))
+        tester.getRect(find.byWidget(w)),
+    ]..sort((a, b) => a.top.compareTo(b.top));
     expect(rows[1].top, rows[0].bottom);
   });
 

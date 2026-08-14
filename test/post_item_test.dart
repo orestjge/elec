@@ -5,6 +5,7 @@ import 'package:elec/src/ui/now_ticker.dart';
 import 'package:elec/src/ui/post_images.dart';
 import 'package:elec/src/ui/post_item.dart';
 import 'package:elec/src/ui/res_body.dart';
+import 'package:elec/src/ui/thread_tree.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -50,9 +51,10 @@ Res postNamed(String name) => Res(
 Widget wrap(Widget child) => MaterialApp(home: Scaffold(body: child));
 
 void main() {
-  // 見せ方はどちらでも成り立つ性質——絵が出る、押せる、ID の文字は出さない——
-  // を両方で確かめる。組み方を切り替えたときに片方だけ壊れるのを防ぐ。
-  for (final layout in ResLayout.values) {
+  // 絵で出す組み方（柱・ヘッダ）で成り立つ性質——絵が出る、押せる、ID の文字は
+  // 出さない——を両方で確かめる。組み方を切り替えたときに片方だけ壊れるのを防ぐ。
+  // クラシックは逆に「文字で出す」組み方なので、下に別のテストがある。
+  for (final layout in [ResLayout.gutter, ResLayout.header]) {
     testWidgets('$layout でも identicon は出て、押すと ID を渡す', (tester) async {
       String? tapped;
       await tester.pumpWidget(
@@ -79,6 +81,175 @@ void main() {
       expect(tapped, 'aBc1De2f');
     });
   }
+
+  group('クラシックの組み方', () {
+    testWidgets('レス番号・名前・日時・ID を文字のまま並べ、絵は出さない', (tester) async {
+      String? tapped;
+      await tester.pumpWidget(
+        wrap(
+          PostItem(
+            res: post(7, 'aBc1De2f'),
+            idCount: 1,
+            idOrdinal: 1,
+            resLayout: ResLayout.classic,
+            defaultName: '名無し',
+            onTapId: (id) => tapped = id,
+          ),
+        ),
+      );
+
+      expect(find.byType(IdIcon), findsNothing);
+      // 番号・ID の文字列・dat の日時表記（秒とコンマ以下まで）。
+      expect(find.text('7'), findsOneWidget);
+      expect(find.textContaining('ID:aBc1De2f'), findsOneWidget);
+      expect(find.text('2025/11/03(月) 02:14:51.907'), findsOneWidget);
+      // 名無しも省かない。他の組み方では板の既定名と同じ名前は落としている。
+      expect(find.text('名無し'), findsOneWidget);
+
+      await tester.tap(find.textContaining('ID:aBc1De2f'));
+      expect(tapped, 'aBc1De2f');
+    });
+
+    testWidgets('その ID の何本目かは ID の直後に付ける', (tester) async {
+      await tester.pumpWidget(
+        wrap(
+          PostItem(
+            res: post(1, 'aBc1De2f'),
+            idCount: 15,
+            idOrdinal: 2,
+            resLayout: ResLayout.classic,
+            onTapId: (_) {},
+          ),
+        ),
+      );
+
+      // ID と同じひとかたまりにする。離すと何の数字か読めない。
+      expect(find.textContaining('ID:aBc1De2f (2/15)'), findsOneWidget);
+    });
+
+    testWidgets('名前の後ろのワッチョイだけ 1 段小さく出す', (tester) async {
+      await tester.pumpWidget(
+        wrap(
+          PostItem(
+            res: postNamed('エッヂの名無し (L20 ipkW-6PVw)'),
+            idCount: 1,
+            idOrdinal: 1,
+            resLayout: ResLayout.classic,
+            defaultName: 'エッヂの名無し',
+            onTapWacchoi: (_) {},
+            onTapId: (_) {},
+          ),
+        ),
+      );
+
+      // 名前は省かず全部出す。ただし括弧の中は名前より小さい字（ID や日時と
+      // 同じ labelMedium）で、名乗りのほうが強く読めるようにする。
+      final name = tester.widget<Text>(
+        find.textContaining('エッヂの名無し', findRichText: false).first,
+      );
+      final root = name.textSpan! as TextSpan;
+      final spans = root.children!.cast<TextSpan>();
+      // 名前は根の字のまま、括弧の中だけ小さい字を持つ。
+      expect(spans.first.style, isNull);
+      expect(spans.first.toPlainText(), 'エッヂの名無し');
+      expect(spans.last.toPlainText(), contains('ipkW-6PVw'));
+      expect(spans.last.style!.fontSize, lessThan(root.style!.fontSize!));
+    });
+
+    testWidgets('返信数はレス番号の直後に置く', (tester) async {
+      await tester.pumpWidget(
+        wrap(
+          PostItem(
+            res: post(3, 'aBc1De2f'),
+            idCount: 1,
+            idOrdinal: 1,
+            resLayout: ResLayout.classic,
+            replyCount: 5,
+            onTapReplies: (_) {},
+            onTapId: (_) {},
+          ),
+        ),
+      );
+
+      // 番号 → 返信数 → 名前 の順。専ブラが昔からこの位置に置いている。
+      final number = tester.getTopLeft(find.text('3')).dx;
+      final replies = tester.getTopLeft(find.text('5')).dx;
+      final name = tester.getTopLeft(find.text('名無し')).dx;
+      expect(number, lessThan(replies));
+      expect(replies, lessThan(name));
+    });
+  });
+
+  group('行を単独で占める >>N', () {
+    Res quoted(int number) => Res(
+      number: number,
+      name: '名無し',
+      mail: '',
+      dateText: '2025/11/03(月) 02:14:51.907',
+      dateTime: null,
+      id: 'aaa',
+      beId: null,
+      body: '指されたレスの本文',
+      kind: ResKind.normal,
+      threadTitle: null,
+    );
+
+    testWidgets('書かれた位置に返信先を差し込む', (tester) async {
+      await tester.pumpWidget(
+        wrap(
+          PostItem(
+            res: postWithBody('&gt;&gt;1<br>それな'),
+            idCount: 1,
+            idOrdinal: 1,
+            onTapId: (_) {},
+            quotedRes: (n) => n == 1 ? quoted(n) : null,
+            inlineQuotes: const {1},
+          ),
+        ),
+      );
+
+      // 番号の文字ではなく、指し先の中身が出る（柱の組み方なので番号は出ない）。
+      expect(find.byType(QuotedResRow), findsOneWidget);
+      expect(find.textContaining('指されたレスの本文'), findsOneWidget);
+      expect(find.textContaining('>>1'), findsNothing);
+      expect(find.textContaining('それな'), findsOneWidget);
+    });
+
+    testWidgets('指し先を引けない場所では、番号の文字のまま出す', (tester) async {
+      await tester.pumpWidget(
+        wrap(
+          PostItem(
+            res: postWithBody('&gt;&gt;1<br>それな'),
+            idCount: 1,
+            idOrdinal: 1,
+            onTapId: (_) {},
+          ),
+        ),
+      );
+
+      expect(find.byType(QuotedResRow), findsNothing);
+      expect(find.textContaining('それな'), findsOneWidget);
+    });
+
+    testWidgets('文の頭に付いているだけの >>N は差し替えない', (tester) async {
+      await tester.pumpWidget(
+        wrap(
+          PostItem(
+            res: postWithBody('&gt;&gt;1 それな'),
+            idCount: 1,
+            idOrdinal: 1,
+            onTapId: (_) {},
+            quotedRes: (n) => quoted(n),
+            inlineQuotes: const {1},
+          ),
+        ),
+      );
+
+      // ここはレスの手前に引用行が出る形（一覧側が組む）なので、本文は本文のまま。
+      expect(find.byType(QuotedResRow), findsNothing);
+      expect(find.textContaining('それな'), findsOneWidget);
+    });
+  });
 
   testWidgets('ヘッダに出すものが無いレスでは、柱の組み方はヘッダの行を作らない', (tester) async {
     // 名無し・返信なし・スレ主でも自分でもないレス。板の既定名を渡すと名前が
@@ -217,30 +388,71 @@ void main() {
     handle.dispose();
   });
 
+  /// スレ主の印。**組み方で見せ方が変わる**——柱では絵に重ねた★、ヘッダに
+  /// まとめる組み方では単独の★、クラシックでは ID に添える★。どれも字は
+  /// 出さず、読み上げにだけ「スレ主」を渡すので、そこで確かめる。
   testWidgets('スレ主のレスにだけ印を付ける', (tester) async {
-    await tester.pumpWidget(
-      wrap(
-        Column(
-          children: [
-            PostItem(
-              res: post(1, 'aaa'),
-              idCount: 1,
-              idOrdinal: 1,
-              onTapId: (_) {},
-              isThreadOwner: true,
-            ),
-            PostItem(
-              res: post(2, 'bbb'),
-              idCount: 1,
-              idOrdinal: 1,
-              onTapId: (_) {},
-            ),
-          ],
+    for (final layout in ResLayout.values) {
+      final handle = tester.ensureSemantics();
+      await tester.pumpWidget(
+        wrap(
+          Column(
+            children: [
+              PostItem(
+                res: post(1, 'aaa'),
+                idCount: 1,
+                idOrdinal: 1,
+                resLayout: layout,
+                onTapId: (_) {},
+                isThreadOwner: true,
+              ),
+              PostItem(
+                res: post(2, 'bbb'),
+                idCount: 1,
+                idOrdinal: 1,
+                resLayout: layout,
+                onTapId: (_) {},
+              ),
+            ],
+          ),
         ),
-      ),
-    );
+      );
 
-    expect(find.text('スレ主'), findsOneWidget);
+      expect(
+        find.bySemanticsLabel(RegExp('スレ主')),
+        findsOneWidget,
+        reason: '$layout',
+      );
+      // 字は出さない。読んでいる間じゅう目に入る場所に置くには強い言い方なので、
+      // 記号だけにして、言葉は NG のメニューと NG 管理の画面に残してある。
+      expect(find.text('スレ主'), findsNothing, reason: '$layout');
+      handle.dispose();
+    }
+  });
+
+  testWidgets('柱の組み方ではスレ主の印を絵に重ね、ヘッダの行を増やさない', (tester) async {
+    Future<double> heightOf({required bool isThreadOwner}) async {
+      await tester.pumpWidget(
+        wrap(
+          PostItem(
+            res: post(1, 'aaa'),
+            idCount: 1,
+            idOrdinal: 1,
+            onTapId: (_) {},
+            isThreadOwner: isThreadOwner,
+          ),
+        ),
+      );
+      return tester.getSize(find.byType(PostItem)).height;
+    }
+
+    // 文字の札はヘッダの行を 1 つ要求していた。印を絵へ移した今は、スレ主でも
+    // 名無し・返信なしなら出すものが無く、行ごと消える＝高さが変わらない。
+    expect(
+      await heightOf(isThreadOwner: true),
+      await heightOf(isThreadOwner: false),
+    );
+    expect(find.text('スレ主'), findsNothing);
   });
 
   testWidgets('画像は貼られた位置に挟まり、URL の文字列は出さない', (tester) async {
