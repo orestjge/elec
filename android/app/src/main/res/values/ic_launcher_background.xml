@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- アダプティブアイコンの下地。絵が白地の線画なので白で揃える。 -->
+    <color name="ic_launcher_background">#FFFFFF</color>
+</resources>
