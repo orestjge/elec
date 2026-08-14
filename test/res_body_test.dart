@@ -151,7 +151,10 @@ void main() {
         closeTo(8 / 15, 1e-9),
       );
       // すでに下限より小さい字なら、これ以上は縮めない。
-      expect(asciiArtFitScale(naturalWidth: 600, maxWidth: 300, fontSize: 6), 1);
+      expect(
+        asciiArtFitScale(naturalWidth: 600, maxWidth: 300, fontSize: 6),
+        1,
+      );
     });
 
     testWidgets('狭い画面でははみ出す AA の字を小さくして出す', (tester) async {
@@ -243,11 +246,17 @@ void main() {
       ]);
     });
 
+    /// **行を丸ごと使って書かれた** `>>N` は矢印＋番号の作り
+    /// （`_InlineResAnchor`）になるので、番号のほうを押す。文と同じ行にある
+    /// `>>N` は今までどおりの span なので [tapLink]。
+    Future<void> tapLineAnchor(WidgetTester tester, String spec) =>
+        tester.tap(find.text(spec));
+
     testWidgets('カンマと範囲の混在も開く', (tester) async {
       final ranges = <List<int>>[];
       await pump(tester, '>>1,4-6', onTapResRange: ranges.add);
 
-      tapLink(tester, '>>1,4-6');
+      await tapLineAnchor(tester, '1,4-6');
       expect(ranges, [
         [1, 4, 5, 6],
       ]);
@@ -257,6 +266,7 @@ void main() {
       final ranges = <List<int>>[];
       await pump(tester, '&gt;&gt;2,4 テスト', onTapResRange: ranges.add);
 
+      // 文と同じ行にあるので `>>` のまま。
       tapLink(tester, '>>2,4');
       expect(ranges, [
         [2, 4],
@@ -267,7 +277,7 @@ void main() {
       final tapped = <int>[];
       await pump(tester, '>>3,8', onTapRes: tapped.add);
 
-      tapLink(tester, '>>3,8');
+      await tapLineAnchor(tester, '3,8');
       expect(tapped, [3]);
     });
 
@@ -285,6 +295,29 @@ void main() {
       expect(tapped, [1]);
       expect(ranges, isEmpty);
       expect(_plainText(tester), '、2人ともありがとう');
+    });
+
+    testWidgets('行を丸ごと使った >> だけ矢印に替える', (tester) async {
+      final tapped = <int>[];
+      await pump(tester, '>>1\nそれは >>5 が言ってた', onTapRes: tapped.add);
+
+      // 1 行を占めているぶんは番号だけの Text（矢印が `>>` の代わり）。
+      expect(find.text('1'), findsOneWidget);
+      expect(find.byIcon(Icons.reply), findsOneWidget);
+      // 文と同じ行にあるぶんは `>>5` の表記のまま。替えると文が読み下せない。
+      tapLink(tester, '>>5');
+      expect(tapped, [5]);
+    });
+
+    testWidgets('安価で文を組む書き方では、どの >>N もそのまま残す', (tester) async {
+      final tapped = <int>[];
+      await pump(tester, '今日は>>5を>>6個食べる！', onTapRes: tapped.add);
+
+      // 「>>5 を >>6 個」——安価が文の部品なので、記号も番号も動かさない。
+      expect(find.byIcon(Icons.reply), findsNothing);
+      tapLink(tester, '>>5');
+      tapLink(tester, '>>6');
+      expect(tapped, [5, 6]);
     });
   });
 

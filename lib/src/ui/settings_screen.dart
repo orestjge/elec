@@ -150,16 +150,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
   static IconData _resLayoutIcon(ResLayout layout) => switch (layout) {
     ResLayout.gutter => Icons.account_box_outlined,
     ResLayout.header => Icons.view_headline,
+    ResLayout.classic => Icons.text_snippet_outlined,
   };
 
   static String _resLayoutLabel(ResLayout layout) => switch (layout) {
     ResLayout.gutter => 'アイコンを左に大きく',
     ResLayout.header => 'ヘッダにまとめる',
+    ResLayout.classic => 'クラシック',
   };
 
   static String _resLayoutDescription(ResLayout layout) => switch (layout) {
     ResLayout.gutter => 'ID の絵をレスの左に立て、時刻はレスの足元。誰が書いたかを追いやすい',
     ResLayout.header => 'ID の絵を小さくして名前・時刻と 1 行に並べる。1 件あたりが小さい',
+    ResLayout.classic => 'レス番号・名前・日時・ID を文字のまま並べる。絵は使わない',
   };
 
   static IconData _layoutIcon(ThreadLayout layout) => switch (layout) {

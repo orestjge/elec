@@ -21,6 +21,7 @@ import 'collapsible.dart';
 import 'post_body_segments.dart';
 import 'post_images.dart';
 import 'reply_tier.dart';
+import 'thread_tree.dart';
 import 'res_body.dart';
 
 /// スレッドの 1 レス。番号順タイムライン向けの密なレイアウト。
@@ -35,6 +36,9 @@ class PostItem extends StatelessWidget {
     this.onTapWacchoi,
     this.resLayout = ResLayout.gutter,
     this.nested = false,
+    this.attachedToQuote = false,
+    this.quotedRes,
+    this.inlineQuotes = const {},
     this.onTapRes,
     this.onTapResRange,
     this.onTapUrl,
@@ -79,11 +83,37 @@ class PostItem extends StatelessWidget {
   /// 収める。読む人が設定で選ぶ——どちらが良いかはスレの性格で変わるため。
   final ResLayout resLayout;
 
+  /// すぐ上に、このレスの返信先の引用行（`QuotedResRow`）が並んでいるか。
+  ///
+  /// その引用行は**このレスのもの**（このレスが指している相手の再掲）なので、
+  /// 上の余白を詰めてひと塊に見せる。空けたままだと、引用行が上下のレスの
+  /// どちらに付いているのか読めない。
+  ///
+  /// 詰め方は組み方で変える。クラシックは 0 まで——見出しが字だけで行も詰まって
+  /// いるので、少しでも空くと切れて見える。他の組み方は見出しに絵が立っていて、
+  /// 0 にすると絵の上端が引用行の字に触れるので、わずかに残す。
+  final bool attachedToQuote;
+
+  /// レス番号から、そのレスを引くもの。
+  ///
+  /// **本文の中で行を丸ごと使って指している `>>N`**（`>>5` だけの行）を、その
+  /// 位置で返信先の再掲に差し替えるために要る（`PostBodyQuote`）。渡さない場所
+  /// では差し替えず、`>>N` の文字のまま出る——会話シートや同一 ID の一覧のように
+  /// スレ全体を持っていない場所では、指し先を引けないため。
+  final Res? Function(int number)? quotedRes;
+
+  /// 本文の中へ返信先の再掲を差し込むレス番号（`ThreadTreeRow.inlineQuotes`）。
+  ///
+  /// 行を丸ごと使って指している `>>N` のうち、**並びがまだ示していない相手**
+  /// だけが入る。ツリーの親（字下げが示す）や、手前に引用行として出る相手は
+  /// 入らない——同じことを 2 か所で言うと、ツリーでは返信のたびに親の再掲が
+  /// 挟まって画面が引用だらけになる。
+  final Set<int> inlineQuotes;
+
   /// 返信としてぶら下がっている（字下げされた）行か。
   ///
-  /// ツリーで字下げされた返信は、そのレス自体が誰かへの従属した発言で、幅も
-  /// 字下げのぶん狭い。[ResLayout.gutter] の identicon をここでも同じ大きさで
-  /// 立てると、狭い行を絵が占領する。ぶら下がった行では一回り小さくする。
+  /// 字下げのぶん幅が狭いので、画面端から本文までの余白を詰める
+  /// （[nestedResLeftPadding]）。identicon の大きさは変えない（[_idGutterSize]）。
   final bool nested;
 
   /// `>>N` タップ時。該当レスへスクロールする。
@@ -205,6 +235,9 @@ class PostItem extends StatelessWidget {
     final command = parseThreadCommand(rawBody);
     // AA はインデントや上下の余白が絵の一部になるのでそのまま残し、普通のレスは
     // 前後の空白・空行を落として詰める。
+    // 本文の `>>N` はどれも消さない。行を丸ごと使って書かれたものは返信先の
+    // 再掲に差し替わり（[PostBodyQuote]）、文と同じ行にあるものは文の部品
+    // （`今日は>>5を>>6個食べる！`）なので、そのまま残す。
     final body = trimUnlessAsciiArt(
       command == null ? rawBody : stripThreadCommand(rawBody, command),
     );
@@ -214,6 +247,9 @@ class PostItem extends StatelessWidget {
       body,
       linkPreviews: linkPreviews,
       isThreadLink: (url) => ThreadLinks.targetOf(url) != null,
+      // 指し先を引ける場所で、かつ並びがまだ示していない相手だけ、行を単独で
+      // 占める `>>N` を再掲に差し替える。
+      inlineQuotes: quotedRes == null ? const {} : inlineQuotes,
     );
     // 全画面ビューアはレス内の全画像・全動画をひと続きに送れるようにする。
     // 本文の途中で区画に分かれても、どのサムネイルから開いても並びは同じ。
@@ -235,19 +271,26 @@ class PostItem extends StatelessWidget {
     }
 
     final gutter = resLayout == ResLayout.gutter;
+    final classic = resLayout == ResLayout.classic;
 
-    // ヘッダの行に出すものがあるか。名無し・返信なし・スレ主でも自分でもない
-    // レス——実際の板でいちばん多い形——では**何も無い**ので、行ごと省く。
-    // 柱の組み方では時刻をヘッダに置いていないので、省いても行き場を失うものは
-    // ない。ヘッダにまとめる組み方では ID の絵と時刻がそこにあるので、常に出す。
+    // 「何者か」の 3 つ。柱の組み方では絵に重ねた印（[_IdBadge]）に、ヘッダに
+    // まとめる組み方では文字の札（[_OwnChip]）になる。
+    final marks = (
+      owner: isThreadOwner,
+      own: isOwn,
+      replyToOwn: isReplyToOwn && !isOwn,
+    );
+
+    // ヘッダの行に出すものがあるか。名無し・返信なしのレス——実際の板でいちばん
+    // 多い形——では**何も無い**ので、行ごと省く。柱の組み方では時刻をヘッダに
+    // 置いていないので、省いても行き場を失うものはない。ヘッダにまとめる組み方
+    // では ID の絵と時刻がそこにあるので、常に出す。
+    //
+    // スレ主・自分・自分宛はここに数えない。柱の組み方ではこの 3 つを絵に重ねた
+    // 印で出す（[_IdBadge]）ので、ヘッダに出すものは増えない。
     final headerName = _headerName(name);
     final hasHeaderLine =
-        !gutter ||
-        headerName.text.isNotEmpty ||
-        replyCount > 0 ||
-        isThreadOwner ||
-        isOwn ||
-        isReplyToOwn;
+        !gutter || headerName.text.isNotEmpty || replyCount > 0;
 
     // 本文の最後が箱——リンクのカード・画像・スレ立てコマンドの札——で終わる
     // レスは、その下の縁と足元の時刻が直に接する。文章で終わるなら行の下に
@@ -257,6 +300,43 @@ class PostItem extends StatelessWidget {
     final endsWithBox = segments.isEmpty
         ? command != null
         : segments.last is! PostBodyText;
+
+    /// 本文に差し込む返信先の再掲。そのレスが手元に無ければ（会話シートなど、
+    /// 引ける一覧を持たない場所）、書かれていた `>>N` の文字のまま出す。
+    Widget buildQuote({
+      required int number,
+      required String raw,
+      required bool first,
+      required bool joinsPrevious,
+    }) {
+      final target = quotedRes?.call(number);
+      if (target == null) {
+        return Padding(
+          padding: EdgeInsets.only(top: first ? 3 : 8),
+          child: ResBody(
+            text: raw,
+            style: theme.textTheme.bodyLarge?.copyWith(
+              fontSize: _bodyFontSize,
+              height: _bodyLineHeight,
+            ),
+            onTapRes: (n) => onTapRes?.call(n),
+            onTapResRange: (numbers) => onTapResRange?.call(numbers),
+            onTapUrl: openUrl,
+            onTapId: onTapId,
+            selectable: bodySelectable,
+            highlightQuery: highlightQuery,
+          ),
+        );
+      }
+      return QuotedResRow(
+        res: target,
+        inline: true,
+        resLayout: resLayout,
+        joinsPrevious: joinsPrevious,
+        blurImages: blurImages,
+        onTap: () => onTapRes?.call(number),
+      );
+    }
 
     final bodyChildren = <Widget>[
       if (command != null) _ThreadCommandChip(command: command),
@@ -283,6 +363,13 @@ class PostItem extends StatelessWidget {
               selectable: bodySelectable,
               highlightQuery: highlightQuery,
             ),
+          ),
+          // 行を単独で占める `>>N`。書かれた位置に返信先を差し込む。
+          PostBodyQuote(:final number, :final raw) => buildQuote(
+            number: number,
+            raw: raw,
+            first: i == 0,
+            joinsPrevious: i > 0 && segments[i - 1] is PostBodyQuote,
           ),
           PostBodyLink(:final url, :final raw) => Padding(
             padding: EdgeInsets.only(top: i == 0 ? 3 : 8),
@@ -342,6 +429,7 @@ class PostItem extends StatelessWidget {
           _Header(
             res: res,
             name: headerName,
+            fullName: name.isNotEmpty ? name : (defaultName ?? '名無し'),
             wacchoi: wacchoiOf(name),
             resLayout: resLayout,
             idCount: idCount,
@@ -400,11 +488,12 @@ class PostItem extends StatelessWidget {
                   id: res.id!,
                   count: idCount,
                   ordinal: idOrdinal,
-                  size: nested ? _idGutterNestedSize : _idGutterSize,
+                  size: _idGutterSize,
+                  marks: marks,
                   onTap: onTapId,
                 )
               else
-                _NoIdGutter(size: nested ? _idGutterNestedSize : _idGutterSize),
+                _NoIdGutter(size: _idGutterSize, marks: marks),
               const SizedBox(width: _idGutterGap),
               Expanded(child: stack),
             ],
@@ -434,11 +523,15 @@ class PostItem extends StatelessWidget {
       //
       // アクセント帯を自分で描くときは、その太さ（3）ぶん詰めて中身の位置を
       // 保つ。
+      //
+      // 上下は、クラシックの組み方だけ詰める（[_classicResVerticalPadding]）。
       padding: EdgeInsets.fromLTRB(
         (nested ? nestedResLeftPadding : resLeftPadding) - (showAccent ? 3 : 0),
-        6,
+        attachedToQuote
+            ? (classic ? 0 : _quotedResTopPadding)
+            : (classic ? _classicResVerticalPadding : _resVerticalPadding),
         resLeftPadding,
-        6,
+        classic ? _classicResVerticalPadding : _resVerticalPadding,
       ),
       child: column,
     );
@@ -826,6 +919,7 @@ class _Header extends StatelessWidget {
   const _Header({
     required this.res,
     required this.name,
+    required this.fullName,
     required this.wacchoi,
     required this.resLayout,
     required this.idCount,
@@ -845,11 +939,17 @@ class _Header extends StatelessWidget {
   /// ヘッダに出す名前と見せ方（[PostItem._headerName] の結果）。
   final ({String text, bool muted}) name;
 
+  /// 省略しない名前。名前欄が空なら板の既定名（それも無ければ「名無し」）。
+  /// クラシックの組み方だけがこちらを使う——dat の見出しには必ず名前があり、
+  /// 毎行同じ名前が並ぶ形そのものが「クラシック」だから。
+  final String fullName;
+
   /// 名前から切り出したワッチョイ（[wacchoiOf]）。無ければ null。
   final String? wacchoi;
 
   /// レスの組み方（[PostItem.resLayout]）。[ResLayout.header] のときだけ、この
   /// 行が ID の絵と時刻も抱える。柱の組み方ではどちらも行の外にある。
+  /// [ResLayout.classic] では並びそのものが変わる（[_classicChildren]）。
   final ResLayout resLayout;
   final int idCount;
   final int idOrdinal;
@@ -865,14 +965,18 @@ class _Header extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
     final lineHeight = _headerLineHeight(theme);
     // 返信件数が押せるときだけ、件数のスロットを当たり判定の高さまで広げる。
     // 押せないレスは今までどおり 1 行分のままにして、一覧の詰まりを保つ。
+    final classic = resLayout == ResLayout.classic;
+    // クラシックの 1 段の高さは、そこに並ぶ字（labelMedium）ちょうどに落とす。
+    // 名前・日時・ID はどれもこの字で、札のような箱は無い。名前用の行高（20）を
+    // 使うと、字の上下に 2px ずつ空いたぶんが**段の間に二重で乗る**。
+    final slotHeight = classic ? _classicLineHeight(theme) : lineHeight;
     final replyCountSlotHeight =
-        onTapReplies != null && lineHeight < _replyCountTapHeight
+        onTapReplies != null && slotHeight < _replyCountTapHeight
         ? _replyCountTapHeight
-        : lineHeight;
+        : slotHeight;
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -883,85 +987,33 @@ class _Header extends StatelessWidget {
         Expanded(
           child: LayoutBuilder(
             builder: (context, constraints) => Wrap(
-              spacing: 8,
-              runSpacing: 2,
+              // クラシックは dat の 1 行を写したものなので、要素の間は語と語の
+              // 間くらいに詰める。他の組み方は札が並ぶので広く取る。
+              spacing: classic ? 5 : 8,
+              // 折り返した段の間。**クラシックでは空けない**——長い日時のせいで
+              // 2 段になるのが常態で、ここが空くと 1 レスのヘッダが 2 つの行に
+              // 見えてしまう。段の中身はもともと字の高さちょうどなので、0 でも
+              // 字どうしはくっつかない。
+              runSpacing: classic ? 0 : 1,
               crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                // ヘッダは「どれだけ反応され・誰が・何者で・いつ」の順に読ませる。
-                //
-                // **レス番号は出さない。** 番号は `>>N` から辿るための参照値で、
-                // 読むときには要らない。レスを指定する操作は左スワイプ（返信・
-                // `SwipeToReply`）と長押しメニューが受け持つ。
-                if (replyCount > 0)
-                  _HeaderSlot(
-                    height: replyCountSlotHeight,
-                    child: _ReplyCount(
-                      number: res.number,
-                      replyCount: replyCount,
-                      onTap: onTapReplies,
-                    ),
-                  ),
-                // その ID の何本目か（`n/m`）はヘッダに出さない。**連投の多さは
-                // 左の柱の外周リングの色が持っている**ので、ヘッダに数字で足すと
-                // 同じことを二度言うことになる。正確なレス数は ID をタップした
-                // シートの見出しに出る。
-                //
-                // ヘッダにまとめる組み方では、ID の絵もこの行に並ぶ。固定高さの
-                // スロットには入れない——狭いときは中身に応じて縦に伸び、それでも
-                // 入らなければ折り返す。スロットで 1 行に固定すると潰れる。
-                if (resLayout == ResLayout.header)
-                  if (res.id != null)
-                    _IdChip(
-                      id: res.id!,
-                      count: idCount,
-                      ordinal: idOrdinal,
-                      onTap: onTapId,
+              children: classic
+                  ? _classicChildren(
+                      context,
+                      constraints,
+                      lineHeight: slotHeight,
+                      replyCountSlotHeight: replyCountSlotHeight,
                     )
-                  else
-                    // ID なしの板。アイコンごと省くと、名無し・返信なしのレスは
-                    // ヘッダが時刻だけになってレスの切れ目が読めなくなる。
-                    const _NoIdChip(),
-                // スレ主の印はヘッダの先頭寄り。「誰が」に掛かる情報なので、左の
-                // 柱の identicon から離さない。★ はスレ主 NG の `[xxxx★]` と
-                // 同じ、このアプリでのスレ主の記号。
-                if (isThreadOwner)
-                  _OwnChip(
-                    color: scheme.tertiary,
-                    label: 'スレ主',
-                    icon: Icons.star_rounded,
-                  ),
-                // Wrap の子は Flexible にできないので、極端に長い名前だけは
-                // 行幅で頭打ちにして省略する（通常の名前はそのまま 1 チャンク）。
-                // 名無しは空文字で渡ってくるので、枠ごと出さない。
-                if (name.text.isNotEmpty)
-                  ConstrainedBox(
-                    constraints: BoxConstraints(maxWidth: constraints.maxWidth),
-                    child: _HeaderSlot(
-                      height: lineHeight,
-                      child: _NameLabel(
-                        name: name.text,
-                        muted: name.muted,
-                        highlightQuery: highlightQuery,
-                        wacchoi: wacchoi,
-                        onTapWacchoi: onTapWacchoi,
-                      ),
+                  : _modernChildren(
+                      context,
+                      constraints,
+                      lineHeight: slotHeight,
+                      replyCountSlotHeight: replyCountSlotHeight,
                     ),
-                  ),
-                if (isOwn)
-                  _OwnChip(color: scheme.secondary)
-                else if (isReplyToOwn)
-                  _OwnChip(
-                    color: scheme.primary,
-                    onColor: scheme.onPrimary,
-                    label: '自分宛',
-                    icon: Icons.reply,
-                    filled: true,
-                  ),
-              ],
             ),
           ),
         ),
-        // ヘッダにまとめる組み方の時刻。柱の組み方ではレスの足元にある。
+        // ヘッダにまとめる組み方の時刻。柱の組み方ではレスの足元、クラシックでは
+        // 日付として左の並びの中にある。
         if (resLayout == ResLayout.header) ...[
           const SizedBox(width: 8),
           _HeaderSlot(
@@ -971,6 +1023,176 @@ class _Header extends StatelessWidget {
         ],
       ],
     );
+  }
+
+  /// dat の見出しをそのまま並べる（[ResLayout.classic]）。
+  ///
+  /// 順序は dat の 1 行と同じ——**番号・名前・日時・ID**。読む人がすでに知って
+  /// いる並びなので、目が迷わない。
+  ///
+  /// dat に無いもの（このアプリが足したもの）は、**それが掛かっている語の直後**
+  /// に差す。返信数はレス番号の後ろ（`>>N` が集めた数なので番号に掛かる）、
+  /// その ID の何本目か（`n/m`）は ID の後ろ。専ブラが昔からこの位置に置いて
+  /// いるので、置き場所を覚え直さずに読める。「何者か」の札だけは dat の語に
+  /// 掛からないので末尾へ回す。
+  List<Widget> _classicChildren(
+    BuildContext context,
+    BoxConstraints constraints, {
+    required double lineHeight,
+    required double replyCountSlotHeight,
+  }) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    // 名前だけは他より 1 段大きい字（[_NameLabel] は labelLarge）なので、枠も
+    // その行の高さで取る。ほかと同じ 16 に押し込めると、字が枠から数 px はみ出て
+    // 下の段に触れる。
+    final nameHeight = _headerLineHeight(theme);
+    return [
+      _HeaderSlot(
+        height: lineHeight,
+        child: _ClassicNumber(number: res.number),
+      ),
+      if (replyCount > 0)
+        _HeaderSlot(
+          height: replyCountSlotHeight,
+          child: _ReplyCount(
+            number: res.number,
+            replyCount: replyCount,
+            onTap: onTapReplies,
+          ),
+        ),
+      // 名無しも省かずに出す。**この組み方だけは省略しない**——毎行同じ名前が
+      // 並ぶ冗長さこそが dat の見出しの形で、そこを削ると他の組み方に寄る。
+      ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: constraints.maxWidth),
+        child: _HeaderSlot(
+          height: nameHeight,
+          child: _NameLabel(
+            name: fullName,
+            // 名前の後ろの括弧（ワッチョイ等）だけ 1 段落とす。
+            smallSuffix: true,
+            highlightQuery: highlightQuery,
+            wacchoi: wacchoi,
+            onTapWacchoi: onTapWacchoi,
+          ),
+        ),
+      ),
+      _HeaderSlot(
+        height: lineHeight,
+        child: _ClassicDate(res: res),
+      ),
+      if (res.id != null)
+        _HeaderSlot(
+          height: lineHeight,
+          child: _ClassicId(
+            id: res.id!,
+            count: idCount,
+            ordinal: idOrdinal,
+            isThreadOwner: isThreadOwner,
+            onTap: onTapId,
+          ),
+        )
+      // ID を出さない板では星の行き先が無いので、単独で置く。（この板でスレ主と
+      // 分かるのはレス番号 1 だけ——判定は `>>1` と同じ ID かどうかなので、ID が
+      // 無ければ他のレスでは立たない。）
+      else if (isThreadOwner)
+        _HeaderSlot(height: lineHeight, child: const _OwnerStar()),
+      if (_selfChip(scheme) case final chip?) chip,
+    ];
+  }
+
+  /// 自分・自分宛の札。両方立つことはない（自分のレスは自分宛にならない）。
+  ///
+  /// **柱の組み方では出さない。** あちらは絵に重ねた印（[_IdBadge]）が同じことを
+  /// 言う。スレ主と違い、この 2 つはヘッダにまとめる組み方・クラシックでは札の
+  /// まま——★ のような定着した記号が無く、「自分」「自分宛」の字自体はくだけた
+  /// 言い方でもないため。
+  Widget? _selfChip(ColorScheme scheme) {
+    if (resLayout == ResLayout.gutter) return null;
+    if (isOwn) return _OwnChip(color: scheme.secondary);
+    if (isReplyToOwn) {
+      return _OwnChip(
+        color: scheme.primary,
+        onColor: scheme.onPrimary,
+        label: '自分宛',
+        icon: Icons.reply,
+        filled: true,
+      );
+    }
+    return null;
+  }
+
+  List<Widget> _modernChildren(
+    BuildContext context,
+    BoxConstraints constraints, {
+    required double lineHeight,
+    required double replyCountSlotHeight,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    return [
+      // ヘッダは「どれだけ反応され・誰が・何者で・いつ」の順に読ませる。
+      //
+      // **レス番号は出さない。** 番号は `>>N` から辿るための参照値で、読むときには
+      // 要らない。レスを指定する操作は左スワイプ（返信・`SwipeToReply`）と長押し
+      // メニューが受け持つ。番号が要る読み方のためにクラシックの組み方がある。
+      if (replyCount > 0)
+        _HeaderSlot(
+          height: replyCountSlotHeight,
+          child: _ReplyCount(
+            number: res.number,
+            replyCount: replyCount,
+            onTap: onTapReplies,
+          ),
+        ),
+      // その ID の何本目か（`n/m`）はヘッダに出さない。**連投の多さは左の柱の
+      // 外周リングの色が持っている**ので、ヘッダに数字で足すと同じことを二度
+      // 言うことになる。正確なレス数は ID をタップしたシートの見出しに出る。
+      //
+      // ヘッダにまとめる組み方では、ID の絵もこの行に並ぶ。固定高さのスロットには
+      // 入れない——狭いときは中身に応じて縦に伸び、それでも入らなければ折り返す。
+      // スロットで 1 行に固定すると潰れる。
+      //
+      // スレ主の印はこの絵の角に載る（[_IdChip.isThreadOwner]）。「誰が」に
+      // 掛かる情報なので、どの組み方でも ID から離さない。
+      if (resLayout == ResLayout.header)
+        if (res.id != null)
+          _IdChip(
+            id: res.id!,
+            count: idCount,
+            ordinal: idOrdinal,
+            isThreadOwner: isThreadOwner,
+            onTap: onTapId,
+          )
+        else
+          // ID なしの板。アイコンごと省くと、名無し・返信なしのレスはヘッダが
+          // 時刻だけになってレスの切れ目が読めなくなる。
+          _NoIdChip(isThreadOwner: isThreadOwner),
+      // Wrap の子は Flexible にできないので、極端に長い名前だけは行幅で頭打ちに
+      // して省略する（通常の名前はそのまま 1 チャンク）。名無しは空文字で渡って
+      // くるので、枠ごと出さない。
+      if (name.text.isNotEmpty)
+        ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: constraints.maxWidth),
+          child: _HeaderSlot(
+            height: lineHeight,
+            child: _NameLabel(
+              name: name.text,
+              muted: name.muted,
+              highlightQuery: highlightQuery,
+              wacchoi: wacchoi,
+              onTapWacchoi: onTapWacchoi,
+            ),
+          ),
+        ),
+      if (_selfChip(scheme) case final chip?) chip,
+    ];
+  }
+
+  /// クラシックの 1 段の高さ。並ぶ字（[TextTheme.labelMedium]）の行の高さ。
+  double _classicLineHeight(ThemeData theme) {
+    final style = theme.textTheme.labelMedium;
+    final fontSize = style?.fontSize ?? 12;
+    return fontSize * (style?.height ?? 16 / fontSize);
   }
 
   double _headerLineHeight(ThemeData theme) {
@@ -1004,6 +1226,7 @@ class _NameLabel extends StatelessWidget {
   const _NameLabel({
     required this.name,
     this.muted = false,
+    this.smallSuffix = false,
     this.highlightQuery = '',
     this.wacchoi,
     this.onTapWacchoi,
@@ -1013,6 +1236,16 @@ class _NameLabel extends StatelessWidget {
   /// 名乗っていない人の付随情報（ワッチョイ等）か。時刻と同じ「添え物」の見た目に
   /// 落として、コテハンだけが名前として目立つようにする。
   final bool muted;
+
+  /// 名前の末尾の括弧（`エッヂの名無し (L20 ipkW-6PVw)` の後半）を 1 段落として
+  /// 出すか。**名前を省略しないクラシックの組み方のためのもの。**
+  ///
+  /// 他の組み方は [PostItem._headerName] が既定名を落として括弧だけを残すので、
+  /// 出るものがそもそも「添え物」しかない。クラシックは名乗りごと全部出すため、
+  /// ワッチョイまで名前と同じ強さで並ぶ——匿名の掲示板で、名前より長い識別子が
+  /// 毎行太字で載ることになる。**括弧の中だけ**時刻や ID と同じ大きさ・色に
+  /// 落として、名前の後ろの添え物として読ませる。
+  final bool smallSuffix;
   final String highlightQuery;
 
   /// この名前に含まれるワッチョイ（[PostItem.onTapWacchoi] と両方揃うと押せる）。
@@ -1043,8 +1276,36 @@ class _NameLabel extends StatelessWidget {
       ),
     );
     final queryLower = highlightQuery.trim().toLowerCase();
+    // 末尾の括弧を切り離す。切れなければ（コテハンだけの名前など）今までどおり
+    // 1 つの字で出す。
+    final suffix = smallSuffix ? _nameSuffixRe.firstMatch(name) : null;
     final Widget label;
-    if (queryLower.isEmpty) {
+    if (suffix != null) {
+      final suffixStyle = theme.textTheme.labelMedium?.copyWith(
+        color: theme.colorScheme.onSurfaceVariant,
+        leadingDistribution: TextLeadingDistribution.even,
+        decoration: style?.decoration,
+        decorationStyle: style?.decorationStyle,
+        decorationColor: style?.decorationColor,
+      );
+      label = Text.rich(
+        TextSpan(
+          style: style,
+          children: [
+            TextSpan(children: _spans(theme, suffix.group(1)!, queryLower)),
+            // 名前と括弧の間の空白は元の綴りのまま残す（`_nameSuffixRe` は
+            // 空白を group から外すので、ここで 1 つ入れ直す）。
+            const TextSpan(text: ' '),
+            TextSpan(
+              style: suffixStyle,
+              children: _spans(theme, suffix.group(2)!, queryLower),
+            ),
+          ],
+        ),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      );
+    } else if (queryLower.isEmpty) {
       label = Text(
         name,
         maxLines: 1,
@@ -1052,15 +1313,8 @@ class _NameLabel extends StatelessWidget {
         style: style,
       );
     } else {
-      final spans = <InlineSpan>[];
-      appendHighlighted(
-        spans,
-        name,
-        queryLower,
-        searchHighlightStyle(theme.colorScheme),
-      );
       label = Text.rich(
-        TextSpan(style: style, children: spans),
+        TextSpan(style: style, children: _spans(theme, name, queryLower)),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       );
@@ -1088,6 +1342,181 @@ class _NameLabel extends StatelessWidget {
       child: label,
     );
   }
+
+  /// [text] を、スレ内検索の一致だけ塗り分けた span に開く。検索していなければ
+  /// そのまま 1 つの span。
+  List<InlineSpan> _spans(ThemeData theme, String text, String queryLower) {
+    if (queryLower.isEmpty) return [TextSpan(text: text)];
+    final spans = <InlineSpan>[];
+    appendHighlighted(
+      spans,
+      text,
+      queryLower,
+      searchHighlightStyle(theme.colorScheme),
+    );
+    return spans;
+  }
+}
+
+/// クラシックの組み方のレス番号（[ResLayout.classic]）。dat の行頭と同じ位置。
+///
+/// **押せない。** 番号を押して開くもの（返信一覧）は隣の件数が持っていて、同じ
+/// 行で 2 つが同じ場所へ繋がると、どちらを押したのか分からなくなる。番号はここ
+/// では読むためだけのもの——`>>N` を手で書くとき、必死チェッカーの結果と突き
+/// 合わせるときに要る。
+class _ClassicNumber extends StatelessWidget {
+  const _ClassicNumber({required this.number});
+
+  final int number;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Text(
+      '$number',
+      style: theme.textTheme.labelMedium?.copyWith(
+        color: theme.colorScheme.onSurfaceVariant,
+        fontWeight: FontWeight.w700,
+        leadingDistribution: TextLeadingDistribution.even,
+        // 番号の桁が変わっても後ろの語がずれないよう、数字の幅を揃える。
+        fontFeatures: const [FontFeature.tabularFigures()],
+      ),
+    );
+  }
+}
+
+/// クラシックの組み方の日時。**dat の表記そのまま**（秒・コンマ以下まで）。
+///
+/// 他の組み方は「たった今 / 3分前」に置き換えているが、それは読んでいる最中に
+/// 効く形であって、連投の間隔を秒で見る・同じ時刻のレスを突き合わせるといった
+/// 読み方には使えない。クラシックは後者のための組み方なので、丸めずに出す。
+class _ClassicDate extends StatelessWidget {
+  const _ClassicDate({required this.res});
+
+  final Res res;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Text(
+      res.dateText.trim(),
+      style: theme.textTheme.labelMedium?.copyWith(
+        color: theme.colorScheme.onSurfaceVariant,
+        leadingDistribution: TextLeadingDistribution.even,
+      ),
+    );
+  }
+}
+
+/// クラシックの組み方の ID。**絵にせず `ID:xxxx` の文字列のまま**出す。
+///
+/// 必死チェッカーに貼る・NG リストと突き合わせる・目で拾って覚える、といった
+/// 「文字列として使う」読み方のための組み方なので、ここで絵に置き換えると
+/// この組み方を選ぶ理由そのものが無くなる。
+///
+/// 押すと同一 ID 抽出（他の組み方の絵と同じ）。押せることは点線の下線で示す
+/// ——実線は本文のリンクと同じ強さになり、ヘッダが騒がしくなる。
+///
+/// 何本目か（`n/m`）は **ID の直後**。専ブラが昔からこの位置に置いていて、
+/// 「この ID は何回書いているか」を ID から目を動かさずに読める。色は本数の
+/// 段階色（[idColorForCount]）で、ID の文字ごと染める。
+///
+/// スレ主は **ID に星を添えて**示す（[isThreadOwner]）。この組み方では札を出さ
+/// ない——並びが dat の見出しの形をしているところへ、丸い札が 1 つ割り込むと
+/// そこだけ別のアプリの部品に見える。スレ主かどうかは ID で判定しているもの
+/// （`>>1` と同じ ID）なので、その ID に付ければ理屈も見た目も合う。書き方は
+/// スレ主 NG の `[xxxx★]` と同じ。**星だけ別の色**にして、ID 文字列の一部と
+/// 読まれないようにする。
+class _ClassicId extends StatelessWidget {
+  const _ClassicId({
+    required this.id,
+    required this.count,
+    required this.ordinal,
+    required this.isThreadOwner,
+    required this.onTap,
+  });
+
+  final String id;
+  final int count;
+  final int ordinal;
+  final bool isThreadOwner;
+  final ValueChanged<String>? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final color = idColorForCount(scheme, count);
+    final tappable = onTap != null;
+    final style = theme.textTheme.labelMedium?.copyWith(
+      color: color,
+      fontWeight: count > 1 ? FontWeight.w600 : FontWeight.w400,
+      leadingDistribution: TextLeadingDistribution.even,
+      decoration: tappable ? TextDecoration.underline : null,
+      decorationStyle: TextDecorationStyle.dotted,
+      decorationColor: color.withValues(alpha: 0.6),
+    );
+    final label = Text.rich(
+      TextSpan(
+        style: style,
+        children: [
+          TextSpan(text: 'ID:$id'),
+          if (isThreadOwner)
+            TextSpan(
+              text: '★',
+              style: TextStyle(
+                color: scheme.tertiary,
+                decorationColor: scheme.tertiary.withValues(alpha: 0.6),
+              ),
+            ),
+          if (count > 1) TextSpan(text: ' ($ordinal/$count)'),
+        ],
+      ),
+    );
+    if (!tappable) return label;
+    return Semantics(
+      button: true,
+      // 星は読み上げられないので、元の札の文言をここで言う。
+      label: [
+        count > 1 ? 'ID:$id ($ordinal/$count)' : 'ID:$id',
+        if (isThreadOwner) 'スレ主',
+      ].join(' '),
+      excludeSemantics: true,
+      child: InkWell(
+        onTap: () => onTap!(id),
+        borderRadius: BorderRadius.circular(4),
+        child: label,
+      ),
+    );
+  }
+}
+
+/// 単独で立てるスレ主の星。**ID を出さない板でのクラシックだけ**が使う——他は
+/// 印の行き先（絵の角、あるいは ID 文字列の後ろ）があるが、ここには無い。
+/// [_ClassicId] の中の星と同じ形・同じ色。
+///
+/// **字は出さない。** 「スレ主」という言い方はくだけていて、読んでいる間じゅう
+/// 目に入る場所に置くには強すぎる。★ はスレ主 NG の `[xxxx★]` と同じ記号で、
+/// 言葉のほうは NG のメニューと NG 管理の画面に残っているので、意味はそこから
+/// 辿れる。読み上げにだけ言葉を渡す。
+class _OwnerStar extends StatelessWidget {
+  const _OwnerStar();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Semantics(
+      label: 'スレ主',
+      child: Text(
+        '★',
+        style: theme.textTheme.labelLarge?.copyWith(
+          color: theme.colorScheme.tertiary,
+          height: 1,
+          leadingDistribution: TextLeadingDistribution.even,
+        ),
+      ),
+    );
+  }
 }
 
 class _OwnChip extends StatelessWidget {
@@ -1104,6 +1533,7 @@ class _OwnChip extends StatelessWidget {
 
   /// [filled] のときの文字・アイコン色（塗り色の上に載る色）。
   final Color? onColor;
+
   final String label;
 
   /// ラベル左に添えるアイコン（自分宛の返信矢印など）。
@@ -1115,9 +1545,19 @@ class _OwnChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final fg = filled ? (onColor ?? color) : color;
-    // 高さ・幅とも中身に合わせて縮める。height + alignment を使うと Wrap 内で
-    // 横いっぱいに広がってしまうため、上下パディングでピル高さを作る。
+    // 幅は中身に合わせて縮める（Wrap 内で全幅化させない）が、**高さは ID の
+    // チップに合わせる**（[_headerChipHeight]）。字の高さなりにすると 3px 低く
+    // なり、同じ行に並ぶ枠付きの箱どうしで上下の辺が食い違う。
+    //
+    // 固定ではなく下限にしておくのは、端末の文字を大きくする設定のため。ID の
+    // チップは中身が絵なので伸びないが、こちらは字なので伸びる——固定すると
+    // そこで文字が切れる。
+    //
+    // **[Container.alignment] は使わない。** 揃え位置を渡すと箱が「与えられた
+    // 制約いっぱい」に育ち、Wrap の中では横幅いっぱいの札になって 1 個ずつ縦に
+    // 積まれる。下限だけ渡せば、中の Row（既定で縦中央揃え）が字を真ん中に置く。
     return Container(
+      constraints: const BoxConstraints(minHeight: _headerChipHeight),
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(6),
@@ -1206,30 +1646,55 @@ class _TimeLabel extends StatelessWidget {
   }
 }
 
+/// ヘッダの行に並ぶ小箱（ID のチップと「自分」の札）の枠と、中身までの余白。
+const double _headerChipBorder = 1.2;
+const double _headerChipPadding = 1;
+
+/// その小箱の高さ。ID のチップは中の絵（16）＋余白＋枠でこの寸法になるので、
+/// 札のほうをここへ合わせる。
+///
+/// **揃えないと同じ行に高さの違う箱が並ぶ。** 枠を持つものどうしが 3px 違うと、
+/// 縦中央で揃えても上下の辺が食い違って、行が波打って見える。
+const double _headerChipHeight =
+    16 + (_headerChipBorder + _headerChipPadding) * 2;
+
+/// ヘッダのチップ（16px の絵）に載せる印の外径。柱の 13 をそのまま持ってくると
+/// 絵の面積の大半を覆うので、絵の縮小に合わせて詰める。
+const double _headerBadgeSize = 11;
+
 /// ID なしの板でのアイコン枠。[_IdChip] と同じ大きさ・同じ位置を占め、
 /// ヘッダの左端とレスの切れ目だけを保つ。
 ///
 /// 押せない（絞り込む ID が無い）し、輪も色を持たない（連投を数えられない）。
+/// 誰が書いたかは分からないが、スレ主かどうかは ID とは別の手掛かり（レス番号
+/// 1）から分かるので、印はここにも載る。
 class _NoIdChip extends StatelessWidget {
-  const _NoIdChip();
+  const _NoIdChip({required this.isThreadOwner});
+
+  final bool isThreadOwner;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final marks = (owner: isThreadOwner, own: false, replyToOwn: false);
     return Semantics(
-      label: 'IDなし',
+      label: 'IDなし${_marksLabel(marks)}',
       child: Padding(
         padding: const EdgeInsets.only(right: 2),
-        child: Container(
-          padding: const EdgeInsets.all(1),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(6),
-            border: Border.all(
-              color: scheme.outlineVariant.withValues(alpha: 0.8),
-              width: 1.2,
+        child: _MarkedIdIcon(
+          marks: marks,
+          badgeSize: _headerBadgeSize,
+          child: Container(
+            padding: const EdgeInsets.all(_headerChipPadding),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(
+                color: scheme.outlineVariant.withValues(alpha: 0.8),
+                width: _headerChipBorder,
+              ),
             ),
+            child: const IdIconPlaceholder(),
           ),
-          child: const IdIconPlaceholder(),
         ),
       ),
     );
@@ -1241,20 +1706,33 @@ class _IdChip extends StatelessWidget {
     required this.id,
     required this.count,
     required this.ordinal,
+    required this.isThreadOwner,
     required this.onTap,
   });
   final String id;
   final int count;
   final int ordinal;
+
+  /// スレ主のレスか。**この組み方でも印は絵に載せる**（[_MarkedIdIcon]）——
+  /// 柱の組み方・クラシックと揃えて、「何者か」は必ず ID の側に付ける。絵は
+  /// 16px と小さいので、印もそのぶん小さくする。
+  ///
+  /// 自分・自分宛はこの組み方では文字の札のまま（[_Header._selfChip]）。★ と
+  /// 違って定着した記号が無く、「自分」「自分宛」の字自体はくだけた言い方でも
+  /// ないので、読める形で残している。
+  final bool isThreadOwner;
   final ValueChanged<String>? onTap;
 
   @override
   Widget build(BuildContext context) {
     final color = idColorForCount(Theme.of(context).colorScheme, count);
+    final marks = (owner: isThreadOwner, own: false, replyToOwn: false);
     return Semantics(
       // 絵には読み上げるものが無いので、元のチップの文言をここに持たせる。
       // ウィジェットテストもこのラベルでアイコンを掴む。
-      label: count > 1 ? 'ID:$id ($ordinal/$count)' : 'ID:$id',
+      label:
+          (count > 1 ? 'ID:$id ($ordinal/$count)' : 'ID:$id') +
+          _marksLabel(marks),
       button: onTap != null,
       child: InkWell(
         onTap: onTap == null ? null : () => onTap!(id),
@@ -1267,21 +1745,28 @@ class _IdChip extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Container(
-                padding: const EdgeInsets.all(1),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(6),
-                  // 外周のリングだけレス数で色を変える。中の絵は ID ごとの
-                  // 色なので、そこに連投の多さを混ぜると両方読めなくなる。
-                  border: Border.all(
-                    color: color.withValues(alpha: 0.75),
-                    width: 1.2,
+              _MarkedIdIcon(
+                marks: marks,
+                badgeSize: _headerBadgeSize,
+                child: Container(
+                  padding: const EdgeInsets.all(_headerChipPadding),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(6),
+                    // レス数で色を変えるのは外周のリングと下の数だけ。中の絵は
+                    // ID ごとの色なので、そこに連投の多さを混ぜると両方読めなく
+                    // なる。
+                    border: Border.all(
+                      color: color.withValues(alpha: 0.75),
+                      width: _headerChipBorder,
+                    ),
                   ),
+                  child: IdIcon(id: id),
                 ),
-                child: IdIcon(id: id),
               ),
               if (count > 1) ...[
-                const SizedBox(width: 4),
+                // 印が右へはみ出すぶん、数との間を空ける。詰めたままだと星と
+                // 数字がくっついて、星が数字の一部に見える。
+                SizedBox(width: isThreadOwner ? 7 : 4),
                 // 上のラベルが「ID:xxx (1/2)」まで読み上げるので、同じことを
                 // 言うこの数字は読み上げから外す。見た目の要約でしかない。
                 ExcludeSemantics(
@@ -1291,7 +1776,9 @@ class _IdChip extends StatelessWidget {
                       fontSize: 11,
                       height: 1,
                       leadingDistribution: TextLeadingDistribution.even,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      // リングと同じ段階色。同じことを言っている 2 つなので、
+                      // 色を揃えて 1 つの目印として読ませる。
+                      color: color,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -1305,12 +1792,20 @@ class _IdChip extends StatelessWidget {
   }
 }
 
-/// 左の柱に立てる identicon の一辺。
+/// 左の柱に立てる identicon の一辺。ぶら下がった返信（[PostItem.nested]）でも
+/// 同じ大きさにする。
 ///
 /// ヘッダの行と本文の 1 行目にまたがって置くので、ここを大きくしてもレスの
 /// 高さは増えない。文字と行を共有していた頃（ヘッダのチップ）は行の高さが
 /// 上限だったが、柱にしたことでその縛りが外れている。
-const double _idGutterSize = 24;
+///
+/// とはいえ上限が無いから大きく取る、ではない。柱は「誰が」を照合するための
+/// 目印で、本文より目立つと読む順が狂う。5 の倍数にしておくと 5x5 のマスが
+/// 整数 px に乗って形も締まる（24 では 1 マス 4.8px で滲む）。
+///
+/// 返信を一回り小さくしていた時期があるが、字下げがすでに従属を示しているうえ、
+/// 親と子で絵の大きさが違うと同じ ID かどうかの照合がしにくかったのでやめた。
+const double _idGutterSize = 20;
 
 /// レスの左右の余白。画面端から本文までの距離。
 ///
@@ -1323,16 +1818,26 @@ const double resLeftPadding = 16;
 /// 画面端から始まる行より詰める。[resLeftPadding] と同じ理由で公開してある。
 const double nestedResLeftPadding = 8;
 
-/// ぶら下がった返信（[PostItem.nested]）での柱の一辺。
-///
-/// 字下げのぶん行が狭く、返信そのものも従属した発言なので一回り小さくする。
-/// 引用行（`thread_tree.dart` の `QuotedResRow`）が 14 まで落としているのと
-/// 同じ考え方だが、あちらと違ってこれは本文を持つ 1 レスなので、絵として
-/// 読める大きさは残す。
-const double _idGutterNestedSize = 20;
-
 /// 柱と本文の間。
 const double _idGutterGap = 10;
+
+/// レスの上下の余白。
+const double _resVerticalPadding = 6;
+
+/// 返信先の引用行がすぐ上にあるレスの、上の余白（[PostItem.attachedToQuote]）。
+///
+/// 引用行はこのレスのものなので、間を詰めて 1 かたまりに見せる。0 にしないのは、
+/// 柱・ヘッダの組み方では見出しに identicon が立っていて、その上端が引用行の字に
+/// 触れてしまうため。
+const double _quotedResTopPadding = 2;
+
+/// クラシックの組み方でのレスの上下の余白。
+///
+/// 見出しが字だけ・行も詰まっているので、他と同じ 6 を空けるとレスの中の行間と
+/// レスとレスの間が同じに見える。**返信先の引用行（`QuotedResRow`）との間**が
+/// とくに響く——引用行はその下のレスのものなのに、間が空くと上のレスに付いて
+/// いるようにも見える。詰めたぶんの切れ目は、各行の頭に立つレス番号が受け持つ。
+const double _classicResVerticalPadding = 4;
 
 /// 本文の字の大きさと行の高さ。一覧のタイトル（14px）寄りに詰めつつ、読む主役の
 /// テキストなので 1px 大きくして行間を確保する。
@@ -1342,22 +1847,156 @@ const double _bodyLineHeight = 1.4;
 /// 柱の絵の下に添える連投数（`n/m`）の字の大きさ。
 const double _idGutterCountSize = 10;
 
-/// ID なしの板での柱。[_IdGutter] と同じ幅を占め、本文の左端を揃える。
-///
-/// 押せない（絞り込む ID が無い）し、輪も色を持たない（連投を数えられない）。
-class _NoIdGutter extends StatelessWidget {
-  const _NoIdGutter({required this.size});
+/// そのレスが「何者の発言か」。柱の絵に重ねる印（[_IdBadge]）になる。
+typedef _ResMarks = ({bool owner, bool own, bool replyToOwn});
 
+/// 印を読み上げ用の文言にする。絵には読み上げるものが無いので、柱のラベルへ
+/// 足して文字の札だったときと同じことを言わせる。
+String _marksLabel(_ResMarks marks) {
+  final words = [
+    if (marks.owner) 'スレ主',
+    if (marks.own) '自分',
+    if (marks.replyToOwn) '自分宛',
+  ];
+  return words.isEmpty ? '' : ' ${words.join(' ')}';
+}
+
+/// ID の絵の角に載せる小さな印。★＝スレ主、人＝自分、矢印＝自分宛。
+///
+/// 文字の札（[_OwnChip]）を置き換えたもの。札は「スレ主」の 3 文字のために
+/// ヘッダの行を 1 つ要求していて、名無し・返信なしのレス——板でいちばん多い
+/// 形——では**その札だけのために行が増えていた**。印を絵に載せれば行は消え、
+/// 「誰が」を語るものが 1 か所にまとまる。
+///
+/// 地色で縁取るのは、印を絵から浮かせるため。囲いが無いと identicon のドットと
+/// 混ざって、絵の一部（マスの塗り）に見える。
+class _IdBadge extends StatelessWidget {
+  const _IdBadge({
+    required this.icon,
+    required this.color,
+    required this.onColor,
+    required this.size,
+  });
+
+  final IconData icon;
+  final Color color;
+  final Color onColor;
+
+  /// 外径。絵に対してこれ以上大きいと、絵そのものが読めなくなる。柱（20px の
+  /// 絵）で 13、ヘッダのチップ（16px の絵）で 11。
   final double size;
 
   @override
   Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: color,
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: Theme.of(context).colorScheme.surface,
+          width: size < 12 ? 1.2 : 1.5,
+        ),
+      ),
+      // 字形が単純で中の詰まったものだけを使う。この大きさでは線の細いアイコンは
+      // 消える。
+      child: Icon(icon, size: size * 0.62, color: onColor),
+    );
+  }
+}
+
+/// ID の絵に印を重ねる。付くものが無ければ [child] をそのまま返す。
+///
+/// スレ主は右上、自分・自分宛は右下。**自分と自分宛は同時に立たない**ので、
+/// 同時に出るのは最大 2 つ（自分が立てたスレでの自分のレス）。
+class _MarkedIdIcon extends StatelessWidget {
+  const _MarkedIdIcon({
+    required this.marks,
+    required this.child,
+    this.badgeSize = 13,
+  });
+
+  final _ResMarks marks;
+  final Widget child;
+
+  /// 印の外径。絵の大きさに合わせて渡す（[_IdBadge.size]）。
+  final double badgeSize;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!marks.owner && !marks.own && !marks.replyToOwn) return child;
+    final scheme = Theme.of(context).colorScheme;
+    // はみ出す量は印の大きさなり。小さい印を大きくはみ出させると、絵から離れて
+    // 「隣にある別のもの」に見える。
+    final out = badgeSize / 4;
+    return Stack(
+      // 印は絵の角から少しはみ出す。絵の中へ収めると絵の面積の大半を印が占めて、
+      // 肝心の identicon が読めなくなる。
+      clipBehavior: Clip.none,
+      children: [
+        child,
+        if (marks.owner)
+          Positioned(
+            top: -out,
+            right: -out,
+            child: _IdBadge(
+              icon: Icons.star_rounded,
+              color: scheme.tertiary,
+              onColor: scheme.onTertiary,
+              size: badgeSize,
+            ),
+          ),
+        if (marks.own)
+          Positioned(
+            bottom: -out / 3,
+            right: -out,
+            child: _IdBadge(
+              icon: Icons.person_rounded,
+              color: scheme.secondary,
+              onColor: scheme.onSecondary,
+              size: badgeSize,
+            ),
+          )
+        else if (marks.replyToOwn)
+          Positioned(
+            bottom: -out / 3,
+            right: -out,
+            child: _IdBadge(
+              icon: Icons.reply,
+              color: scheme.primary,
+              onColor: scheme.onPrimary,
+              size: badgeSize,
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// ID なしの板での柱。[_IdGutter] と同じ幅を占め、本文の左端を揃える。
+///
+/// 押せない（絞り込む ID が無い）し、輪も色を持たない（連投を数えられない）。
+/// 誰が書いたかは分からないが、スレ主・自分の印は ID とは別の手掛かりから
+/// 分かるので、ここでも出す。
+class _NoIdGutter extends StatelessWidget {
+  const _NoIdGutter({required this.size, required this.marks});
+
+  final double size;
+  final _ResMarks marks;
+
+  @override
+  Widget build(BuildContext context) {
     return Semantics(
-      label: 'IDなし',
+      label: 'IDなし${_marksLabel(marks)}',
       child: Padding(
         // ヘッダの文字（行高 20）の中心と絵の中心を合わせる。
         padding: const EdgeInsets.only(top: 2),
-        child: IdIconPlaceholder(size: size),
+        child: _MarkedIdIcon(
+          marks: marks,
+          child: IdIconPlaceholder(size: size),
+        ),
       ),
     );
   }
@@ -1375,12 +2014,14 @@ class _IdGutter extends StatelessWidget {
     required this.count,
     required this.ordinal,
     required this.size,
+    required this.marks,
     required this.onTap,
   });
   final String id;
   final int count;
   final int ordinal;
   final double size;
+  final _ResMarks marks;
   final ValueChanged<String>? onTap;
 
   @override
@@ -1389,7 +2030,9 @@ class _IdGutter extends StatelessWidget {
     return Semantics(
       // 絵には読み上げるものが無いので、元のチップの文言をここに持たせる。
       // ウィジェットテストもこのラベルでアイコンを掴む。
-      label: count > 1 ? 'ID:$id ($ordinal/$count)' : 'ID:$id',
+      label:
+          (count > 1 ? 'ID:$id ($ordinal/$count)' : 'ID:$id') +
+          _marksLabel(marks),
       button: onTap != null,
       child: InkWell(
         onTap: onTap == null ? null : () => onTap!(id),
@@ -1400,18 +2043,22 @@ class _IdGutter extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Container(
-                padding: const EdgeInsets.all(1.5),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(9),
-                  // 外周のリングだけレス数で色を変える。中の絵は ID ごとの
-                  // 色なので、そこに連投の多さを混ぜると両方読めなくなる。
-                  border: Border.all(
-                    color: color.withValues(alpha: 0.75),
-                    width: 1.5,
+              _MarkedIdIcon(
+                marks: marks,
+                child: Container(
+                  padding: const EdgeInsets.all(1.5),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(9),
+                    // レス数で色を変えるのは外周のリングと下の数だけ。中の絵は
+                    // ID ごとの色なので、そこに連投の多さを混ぜると両方読めなく
+                    // なる。
+                    border: Border.all(
+                      color: color.withValues(alpha: 0.75),
+                      width: 1.5,
+                    ),
                   ),
+                  child: IdIcon(id: id, size: size),
                 ),
-                child: IdIcon(id: id, size: size),
               ),
               if (count > 1)
                 // 上のラベルが「ID:xxx (1/15)」まで読み上げるので、同じことを
@@ -1426,7 +2073,9 @@ class _IdGutter extends StatelessWidget {
                       // 絵の分だけ間延びする。
                       height: 1,
                       leadingDistribution: TextLeadingDistribution.even,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      // リングと同じ段階色。数と輪は同じことを言っているので、
+                      // 色を揃えて 1 つの目印として読ませる。
+                      color: color,
                       fontWeight: FontWeight.w600,
                     ),
                   ),

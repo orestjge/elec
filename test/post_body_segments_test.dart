@@ -1,11 +1,13 @@
 import 'package:elec/src/ui/post_body_segments.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// 区画の並びを「t:文章 / i:画像 / v:動画 / a:音声 / e:埋め込み」の要約にする。
-List<String> shape(String body) => [
-  for (final segment in splitPostBody(body))
+/// 区画の並びを「t:文章 / q:引用 / i:画像 / v:動画 / a:音声 / e:埋め込み」の
+/// 要約にする。
+List<String> shape(String body, {Set<int> inlineQuotes = const {}}) => [
+  for (final segment in splitPostBody(body, inlineQuotes: inlineQuotes))
     switch (segment) {
       PostBodyText() => 't',
+      PostBodyQuote(:final number) => 'q$number',
       PostBodyLink() => 'l',
       PostBodyMedia(:final images) when images.isNotEmpty =>
         'i${images.length}',
@@ -23,6 +25,37 @@ List<String> texts(String body) => [
 ];
 
 void main() {
+  group('行を単独で占める >>N（inlineQuotes）', () {
+    test('その位置で区画に切り出す', () {
+      expect(shape('>>5\nそれな', inlineQuotes: {5}), ['q5', 't']);
+      expect(shape('これ見て\n>>5\nどう？', inlineQuotes: {5}), ['t', 'q5', 't']);
+    });
+
+    test('1 行に並べて指していれば、その数だけ切り出す', () {
+      expect(shape('>>5 >>7\nどっちも', inlineQuotes: {5, 7}), ['q5', 'q7', 't']);
+      expect(shape('>>1-3\nまとめて', inlineQuotes: {1, 2, 3}), [
+        'q1',
+        'q2',
+        'q3',
+        't',
+      ]);
+    });
+
+    test('文の頭に付いているだけの >>N は切らない。レスの手前に出るぶん', () {
+      expect(shape('>>5 それな', inlineQuotes: {5}), ['t']);
+      expect(shape('それは >>5 が言ってた', inlineQuotes: {5}), ['t']);
+    });
+
+    // 並びがすでに示している相手（ツリーの親など）は、呼ぶ側が外して渡す。
+    test('渡された番号だけ切り出す', () {
+      expect(shape('>>5\nそれな'), ['t']);
+      expect(shape('>>5\nそれな', inlineQuotes: {7}), ['t']);
+      // 1 行に並べて指しているなら、全部が対象のときだけ切り出す。片方だけ絵に
+      // すると、残った `>>N` が宙に浮く。
+      expect(shape('>>5 >>7\nどっちも', inlineQuotes: {5}), ['t']);
+    });
+  });
+
   test('メディアの無い本文はそのまま1区画', () {
     final segments = splitPostBody('ふつうのレス');
     expect(segments.single, isA<PostBodyText>());
@@ -87,6 +120,7 @@ void main() {
       for (final segment in splitPostBody(body, linkPreviews: true))
         switch (segment) {
           PostBodyText() => 't',
+          PostBodyQuote() => 'q',
           PostBodyLink() => 'l',
           PostBodyMedia() => 'm',
         },
@@ -146,6 +180,7 @@ void main() {
       ))
         switch (segment) {
           PostBodyText() => 't',
+          PostBodyQuote() => 'q',
           PostBodyLink() => 'l',
           PostBodyMedia() => 'm',
         },

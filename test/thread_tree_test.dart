@@ -1,4 +1,6 @@
 import 'package:edge_core/edge_core.dart';
+import 'package:elec/src/net/thread_view_settings.dart';
+import 'package:elec/src/ui/id_icon.dart';
 import 'package:elec/src/ui/post_item.dart';
 import 'package:elec/src/ui/thread_tree.dart';
 import 'package:flutter/material.dart';
@@ -359,7 +361,7 @@ void main() {
       expect(find.text('+2'), findsOneWidget);
     });
 
-    testWidgets('番号・ID の絵・抜粋・サムネイルを 1 行に並べる', (tester) async {
+    testWidgets('矢印・ID の絵・抜粋・サムネイルを 1 行に並べる', (tester) async {
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
@@ -370,10 +372,43 @@ void main() {
         ),
       );
 
-      // 番号・抜粋・サムネイルの中心が同じ高さ＝折り返さず横一列に載っている。
-      final number = tester.getCenter(find.text('1')).dy;
-      expect(tester.getCenter(find.text('返信先の本文')).dy, number);
-      expect(tester.getCenter(find.byType(Image)).dy, number);
+      // 矢印・抜粋・サムネイルの中心が同じ高さ＝折り返さず横一列に載っている。
+      final mark = tester.getCenter(find.byIcon(Icons.reply)).dy;
+      expect(tester.getCenter(find.text('返信先の本文')).dy, mark);
+      expect(tester.getCenter(find.byType(Image)).dy, mark);
+    });
+
+    /// レス番号は**クラシックの組み方でだけ**出す。他の組み方はレス本体にも
+    /// 番号を出していないので、ここにだけ番号があっても見比べる先が無い。
+    testWidgets('番号を出すのはクラシックの組み方だけ', (tester) async {
+      Widget rowFor(ResLayout layout) => MaterialApp(
+        home: Scaffold(
+          body: QuotedResRow(res: post(7, '返信先の本文'), resLayout: layout),
+        ),
+      );
+
+      await tester.pumpWidget(rowFor(ResLayout.classic));
+      expect(find.text('7'), findsOneWidget);
+      // 絵のほうは逆に、クラシックでは出さない（ヘッダに絵が無いので照合できない）。
+      expect(find.byType(IdIcon), findsNothing);
+
+      for (final layout in [ResLayout.gutter, ResLayout.header]) {
+        await tester.pumpWidget(rowFor(layout));
+        expect(find.text('7'), findsNothing, reason: '$layout');
+        expect(find.byType(IdIcon), findsOneWidget, reason: '$layout');
+      }
+    });
+
+    testWidgets('番号を出さない組み方でも、読み上げには残す', (tester) async {
+      final handle = tester.ensureSemantics();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: QuotedResRow(res: post(7, '返信先の本文'))),
+        ),
+      );
+
+      expect(find.bySemanticsLabel(RegExp('レス7')), findsOneWidget);
+      handle.dispose();
     });
 
     testWidgets('どれだけ本文が長くても引用行は伸びない', (tester) async {
@@ -507,6 +542,72 @@ void main() {
       final layout = layOutFlatRows(res, settledCount: 2);
       expect(shape(layout.settled), ['1:0', '2:0']);
       expect(shape(layout.arrivals), ['1:0:引用', '3:0']);
+    });
+  });
+
+  group('本文への差し込み（inlineQuotes）', () {
+    List<Set<int>> inline(List<ThreadTreeRow> rows) => [
+      for (final row in rows) row.inlineQuotes,
+    ];
+
+    test('番号順では、行を丸ごと使って指した相手を本文へ差し込む', () {
+      final res = [post(1, 'OP'), post(2, '>>1\nそれな')];
+      final rows = layOutFlatRows(res, settledCount: 2).settled;
+      // 差し込むぶんは手前の引用行にしない（同じものが 2 度出る）。
+      expect(shape(rows), ['1:0', '2:0']);
+      expect(inline(rows), [
+        <int>{},
+        <int>{1},
+      ]);
+    });
+
+    test('ツリーの親は差し込まない。字下げがすでに示している', () {
+      final res = [post(1, 'OP'), post(2, '>>1\nそれな')];
+      final rows = layOutThreadTree(res, settledCount: 2).settled;
+      expect(shape(rows), ['1:0', '2:1']);
+      expect(inline(rows), [<int>{}, <int>{}]);
+    });
+
+    test('ツリーでも、親以外の相手は差し込む', () {
+      final res = [post(1, 'OP'), post(2, 'ふつう'), post(3, '>>1\n>>2\nどっちも')];
+      final rows = layOutThreadTree(res, settledCount: 3).settled;
+      // 1 が親（字下げ）。2 は行を丸ごと使って指しているので本文へ入り、
+      // 手前の引用行には出ない。
+      expect(shape(rows), ['1:0', '3:1', '2:0']);
+      expect(inline(rows), [
+        <int>{},
+        <int>{2},
+        <int>{},
+      ]);
+    });
+
+    test('新着のまとまりの見出しは差し込みに変えない', () {
+      final res = [post(1, 'OP'), post(2, '>>1\nそれな'), post(3, '>>1\nこれも')];
+      final layout = layOutThreadTree(res, settledCount: 1);
+      // 2・3 は同じ見出し（1 の引用行）の下にまとまる。ここを差し込みにすると
+      // 同じ再掲がレスの数だけ並ぶ。
+      expect(shape(layout.arrivals), ['1:0:引用', '2:1', '3:1']);
+      expect(inline(layout.arrivals), [<int>{}, <int>{}, <int>{}]);
+    });
+  });
+
+  group('followsQuotedRes（引用行とその本体の繋がり）', () {
+    List<bool> attached(List<Object> items) => [
+      for (var i = 0; i < items.length; i++) followsQuotedRes(items, i),
+    ];
+
+    test('引用行の直後のレスだけ、引用と地続きになる', () {
+      final res = [post(1, 'OP'), post(2, 'ふつう'), post(3, '>>1 レス')];
+      final rows = layOutFlatRows(res, settledCount: 3).settled;
+      expect(shape(rows), ['1:0', '2:0', '1:0:引用', '3:0']);
+      expect(attached(rows), [false, false, false, true]);
+    });
+
+    test('引用行が続いても、繋がるのは最後の 1 つと本体の間だけ', () {
+      final res = [post(1, 'OP'), post(2, 'ふつう'), post(3, '>>2 >>1 まとめて')];
+      final rows = layOutFlatRows(res, settledCount: 3).settled;
+      expect(shape(rows), ['1:0', '2:0', '2:0:引用', '1:0:引用', '3:0']);
+      expect(attached(rows), [false, false, false, false, true]);
     });
   });
 

@@ -26,6 +26,22 @@ class PostBodyText extends PostBodySegment {
   final String text;
 }
 
+/// 行を単独で占める `>>N` の区画（返信先の再掲の置き場）。
+///
+/// `>>5` だけで 1 行を使っているなら、書いた人はそこで「ここから誰かへの返信」と
+/// 区切っている。返信先の再掲をレスの手前に積むのではなく、**書かれた位置へ
+/// そのまま差し込む**（`>>5 それな` のように文の頭に付いているだけのものは、
+/// 今までどおりレスの手前に出す）。
+class PostBodyQuote extends PostBodySegment {
+  const PostBodyQuote({required this.number, required this.raw});
+
+  /// 指しているレス番号。
+  final int number;
+
+  /// 本文に書かれていた表記（`>>5`）。そのレスが手元に無いときはこれを出す。
+  final String raw;
+}
+
 /// サムネイルにできないリンク 1 本の区画（OGP カードの置き場）。
 ///
 /// **行を単独で占める URL だけ**をここへ切り出す。文の途中に埋まった URL
@@ -77,11 +93,71 @@ class PostBodyMedia extends PostBodySegment {
 /// 占めるもの**を [PostBodyLink] として切り出す（OGP カードの置き場）。false の
 /// ときは、これまでどおり本文中のリンクのままにする。
 ///
+/// [inlineQuotes] に入れたレス番号は、行を単独で占める `>>N` を [PostBodyQuote]
+/// として切り出す（返信先の再掲の置き場）。**渡すのは「並びがまだ示していない
+/// 相手」だけ**——ツリーの親のように字下げが示している相手まで差し込むと、
+/// 返信のたびに同じ再掲が挟まる。
+///
 /// [isThreadLink] が真を返すリンク（＝知っている板のスレ URL）は、
 /// [linkPreviews] が false でも切り出す。スレカードの中身は貼られたリンク先
 /// ではなく元から読みに行っている掲示板サーバから取るので、OGP を切っている
 /// 理由（知らないホストへ通信が広がる）に当たらないため。
 List<PostBodySegment> splitPostBody(
+  String text, {
+  bool linkPreviews = false,
+  bool Function(Uri url)? isThreadLink,
+  Set<int> inlineQuotes = const {},
+}) {
+  // 行を単独で占める `>>N` を先に切り出し、その前後をこれまでの処理にかける。
+  // **AA では切らない**——`>>` を含む行が絵の一部かもしれず、そこで分けると
+  // 絵が割れる。
+  if (inlineQuotes.isEmpty || looksLikeAsciiArt(text)) {
+    return _splitMedia(
+      text,
+      linkPreviews: linkPreviews,
+      isThreadLink: isThreadLink,
+    );
+  }
+  // 差し込むのは、呼ぶ側が「並びではまだ示していない」と判じた相手だけ
+  // （`ThreadTreeRow.inlineQuotes`）。1 行に複数並べて指しているなら、その全部が
+  // 対象のときだけ切り出す——片方だけ絵にすると、残りの `>>N` が宙に浮く。
+  final quoteLines = [
+    for (final line in quoteLinesIn(text))
+      if (line.numbers.every(inlineQuotes.contains)) line,
+  ];
+  if (quoteLines.isEmpty) {
+    return _splitMedia(
+      text,
+      linkPreviews: linkPreviews,
+      isThreadLink: isThreadLink,
+    );
+  }
+  final segments = <PostBodySegment>[];
+  var cursor = 0;
+  for (final line in quoteLines) {
+    segments.addAll(
+      _splitMedia(
+        text.substring(cursor, line.start),
+        linkPreviews: linkPreviews,
+        isThreadLink: isThreadLink,
+      ),
+    );
+    for (final number in line.numbers) {
+      segments.add(PostBodyQuote(number: number, raw: '>>\$number'));
+    }
+    cursor = line.end;
+  }
+  segments.addAll(
+    _splitMedia(
+      text.substring(cursor),
+      linkPreviews: linkPreviews,
+      isThreadLink: isThreadLink,
+    ),
+  );
+  return segments;
+}
+
+List<PostBodySegment> _splitMedia(
   String text, {
   bool linkPreviews = false,
   bool Function(Uri url)? isThreadLink,
