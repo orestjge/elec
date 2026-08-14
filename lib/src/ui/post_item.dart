@@ -12,7 +12,7 @@ import '../net/thread_link.dart';
 import 'mini_player.dart';
 import 'device_gestures.dart';
 import 'format.dart';
-import 'id_color.dart';
+import 'emphasis.dart';
 import 'now_ticker.dart';
 import 'id_icon.dart';
 import 'link_card.dart';
@@ -875,7 +875,10 @@ class _ReplyCount extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final tier = replyTierOf(replyCount);
-    final color = tier == ReplyTier.none ? scheme.primary : scheme.error;
+    // **赤は使わない。** 赤は NG・あぼーんの色として空けてある（`theme.dart`）
+    // ので、「反応が集まっている」は他と同じく量の濃さで出す（`emphasis.dart`）。
+    // 字は小さく常に太いので、いちばん薄い側でも読める。
+    final color = emphasisText(scheme, replyCountAmount(replyCount));
     final weight = tier == ReplyTier.veryMany
         ? FontWeight.w800
         : FontWeight.w700;
@@ -1419,7 +1422,7 @@ class _ClassicDate extends StatelessWidget {
 ///
 /// 何本目か（`n/m`）は **ID の直後**。専ブラが昔からこの位置に置いていて、
 /// 「この ID は何回書いているか」を ID から目を動かさずに読める。色は本数の
-/// 段階色（[idColorForCount]）で、ID の文字ごと染める。
+/// 連投の多さ（[idCountAmount]）に応じた濃さと太さで、ID の文字ごと染める。
 ///
 /// スレ主は **ID に星を添えて**示す（[isThreadOwner]）。この組み方では札を出さ
 /// ない——並びが dat の見出しの形をしているところへ、丸い札が 1 つ割り込むと
@@ -1446,11 +1449,14 @@ class _ClassicId extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final color = idColorForCount(scheme, count);
+    // 連投の多さは色相ではなく**濃さと太さ**で出す（`emphasis.dart`）。この
+    // 組み方は絵を出さないので、輪の代わりに字そのものが目盛りになる。
+    final amount = idCountAmount(count);
+    final color = emphasisText(scheme, amount);
     final tappable = onTap != null;
     final style = theme.textTheme.labelMedium?.copyWith(
       color: color,
-      fontWeight: count > 1 ? FontWeight.w600 : FontWeight.w400,
+      fontWeight: count > 1 ? emphasisWeight(amount) : FontWeight.w400,
       leadingDistribution: TextLeadingDistribution.even,
       decoration: tappable ? TextDecoration.underline : null,
       decorationStyle: TextDecorationStyle.dotted,
@@ -1725,7 +1731,6 @@ class _IdChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = idColorForCount(Theme.of(context).colorScheme, count);
     final marks = (owner: isThreadOwner, own: false, replyToOwn: false);
     return Semantics(
       // 絵には読み上げるものが無いので、元のチップの文言をここに持たせる。
@@ -1748,18 +1753,13 @@ class _IdChip extends StatelessWidget {
               _MarkedIdIcon(
                 marks: marks,
                 badgeSize: _headerBadgeSize,
-                child: Container(
-                  padding: const EdgeInsets.all(_headerChipPadding),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(6),
-                    // レス数で色を変えるのは外周のリングと下の数だけ。中の絵は
-                    // ID ごとの色なので、そこに連投の多さを混ぜると両方読めなく
-                    // なる。
-                    border: Border.all(
-                      color: color.withValues(alpha: 0.75),
-                      width: _headerChipBorder,
-                    ),
-                  ),
+                // 連投の多さは輪の伸びと濃さで出す。中の絵は ID ごとの色なので、
+                // そこに多さを混ぜると両方読めなくなる。
+                child: IdCountRing(
+                  count: count,
+                  radius: 6,
+                  strokeWidth: _headerChipBorder,
+                  padding: _headerChipPadding,
                   child: IdIcon(id: id),
                 ),
               ),
@@ -1776,10 +1776,13 @@ class _IdChip extends StatelessWidget {
                       fontSize: 11,
                       height: 1,
                       leadingDistribution: TextLeadingDistribution.even,
-                      // リングと同じ段階色。同じことを言っている 2 つなので、
-                      // 色を揃えて 1 つの目印として読ませる。
-                      color: color,
-                      fontWeight: FontWeight.w600,
+                      // 輪と同じ濃さ。同じことを言っている 2 つなので、
+                      // 揃えて 1 つの目印として読ませる。
+                      color: emphasisText(
+                        Theme.of(context).colorScheme,
+                        idCountAmount(count),
+                      ),
+                      fontWeight: emphasisWeight(idCountAmount(count)),
                     ),
                   ),
                 ),
@@ -2026,7 +2029,8 @@ class _IdGutter extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = idColorForCount(Theme.of(context).colorScheme, count);
+    final scheme = Theme.of(context).colorScheme;
+    final amount = idCountAmount(count);
     return Semantics(
       // 絵には読み上げるものが無いので、元のチップの文言をここに持たせる。
       // ウィジェットテストもこのラベルでアイコンを掴む。
@@ -2045,18 +2049,13 @@ class _IdGutter extends StatelessWidget {
             children: [
               _MarkedIdIcon(
                 marks: marks,
-                child: Container(
-                  padding: const EdgeInsets.all(1.5),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(9),
-                    // レス数で色を変えるのは外周のリングと下の数だけ。中の絵は
-                    // ID ごとの色なので、そこに連投の多さを混ぜると両方読めなく
-                    // なる。
-                    border: Border.all(
-                      color: color.withValues(alpha: 0.75),
-                      width: 1.5,
-                    ),
-                  ),
+                // 連投の多さは輪の伸びと濃さで出す。中の絵は ID ごとの色なので、
+                // そこに多さを混ぜると両方読めなくなる。
+                child: IdCountRing(
+                  count: count,
+                  radius: 9,
+                  strokeWidth: 1.5,
+                  padding: 1.5,
                   child: IdIcon(id: id, size: size),
                 ),
               ),
@@ -2073,10 +2072,10 @@ class _IdGutter extends StatelessWidget {
                       // 絵の分だけ間延びする。
                       height: 1,
                       leadingDistribution: TextLeadingDistribution.even,
-                      // リングと同じ段階色。数と輪は同じことを言っているので、
-                      // 色を揃えて 1 つの目印として読ませる。
-                      color: color,
-                      fontWeight: FontWeight.w600,
+                      // 輪と同じ濃さ。数と輪は同じことを言っているので、
+                      // 揃えて 1 つの目印として読ませる。
+                      color: emphasisText(scheme, amount),
+                      fontWeight: emphasisWeight(amount),
                     ),
                   ),
                 ),

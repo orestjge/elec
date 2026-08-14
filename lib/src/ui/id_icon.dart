@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import 'emphasis.dart';
+
 /// ID 文字列から決まる 5x5 の左右対称ドット絵（identicon）。
 ///
 /// ID は英数字の羅列で、目で追うと「似た並びの別 ID」を取り違えやすい。絵にして
@@ -120,6 +122,94 @@ class IdIconPlaceholder extends StatelessWidget {
       ),
     );
   }
+}
+
+/// [child]（ID の絵）を、**連投の多さだけ濃くなる輪**で囲む。
+///
+/// 単発（`count <= 1`）なら何も描かない——**輪が出ていること自体が「複数書いて
+/// いる」の合図**になる。そこから先は [idCountAmount] の 5 段で濃さが上がる
+/// （2〜3 / 4〜7 / 8〜15 / 16 以上）。
+///
+/// **周の長さでは表さない。** 書き込み数に上限は無く、「輪が 1 周したら満杯」
+/// という読み方が成り立たないため（勢いのように上限を決められる量とは違う）。
+///
+/// 箱の寸法は `Container(padding: …, decoration: BoxDecoration(border: …))` と
+/// 同じにしてある（外側から枠・余白・中身の順）。組み方を変えずに差し替えられる。
+class IdCountRing extends StatelessWidget {
+  const IdCountRing({
+    super.key,
+    required this.count,
+    required this.radius,
+    required this.strokeWidth,
+    required this.padding,
+    required this.child,
+  });
+
+  /// 同じ ID のレス数。
+  final int count;
+
+  /// 箱の外側の角丸。
+  final double radius;
+
+  /// 輪の太さ。
+  final double strokeWidth;
+
+  /// 輪と中身の間。
+  final double padding;
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final amount = idCountAmount(count);
+    return CustomPaint(
+      foregroundPainter: _IdRingPainter(
+        color: count <= 1 ? null : emphasisFill(scheme, amount),
+        strokeWidth: strokeWidth,
+        radius: radius,
+      ),
+      child: Padding(
+        padding: EdgeInsets.all(padding + strokeWidth),
+        child: child,
+      ),
+    );
+  }
+}
+
+class _IdRingPainter extends CustomPainter {
+  const _IdRingPainter({
+    required this.color,
+    required this.strokeWidth,
+    required this.radius,
+  });
+
+  /// null なら輪を描かない（単発の ID）。
+  final Color? color;
+  final double strokeWidth;
+  final double radius;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final color = this.color;
+    if (color == null) return;
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(
+        Offset.zero & size,
+        Radius.circular(radius),
+      ).deflate(strokeWidth / 2),
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = strokeWidth
+        ..color = color,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_IdRingPainter old) =>
+      old.color != color ||
+      old.strokeWidth != strokeWidth ||
+      old.radius != radius;
 }
 
 class _IdIconPainter extends CustomPainter {

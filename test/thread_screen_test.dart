@@ -7,6 +7,7 @@ import 'package:elec/src/net/read_history.dart';
 import 'package:elec/src/net/thread_link.dart';
 import 'package:elec/src/net/thread_view_settings.dart';
 import 'package:elec/src/ui/compose_style.dart';
+import 'package:elec/src/ui/emphasis.dart';
 import 'package:elec/src/ui/id_icon.dart';
 import 'package:elec/src/ui/mini_player.dart';
 import 'package:elec/src/ui/post_images.dart';
@@ -1485,6 +1486,29 @@ void main() {
     );
   });
 
+  testWidgets('柱表示の会話ビューでもレス間に線を引く', (tester) async {
+    await numberOrder.setResLayout(ResLayout.gutter);
+    final f = QueueFetcher([
+      ok([...res1, ...res2, ...res3]),
+    ]);
+    await tester.pumpWidget(app(f));
+    await tester.pumpAndSettle();
+
+    await tester.tap(replyCount(0));
+    await tester.pumpAndSettle();
+
+    final sheet = find.byWidgetPredicate(
+      (w) => w.runtimeType.toString() == '_ConversationSheet',
+    );
+    final resDividers = tester
+        .widgetList<Divider>(
+          find.descendant(of: sheet, matching: find.byType(Divider)),
+        )
+        .where((d) => d.endIndent == resLeftPadding)
+        .toList();
+    expect(resDividers, hasLength(2));
+  });
+
   testWidgets('返信数は押せる大きさで出し、返信のないレスには出さない', (tester) async {
     final f = QueueFetcher([
       ok([...res1, ...res2, ...res3]),
@@ -2297,7 +2321,7 @@ void main() {
     expect(visibleResNumbers(tester), read);
   });
 
-  testWidgets('返信数に応じて件数の色と太さを変える', (tester) async {
+  testWidgets('返信数に応じて件数の濃さと太さを変える', (tester) async {
     // レス 2 は 1 件（閾値未満）、レス 3 は 5 件、レス 4 は 10 件。
     final bodies = <int, String>{};
     bodies[5] = '>>2 ひとつだけ';
@@ -2325,15 +2349,17 @@ void main() {
     final scheme = Theme.of(
       tester.element(find.byType(ThreadScreen)),
     ).colorScheme;
-    // 閾値未満は従来どおり primary。
-    expect(styleOfCount(1).color, scheme.primary);
+    // 集めた返信が多いほど濃くなる（色相は使わない——赤は NG 専用に空けて
+    // ある）。10 件以上はさらに太くなる。
+    expect(styleOfCount(1).color, emphasisText(scheme, replyCountAmount(1)));
     expect(styleOfCount(1).fontWeight, FontWeight.w700);
-    // 5 件以上は色が上がる。10 件以上はさらに太くなる（色は同じ＝テキストなので
-    // 淡くせず、段階は太さで示す）。
-    expect(styleOfCount(5).color, scheme.error);
+    expect(styleOfCount(5).color, emphasisText(scheme, replyCountAmount(5)));
     expect(styleOfCount(5).fontWeight, FontWeight.w700);
-    expect(styleOfCount(10).color, scheme.error);
+    expect(styleOfCount(10).color, emphasisText(scheme, replyCountAmount(10)));
     expect(styleOfCount(10).fontWeight, FontWeight.w800);
+    // 1 件 → 5 件 → 10 件で濃くなっていること（段が潰れていない）。
+    expect(replyCountAmount(5), greaterThan(replyCountAmount(1)));
+    expect(replyCountAmount(10), greaterThan(replyCountAmount(5)));
   });
 
   testWidgets('返信数に応じて2段階でスレマップに出す', (tester) async {

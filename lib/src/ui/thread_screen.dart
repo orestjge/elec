@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 
+import '../../theme.dart';
 import '../net/auth_launcher.dart';
 import '../net/auth_store.dart';
 import '../net/endpoints.dart';
@@ -2810,26 +2811,7 @@ class _ThreadScreenState extends State<ThreadScreen>
                   final depth = _view.resLayout == ResLayout.gutter
                       ? resDividerDepth(items, i)
                       : null;
-                  if (depth == null) return child;
-                  return Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Divider(
-                        height: 1,
-                        // **線の左端は、下に来るレスの中身の左端に揃える。**
-                        // 端から端まで引くと仕切りというより枠に見えて硬く、
-                        // 揃えておくと線が下のレスの上端の縁として読める。
-                        // 返信の行は左余白がもともと狭い（字下げがすぐ左に
-                        // あるため）ので、線もそのぶん詰まる。
-                        indent:
-                            ThreadTreeTier.indentOf(depth) +
-                            (depth > 0 ? nestedResLeftPadding : resLeftPadding),
-                        endIndent: resLeftPadding,
-                      ),
-                      child,
-                    ],
-                  );
+                  return _ResDivider(depth: depth, child: child);
                 },
               ),
             ),
@@ -2849,6 +2831,38 @@ class _ThreadScreenState extends State<ThreadScreen>
               markers: _mapMarkers(items, searchMatches, replies),
             ),
           ),
+      ],
+    );
+  }
+}
+
+class _ResDivider extends StatelessWidget {
+  const _ResDivider({required this.depth, required this.child});
+
+  final int? depth;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final depth = this.depth;
+    if (depth == null) return child;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Divider(
+          height: 1,
+          // **線の左端は、下に来るレスの中身の左端に揃える。**
+          // 端から端まで引くと仕切りというより枠に見えて硬く、
+          // 揃えておくと線が下のレスの上端の縁として読める。
+          // 返信の行は左余白がもともと狭い（字下げがすぐ左に
+          // あるため）ので、線もそのぶん詰まる。
+          indent:
+              ThreadTreeTier.indentOf(depth) +
+              (depth > 0 ? nestedResLeftPadding : resLeftPadding),
+          endIndent: resLeftPadding,
+        ),
+        child,
       ],
     );
   }
@@ -3838,60 +3852,65 @@ class _ConversationSheetState extends State<_ConversationSheet> {
                         : isToOwn
                         ? scheme.primary
                         : null;
-                    final post = ThreadTreeTier(
-                      depth: entry.depth,
-                      band: band,
-                      accent: accent,
-                      child: ngHidden
-                          ? _NgPlaceholder(
-                              number: entry.res.number,
-                              onReveal: () => setState(
-                                () => widget.revealedNg.add(entry.res.number),
+                    final post = _ResDivider(
+                      depth: widget.resLayout == ResLayout.gutter && i > 0
+                          ? entry.depth
+                          : null,
+                      child: ThreadTreeTier(
+                        depth: entry.depth,
+                        band: band,
+                        accent: accent,
+                        child: ngHidden
+                            ? _NgPlaceholder(
+                                number: entry.res.number,
+                                onReveal: () => setState(
+                                  () => widget.revealedNg.add(entry.res.number),
+                                ),
+                                onLongPress: () => widget.onShowActions(
+                                  entry.res,
+                                  onReply: _replyLocal,
+                                ),
+                              )
+                            : PostItem(
+                                res: entry.res,
+                                nested: entry.depth > 0,
+                                idCount: widget.idCounts[entry.res.id] ?? 1,
+                                idOrdinal:
+                                    widget.idOrdinals[entry.res.number] ?? 1,
+                                onTapId: widget.onTapId,
+                                onTapWacchoi: widget.onTapWacchoi,
+                                onTapRes: (n) =>
+                                    widget.onTapRes(entry.res.number, n),
+                                onTapResRange: (numbers) => widget
+                                    .onTapResRange(entry.res.number, numbers),
+                                onTapUrl: widget.onTapUrl,
+                                replyCount:
+                                    widget.replyCountByNumber[entry
+                                        .res
+                                        .number] ??
+                                    0,
+                                onTapReplies: widget.onTapReplies,
+                                onLongPress: () => widget.onShowActions(
+                                  entry.res,
+                                  onReply: _replyLocal,
+                                ),
+                                isOwn: widget.isOwnPost(entry.res.number),
+                                isThreadOwner: widget.isThreadOwner(entry.res),
+                                isReplyToOwn: widget.isReplyToOwn(entry.res),
+                                // 読みに来た当のレス。一覧で検索の現在位置に使う
+                                // のと同じ強調（帯を引く組み方では帯へ移す）。
+                                isCurrentMatch: entry.highlighted,
+                                showAccentBar: accent == null,
+                                blurImages: widget.guroMasked.contains(
+                                  entry.res.number,
+                                ),
+                                linkPreviews: widget.linkPreviews,
+                                resLayout: widget.resLayout,
+                                quotedRes: widget.quotedRes,
+                                inlineQuotes: entry.inlineQuotes,
+                                defaultName: widget.defaultName,
                               ),
-                              onLongPress: () => widget.onShowActions(
-                                entry.res,
-                                onReply: _replyLocal,
-                              ),
-                            )
-                          : PostItem(
-                              res: entry.res,
-                              nested: entry.depth > 0,
-                              idCount: widget.idCounts[entry.res.id] ?? 1,
-                              idOrdinal:
-                                  widget.idOrdinals[entry.res.number] ?? 1,
-                              onTapId: widget.onTapId,
-                              onTapWacchoi: widget.onTapWacchoi,
-                              onTapRes: (n) =>
-                                  widget.onTapRes(entry.res.number, n),
-                              onTapResRange: (numbers) => widget.onTapResRange(
-                                entry.res.number,
-                                numbers,
-                              ),
-                              onTapUrl: widget.onTapUrl,
-                              replyCount:
-                                  widget.replyCountByNumber[entry.res.number] ??
-                                  0,
-                              onTapReplies: widget.onTapReplies,
-                              onLongPress: () => widget.onShowActions(
-                                entry.res,
-                                onReply: _replyLocal,
-                              ),
-                              isOwn: widget.isOwnPost(entry.res.number),
-                              isThreadOwner: widget.isThreadOwner(entry.res),
-                              isReplyToOwn: widget.isReplyToOwn(entry.res),
-                              // 読みに来た当のレス。一覧で検索の現在位置に使う
-                              // のと同じ強調（帯を引く組み方では帯へ移す）。
-                              isCurrentMatch: entry.highlighted,
-                              showAccentBar: accent == null,
-                              blurImages: widget.guroMasked.contains(
-                                entry.res.number,
-                              ),
-                              linkPreviews: widget.linkPreviews,
-                              resLayout: widget.resLayout,
-                              quotedRes: widget.quotedRes,
-                              inlineQuotes: entry.inlineQuotes,
-                              defaultName: widget.defaultName,
-                            ),
+                      ),
                     );
                     return KeyedSubtree(
                       key: _keys[entry.res.number],
@@ -4362,6 +4381,7 @@ class _ComposerState extends State<_Composer> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final elec = ElecColors.of(context);
     final textStyle = composeBodyTextStyle(theme);
     final text = widget.controller.text;
     final imageUrls = imageUrlsIn(text);
@@ -4517,9 +4537,10 @@ class _ComposerState extends State<_Composer> {
         tooltip: '送信',
         onPressed: !widget.enabled || _sending ? null : _send,
         style: IconButton.styleFrom(
-          backgroundColor: canSend ? scheme.primary : Colors.transparent,
+          // 押すものなので無彩（[ElecColors.action]）。
+          backgroundColor: canSend ? elec.action : Colors.transparent,
           foregroundColor: canSend
-              ? scheme.onPrimary
+              ? elec.onAction
               : scheme.onSurfaceVariant.withValues(alpha: 0.7),
           shape: composeShape,
         ),
