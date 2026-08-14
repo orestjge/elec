@@ -1,0 +1,895 @@
+{
+  "name": "Elec (orestjge)",
+  "identifier": "io.github.orestjge.elec.altsource",
+  "apps": [
+    {
+      "name": "Elec",
+      "bundleIdentifier": "io.github.orestjge.elec",
+      "developerName": "orestjge",
+      "subtitle": "エッヂ掲示板ビューア",
+      "localizedDescription": "エッヂ掲示板ビューア elec。GitHub Actions で自動ビルドした無署名 IPA を AltStore / SideStore が端末上で再署名してインストールします。",
+      "iconURL": "https://raw.githubusercontent.com/orestjge/elec/main/elec_icon.png",
+      "tintColor": "1E88E5",
+      "category": "utilities",
+      "versions": [
+        {
+          "version": "0.0.123",
+          "date": "2026-08-14",
+          "localizedDescription": "リリース v0.0.123",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.123/elec-v0.0.123.ipa",
+          "size": 12365600,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.122",
+          "date": "2026-08-14",
+          "localizedDescription": "リリース v0.0.122",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.122/elec-v0.0.122.ipa",
+          "size": 12366043,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.121",
+          "date": "2026-08-14",
+          "localizedDescription": "リリース v0.0.121",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.121/elec-v0.0.121.ipa",
+          "size": 12508697,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.120",
+          "date": "2026-08-13",
+          "localizedDescription": "リリース v0.0.120",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.120/elec-v0.0.120.ipa",
+          "size": 12494001,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.119",
+          "date": "2026-08-13",
+          "localizedDescription": "リリース v0.0.119",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.119/elec-v0.0.119.ipa",
+          "size": 12490810,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.118",
+          "date": "2026-08-12",
+          "localizedDescription": "リリース v0.0.118",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.118/elec-v0.0.118.ipa",
+          "size": 12487450,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.117",
+          "date": "2026-08-12",
+          "localizedDescription": "リリース v0.0.117",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.117/elec-v0.0.117.ipa",
+          "size": 12487639,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.116",
+          "date": "2026-08-12",
+          "localizedDescription": "リリース v0.0.116",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.116/elec-v0.0.116.ipa",
+          "size": 12488242,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.115",
+          "date": "2026-08-12",
+          "localizedDescription": "リリース v0.0.115",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.115/elec-v0.0.115.ipa",
+          "size": 12487825,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.114",
+          "date": "2026-08-12",
+          "localizedDescription": "リリース v0.0.114",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.114/elec-v0.0.114.ipa",
+          "size": 12487777,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.113",
+          "date": "2026-08-12",
+          "localizedDescription": "リリース v0.0.113",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.113/elec-v0.0.113.ipa",
+          "size": 12485302,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.112",
+          "date": "2026-08-12",
+          "localizedDescription": "リリース v0.0.112",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.112/elec-v0.0.112.ipa",
+          "size": 12485919,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.111",
+          "date": "2026-08-12",
+          "localizedDescription": "リリース v0.0.111",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.111/elec-v0.0.111.ipa",
+          "size": 12487496,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.110",
+          "date": "2026-08-11",
+          "localizedDescription": "リリース v0.0.110",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.110/elec-v0.0.110.ipa",
+          "size": 12479378,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.109",
+          "date": "2026-08-11",
+          "localizedDescription": "リリース v0.0.109",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.109/elec-v0.0.109.ipa",
+          "size": 12479075,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.108",
+          "date": "2026-08-11",
+          "localizedDescription": "リリース v0.0.108",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.108/elec-v0.0.108.ipa",
+          "size": 12480848,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.107",
+          "date": "2026-08-11",
+          "localizedDescription": "リリース v0.0.107",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.107/elec-v0.0.107.ipa",
+          "size": 12476347,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.106",
+          "date": "2026-08-11",
+          "localizedDescription": "リリース v0.0.106",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.106/elec-v0.0.106.ipa",
+          "size": 12475170,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.105",
+          "date": "2026-08-11",
+          "localizedDescription": "リリース v0.0.105",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.105/elec-v0.0.105.ipa",
+          "size": 12475010,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.103",
+          "date": "2026-08-11",
+          "localizedDescription": "リリース v0.0.103",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.103/elec-v0.0.103.ipa",
+          "size": 12466142,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.102",
+          "date": "2026-08-11",
+          "localizedDescription": "リリース v0.0.102",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.102/elec-v0.0.102.ipa",
+          "size": 12464973,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.101",
+          "date": "2026-08-11",
+          "localizedDescription": "リリース v0.0.101",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.101/elec-v0.0.101.ipa",
+          "size": 12466352,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.100",
+          "date": "2026-08-11",
+          "localizedDescription": "リリース v0.0.100",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.100/elec-v0.0.100.ipa",
+          "size": 12467562,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.99",
+          "date": "2026-08-11",
+          "localizedDescription": "リリース v0.0.99",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.99/elec-v0.0.99.ipa",
+          "size": 12465190,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.98",
+          "date": "2026-08-11",
+          "localizedDescription": "リリース v0.0.98",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.98/elec-v0.0.98.ipa",
+          "size": 12465477,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.97",
+          "date": "2026-08-10",
+          "localizedDescription": "リリース v0.0.97",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.97/elec-v0.0.97.ipa",
+          "size": 12462907,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.96",
+          "date": "2026-08-09",
+          "localizedDescription": "リリース v0.0.96",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.96/elec-v0.0.96.ipa",
+          "size": 12459418,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.95",
+          "date": "2026-08-09",
+          "localizedDescription": "リリース v0.0.95",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.95/elec-v0.0.95.ipa",
+          "size": 12457185,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.94",
+          "date": "2026-08-09",
+          "localizedDescription": "リリース v0.0.94",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.94/elec-v0.0.94.ipa",
+          "size": 12453246,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.93",
+          "date": "2026-08-08",
+          "localizedDescription": "リリース v0.0.93",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.93/elec-v0.0.93.ipa",
+          "size": 12444577,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.92",
+          "date": "2026-08-08",
+          "localizedDescription": "リリース v0.0.92",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.92/elec-v0.0.92.ipa",
+          "size": 12446889,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.91",
+          "date": "2026-08-08",
+          "localizedDescription": "リリース v0.0.91",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.91/elec-v0.0.91.ipa",
+          "size": 12444183,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.90",
+          "date": "2026-08-08",
+          "localizedDescription": "リリース v0.0.90",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.90/elec-v0.0.90.ipa",
+          "size": 12441738,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.89",
+          "date": "2026-08-08",
+          "localizedDescription": "リリース v0.0.89",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.89/elec-v0.0.89.ipa",
+          "size": 12434525,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.88",
+          "date": "2026-08-08",
+          "localizedDescription": "リリース v0.0.88",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.88/elec-v0.0.88.ipa",
+          "size": 12434286,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.87",
+          "date": "2026-08-08",
+          "localizedDescription": "リリース v0.0.87",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.87/elec-v0.0.87.ipa",
+          "size": 12434895,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.86",
+          "date": "2026-08-08",
+          "localizedDescription": "リリース v0.0.86",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.86/elec-v0.0.86.ipa",
+          "size": 12434857,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.85",
+          "date": "2026-08-08",
+          "localizedDescription": "リリース v0.0.85",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.85/elec-v0.0.85.ipa",
+          "size": 12433697,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.84",
+          "date": "2026-08-08",
+          "localizedDescription": "リリース v0.0.84",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.84/elec-v0.0.84.ipa",
+          "size": 12431219,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.83",
+          "date": "2026-08-07",
+          "localizedDescription": "リリース v0.0.83",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.83/elec-v0.0.83.ipa",
+          "size": 12406863,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.82",
+          "date": "2026-08-07",
+          "localizedDescription": "リリース v0.0.82",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.82/elec-v0.0.82.ipa",
+          "size": 12406796,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.81",
+          "date": "2026-08-07",
+          "localizedDescription": "リリース v0.0.81",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.81/elec-v0.0.81.ipa",
+          "size": 12403470,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.80",
+          "date": "2026-08-07",
+          "localizedDescription": "リリース v0.0.80",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.80/elec-v0.0.80.ipa",
+          "size": 12399852,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.79",
+          "date": "2026-08-07",
+          "localizedDescription": "リリース v0.0.79",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.79/elec-v0.0.79.ipa",
+          "size": 12398830,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.78",
+          "date": "2026-08-07",
+          "localizedDescription": "リリース v0.0.78",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.78/elec-v0.0.78.ipa",
+          "size": 12396567,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.77",
+          "date": "2026-08-07",
+          "localizedDescription": "リリース v0.0.77",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.77/elec-v0.0.77.ipa",
+          "size": 12167481,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.76",
+          "date": "2026-08-07",
+          "localizedDescription": "リリース v0.0.76",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.76/elec-v0.0.76.ipa",
+          "size": 12162007,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.75",
+          "date": "2026-08-05",
+          "localizedDescription": "リリース v0.0.75",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.75/elec-v0.0.75.ipa",
+          "size": 12117674,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.74",
+          "date": "2026-08-05",
+          "localizedDescription": "リリース v0.0.74",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.74/elec-v0.0.74.ipa",
+          "size": 12113418,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.73",
+          "date": "2026-08-05",
+          "localizedDescription": "リリース v0.0.73",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.73/elec-v0.0.73.ipa",
+          "size": 12104977,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.72",
+          "date": "2026-08-04",
+          "localizedDescription": "リリース v0.0.72",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.72/elec-v0.0.72.ipa",
+          "size": 12106035,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.71",
+          "date": "2026-08-04",
+          "localizedDescription": "リリース v0.0.71",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.71/elec-v0.0.71.ipa",
+          "size": 12097583,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.70",
+          "date": "2026-08-03",
+          "localizedDescription": "リリース v0.0.70",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.70/elec-v0.0.70.ipa",
+          "size": 12091629,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.69",
+          "date": "2026-08-03",
+          "localizedDescription": "リリース v0.0.69",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.69/elec-v0.0.69.ipa",
+          "size": 12072770,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.68",
+          "date": "2026-07-31",
+          "localizedDescription": "リリース v0.0.68",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.68/elec-v0.0.68.ipa",
+          "size": 11583712,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.67",
+          "date": "2026-07-30",
+          "localizedDescription": "リリース v0.0.67",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.67/elec-v0.0.67.ipa",
+          "size": 11578952,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.66",
+          "date": "2026-07-29",
+          "localizedDescription": "リリース v0.0.66",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.66/elec-v0.0.66.ipa",
+          "size": 11578944,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.65",
+          "date": "2026-07-29",
+          "localizedDescription": "リリース v0.0.65",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.65/elec-v0.0.65.ipa",
+          "size": 11577398,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.64",
+          "date": "2026-07-29",
+          "localizedDescription": "リリース v0.0.64",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.64/elec-v0.0.64.ipa",
+          "size": 11579616,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.63",
+          "date": "2026-07-28",
+          "localizedDescription": "リリース v0.0.63",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.63/elec-v0.0.63.ipa",
+          "size": 11572161,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.62",
+          "date": "2026-07-28",
+          "localizedDescription": "リリース v0.0.62",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.62/elec-v0.0.62.ipa",
+          "size": 11566111,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.61",
+          "date": "2026-07-28",
+          "localizedDescription": "リリース v0.0.61",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.61/elec-v0.0.61.ipa",
+          "size": 11565735,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.60",
+          "date": "2026-07-28",
+          "localizedDescription": "リリース v0.0.60",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.60/elec-v0.0.60.ipa",
+          "size": 11567108,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.59",
+          "date": "2026-07-27",
+          "localizedDescription": "リリース v0.0.59",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.59/elec-v0.0.59.ipa",
+          "size": 11568197,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.58",
+          "date": "2026-07-27",
+          "localizedDescription": "リリース v0.0.58",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.58/elec-v0.0.58.ipa",
+          "size": 11568197,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.57",
+          "date": "2026-07-27",
+          "localizedDescription": "リリース v0.0.57",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.57/elec-v0.0.57.ipa",
+          "size": 11556853,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.56",
+          "date": "2026-07-27",
+          "localizedDescription": "リリース v0.0.56",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.56/elec-v0.0.56.ipa",
+          "size": 11555164,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.55",
+          "date": "2026-07-26",
+          "localizedDescription": "リリース v0.0.55",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.55/elec-v0.0.55.ipa",
+          "size": 11556843,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.54",
+          "date": "2026-07-26",
+          "localizedDescription": "リリース v0.0.54",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.54/elec-v0.0.54.ipa",
+          "size": 11556051,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.53",
+          "date": "2026-07-26",
+          "localizedDescription": "リリース v0.0.53",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.53/elec-v0.0.53.ipa",
+          "size": 11556023,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.52",
+          "date": "2026-07-26",
+          "localizedDescription": "リリース v0.0.52",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.52/elec-v0.0.52.ipa",
+          "size": 11561876,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.51",
+          "date": "2026-07-25",
+          "localizedDescription": "リリース v0.0.51",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.51/elec-v0.0.51.ipa",
+          "size": 11259270,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.50",
+          "date": "2026-07-25",
+          "localizedDescription": "リリース v0.0.50",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.50/elec-v0.0.50.ipa",
+          "size": 11249709,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.49",
+          "date": "2026-07-25",
+          "localizedDescription": "リリース v0.0.49",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.49/elec-v0.0.49.ipa",
+          "size": 11165276,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.48",
+          "date": "2026-07-24",
+          "localizedDescription": "リリース v0.0.48",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.48/elec-v0.0.48.ipa",
+          "size": 11094737,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.47",
+          "date": "2026-07-24",
+          "localizedDescription": "リリース v0.0.47",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.47/elec-v0.0.47.ipa",
+          "size": 11094693,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.46",
+          "date": "2026-07-23",
+          "localizedDescription": "リリース v0.0.46",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.46/elec-v0.0.46.ipa",
+          "size": 11050655,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.45",
+          "date": "2026-07-23",
+          "localizedDescription": "リリース v0.0.45",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.45/elec-v0.0.45.ipa",
+          "size": 11052412,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.44",
+          "date": "2026-07-23",
+          "localizedDescription": "リリース v0.0.44",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.44/elec-v0.0.44.ipa",
+          "size": 11053410,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.43",
+          "date": "2026-07-23",
+          "localizedDescription": "リリース v0.0.43",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.43/elec-v0.0.43.ipa",
+          "size": 11001107,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.42",
+          "date": "2026-07-23",
+          "localizedDescription": "リリース v0.0.42",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.42/elec-v0.0.42.ipa",
+          "size": 11001132,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.41",
+          "date": "2026-07-23",
+          "localizedDescription": "リリース v0.0.41",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.41/elec-v0.0.41.ipa",
+          "size": 11001133,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.40",
+          "date": "2026-07-23",
+          "localizedDescription": "リリース v0.0.40",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.40/elec-v0.0.40.ipa",
+          "size": 11001439,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.39",
+          "date": "2026-07-22",
+          "localizedDescription": "リリース v0.0.39",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.39/elec-v0.0.39.ipa",
+          "size": 11001654,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.38",
+          "date": "2026-07-22",
+          "localizedDescription": "リリース v0.0.38",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.38/elec-v0.0.38.ipa",
+          "size": 11005786,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.37",
+          "date": "2026-07-22",
+          "localizedDescription": "リリース v0.0.37",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.37/elec-v0.0.37.ipa",
+          "size": 11005784,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.36",
+          "date": "2026-07-22",
+          "localizedDescription": "リリース v0.0.36",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.36/elec-v0.0.36.ipa",
+          "size": 10989319,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.35",
+          "date": "2026-07-22",
+          "localizedDescription": "リリース v0.0.35",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.35/elec-v0.0.35.ipa",
+          "size": 10985948,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.34",
+          "date": "2026-07-22",
+          "localizedDescription": "リリース v0.0.34",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.34/elec-v0.0.34.ipa",
+          "size": 10989033,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.33",
+          "date": "2026-07-22",
+          "localizedDescription": "リリース v0.0.33",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.33/elec-v0.0.33.ipa",
+          "size": 10982261,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.32",
+          "date": "2026-07-22",
+          "localizedDescription": "リリース v0.0.32",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.32/elec-v0.0.32.ipa",
+          "size": 10981489,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.31",
+          "date": "2026-07-22",
+          "localizedDescription": "リリース v0.0.31",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.31/elec-v0.0.31.ipa",
+          "size": 10981538,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.30",
+          "date": "2026-07-21",
+          "localizedDescription": "リリース v0.0.30",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.30/elec-v0.0.30.ipa",
+          "size": 10981536,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.29",
+          "date": "2026-07-21",
+          "localizedDescription": "リリース v0.0.29",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.29/elec-v0.0.29.ipa",
+          "size": 10981541,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.28",
+          "date": "2026-07-21",
+          "localizedDescription": "リリース v0.0.28",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.28/elec-v0.0.28.ipa",
+          "size": 10981536,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.27",
+          "date": "2026-07-21",
+          "localizedDescription": "リリース v0.0.27",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.27/elec-v0.0.27.ipa",
+          "size": 10979217,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.26",
+          "date": "2026-07-21",
+          "localizedDescription": "リリース v0.0.26",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.26/elec-v0.0.26.ipa",
+          "size": 10979214,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.25",
+          "date": "2026-07-20",
+          "localizedDescription": "リリース v0.0.25",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.25/elec-v0.0.25.ipa",
+          "size": 10978791,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.24",
+          "date": "2026-07-20",
+          "localizedDescription": "リリース v0.0.24",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.24/elec-v0.0.24.ipa",
+          "size": 10981135,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.23",
+          "date": "2026-07-20",
+          "localizedDescription": "リリース v0.0.23",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.23/elec-v0.0.23.ipa",
+          "size": 10720491,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.22",
+          "date": "2026-07-20",
+          "localizedDescription": "リリース v0.0.22",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.22/elec-v0.0.22.ipa",
+          "size": 9688107,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.21",
+          "date": "2026-07-20",
+          "localizedDescription": "リリース v0.0.21",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.21/elec-v0.0.21.ipa",
+          "size": 9682406,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.20",
+          "date": "2026-07-20",
+          "localizedDescription": "リリース v0.0.20",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.20/elec-v0.0.20.ipa",
+          "size": 9683209,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.19",
+          "date": "2026-07-20",
+          "localizedDescription": "リリース v0.0.19",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.19/elec-v0.0.19.ipa",
+          "size": 9682970,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.18",
+          "date": "2026-07-20",
+          "localizedDescription": "リリース v0.0.18",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.18/elec-v0.0.18.ipa",
+          "size": 9682904,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.17",
+          "date": "2026-07-20",
+          "localizedDescription": "リリース v0.0.17",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.17/elec-v0.0.17.ipa",
+          "size": 9680616,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.16",
+          "date": "2026-07-20",
+          "localizedDescription": "リリース v0.0.16",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.16/elec-v0.0.16.ipa",
+          "size": 9680627,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.15",
+          "date": "2026-07-20",
+          "localizedDescription": "リリース v0.0.15",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.15/elec-v0.0.15.ipa",
+          "size": 9679293,
+          "minOSVersion": "13.0"
+        },
+        {
+          "version": "0.0.14",
+          "date": "2026-07-20",
+          "localizedDescription": "リリース v0.0.14",
+          "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.14/elec-v0.0.14.ipa",
+          "size": 9258485,
+          "minOSVersion": "13.0"
+        }
+      ],
+      "version": "0.0.123",
+      "versionDate": "2026-08-14",
+      "versionDescription": "リリース v0.0.123",
+      "downloadURL": "https://github.com/orestjge/elec/releases/download/v0.0.123/elec-v0.0.123.ipa",
+      "size": 12365600
+    }
+  ]
+}
