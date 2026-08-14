@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 8 以降のアダプティブアイコン。ランチャーが好きな型（丸・角丸・雫）で
+     切り抜けるよう、白の下地と線画を別の層で渡す。これが無いと正方形の PNG が
+     縮められて型の中に置かれ、他のアプリより一回り小さく見える。
+     monochrome は Android 13 の themed icon 用。前景のアルファだけが使われるので、
+     線画をそのまま渡せば壁紙に合わせて塗り直される。 -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background"/>
+    <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
+    <monochrome android:drawable="@mipmap/ic_launcher_foreground"/>
+</adaptive-icon>
