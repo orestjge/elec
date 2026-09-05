@@ -205,11 +205,15 @@ class _ThreadScreenState extends State<ThreadScreen>
   /// 指で送っている最中か（こちらから頼んだスクロールと区別する）。
   bool _userScrolling = false;
 
+  bool _listScrolling = false;
+  final _listPointers = <int>{};
+  bool _reanchorPending = false;
+
   /// 基準の置き直し中。置き直しが自分で出すスクロール通知で二重に走らせない。
   bool _reanchoring = false;
 
-  /// 置き直しの予約済み。フレームの終わりに一度だけ走らせる。
-  bool _reanchorScheduled = false;
+  Timer? _reanchorTimer;
+  int? _reanchorFrame;
 
   /// 末尾（最新レス）が画面に見えているか。新着の自動追従に使う。
   bool _atBottomNow = false;
@@ -382,6 +386,7 @@ class _ThreadScreenState extends State<ThreadScreen>
 
   @override
   void dispose() {
+    _cancelReanchorSchedule();
     // 離脱時に「どこまで読んだか（スクロールで見た最大レス番号）」を記録する。
     // 次に開いたときの再開位置と、一覧の新着判定に使う。markRead は下げない。
     if (_furthestRead > 0) {
@@ -942,9 +947,15 @@ class _ThreadScreenState extends State<ThreadScreen>
       // 基準を触ると渡しかけのまま元の一覧へ引き戻される。指した先へ着けば
       // 基準はあちらが移してくれるので、そもそも出番が無い。
       if (notification is ScrollStartNotification) {
+        _cancelReanchorSchedule();
+        _listScrolling = true;
+        _reanchorPending = false;
         _userScrolling = notification.dragDetails != null;
-      } else if (notification is ScrollEndNotification && _userScrolling) {
+      } else if (notification is ScrollEndNotification) {
+        _listScrolling = false;
+        if (!_userScrolling) return false;
         _userScrolling = false;
+        _reanchorPending = true;
         _scheduleReanchor();
       }
     } else if (notification is ScrollMetricsNotification &&
@@ -954,15 +965,43 @@ class _ThreadScreenState extends State<ThreadScreen>
     return false;
   }
 
-  /// 置き直しはフレームの終わりに回す。通知はレイアウトの途中でも飛んでくる
-  /// ので、その場で組み直しに入ると build 中の setState になる。
+  /// 連続スワイプの合間には一覧を組み直さず、操作が落ち着いてから補正する。
   void _scheduleReanchor() {
-    if (_reanchorScheduled) return;
-    _reanchorScheduled = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _reanchorScheduled = false;
-      _reanchor();
+    if (!_reanchorPending || _listScrolling || _listPointers.isNotEmpty) return;
+    _cancelReanchorSchedule();
+    _reanchorTimer = Timer(const Duration(milliseconds: 250), () {
+      _reanchorTimer = null;
+      // レイアウト前に実行し、位置変更と行の組み直しを同じフレームで終える。
+      _reanchorFrame = WidgetsBinding.instance.scheduleFrameCallback((_) {
+        _reanchorFrame = null;
+        if (!mounted ||
+            !_reanchorPending ||
+            _listScrolling ||
+            _listPointers.isNotEmpty) {
+          return;
+        }
+        _reanchorPending = false;
+        _reanchor();
+      });
     });
+  }
+
+  void _cancelReanchorSchedule() {
+    _reanchorTimer?.cancel();
+    _reanchorTimer = null;
+    final frame = _reanchorFrame;
+    if (frame != null) WidgetsBinding.instance.cancelFrameCallbackWithId(frame);
+    _reanchorFrame = null;
+  }
+
+  void _onListPointerStarted(PointerEvent event) {
+    _listPointers.add(event.pointer);
+    _cancelReanchorSchedule();
+  }
+
+  void _onListPointerReleased(PointerEvent event) {
+    _listPointers.remove(event.pointer);
+    if (_listPointers.isEmpty) _scheduleReanchor();
   }
 
   /// スクロール位置の**基準**を、いま画面のいちばん上に見えている行へ置き直す。
@@ -2787,32 +2826,39 @@ class _ThreadScreenState extends State<ThreadScreen>
 
     return Stack(
       children: [
-        RefreshIndicator(
-          onRefresh: _refresh,
-          // 一覧の寸法はここでしか受け取れない。中身が伸びただけのときも来る
-          // ので、行が増えた直後でも末尾までの残りが分かる。
-          child: NotificationListener<ScrollMetricsNotification>(
-            onNotification: _onListMetrics,
-            child: NotificationListener<ScrollNotification>(
+        Listener(
+          onPointerDown: _onListPointerStarted,
+          onPointerPanZoomStart: _onListPointerStarted,
+          onPointerPanZoomEnd: _onListPointerReleased,
+          onPointerUp: _onListPointerReleased,
+          onPointerCancel: _onListPointerReleased,
+          child: RefreshIndicator(
+            onRefresh: _refresh,
+            // 一覧の寸法はここでしか受け取れない。中身が伸びただけのときも来る
+            // ので、行が増えた直後でも末尾までの残りが分かる。
+            child: NotificationListener<ScrollMetricsNotification>(
               onNotification: _onListMetrics,
-              child: ScrollablePositionedList.builder(
-                itemScrollController: _itemScroll,
-                scrollOffsetController: _scrollOffset,
-                itemPositionsListener: _positions,
-                initialScrollIndex: _initialIndex,
-                itemCount: items.length,
-                itemBuilder: (context, i) {
-                  final child = buildRow(context, i);
-                  // レスとレスの間の区切り線（[resDividerDepth]）は**柱の組み方
-                  // だけ**。ヘッダにまとめる組み方は、時刻まで含めて 1 行目に
-                  // 収まっていて切れ目が読めるので要らない。柱の組み方は時刻が
-                  // レスの足元・右端にあり、線が無いと上下どちらのレスの時刻か
-                  // 迷う——そこを線が決める。
-                  final depth = _view.resLayout == ResLayout.gutter
-                      ? resDividerDepth(items, i)
-                      : null;
-                  return _ResDivider(depth: depth, child: child);
-                },
+              child: NotificationListener<ScrollNotification>(
+                onNotification: _onListMetrics,
+                child: ScrollablePositionedList.builder(
+                  itemScrollController: _itemScroll,
+                  scrollOffsetController: _scrollOffset,
+                  itemPositionsListener: _positions,
+                  initialScrollIndex: _initialIndex,
+                  itemCount: items.length,
+                  itemBuilder: (context, i) {
+                    final child = buildRow(context, i);
+                    // レスとレスの間の区切り線（[resDividerDepth]）は**柱の組み方
+                    // だけ**。ヘッダにまとめる組み方は、時刻まで含めて 1 行目に
+                    // 収まっていて切れ目が読めるので要らない。柱の組み方は時刻が
+                    // レスの足元・右端にあり、線が無いと上下どちらのレスの時刻か
+                    // 迷う——そこを線が決める。
+                    final depth = _view.resLayout == ResLayout.gutter
+                        ? resDividerDepth(items, i)
+                        : null;
+                    return _ResDivider(depth: depth, child: child);
+                  },
+                ),
               ),
             ),
           ),

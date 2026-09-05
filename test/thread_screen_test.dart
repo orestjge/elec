@@ -2285,6 +2285,89 @@ void main() {
     ]);
   });
 
+  for (final kind in [PointerDeviceKind.touch, PointerDeviceKind.trackpad]) {
+    for (final holdBeforeDrag in [false, true]) {
+      testWidgets(
+        '慣性スクロールを掴み直しても次のスワイプが途中で止まらない ($kind, 待機: $holdBeforeDrag)',
+        (tester) async {
+          final f = QueueFetcher([ok(manyResWithBodies(100, const {}))]);
+          await tester.pumpWidget(app(f));
+          await tester.pumpAndSettle();
+
+          final list = find.byType(ScrollablePositionedList);
+          await tester.fling(list, const Offset(0, -300), 1500);
+          await tester.pump(const Duration(milliseconds: 80));
+          expect(listScrollPosition(tester).isScrollingNotifier.value, isTrue);
+
+          // 慣性を止めた通知の補正が、次のドラッグより後に実行される順序。
+          final gesture = await tester.startGesture(
+            tester.getCenter(list),
+            kind: kind,
+          );
+          if (holdBeforeDrag) {
+            final heldPixels = listScrollPosition(tester).pixels;
+            await tester.pump(const Duration(milliseconds: 32));
+            expect(listScrollPosition(tester).pixels, heldPixels);
+          }
+          await gesture.moveBy(const Offset(0, -30));
+          await tester.pump();
+          final before = listScrollPosition(tester).pixels;
+          await gesture.moveBy(const Offset(0, -90));
+          await tester.pump();
+          expect(listScrollPosition(tester).pixels - before, closeTo(90, 1));
+
+          await gesture.up();
+          await tester.pumpAndSettle();
+        },
+      );
+    }
+  }
+
+  for (final kind in [PointerDeviceKind.touch, PointerDeviceKind.trackpad]) {
+    testWidgets('停止直後のスワイプを繰り返しても指の移動に追従する ($kind)', (tester) async {
+      final f = QueueFetcher([ok(manyResWithBodies(200, const {}))]);
+      await tester.pumpWidget(app(f));
+      await tester.pumpAndSettle();
+      final list = find.byType(ScrollablePositionedList);
+      for (var i = 0; i < 8; i++) {
+        final gesture = await tester.startGesture(
+          tester.getCenter(list),
+          kind: kind,
+        );
+        await gesture.moveBy(const Offset(0, -30));
+        await tester.pump();
+        final before = listScrollPosition(tester).pixels;
+        await gesture.moveBy(const Offset(0, -150));
+        await tester.pump();
+        expect(
+          listScrollPosition(tester).pixels - before,
+          closeTo(150, 1),
+          reason: 'swipe $i',
+        );
+        await tester.pump(const Duration(milliseconds: 100));
+        final releasedPixels = listScrollPosition(tester).pixels;
+        await gesture.up();
+        await tester.pump(const Duration(milliseconds: 100));
+        expect(
+          listScrollPosition(tester).pixels,
+          releasedPixels,
+          reason: '連続操作の合間には位置補正しない',
+        );
+      }
+      final beforeHold = listScrollPosition(tester).pixels;
+      final hold = await tester.startGesture(
+        tester.getCenter(list),
+        kind: kind,
+      );
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(listScrollPosition(tester).pixels, beforeHold);
+      await hold.up();
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pumpAndSettle();
+      expect(listScrollPosition(tester).pixels.abs(), lessThan(1));
+    });
+  }
+
   testWidgets('スクロール位置の基準を読んでいる行へ移し、0 に戻されても飛ばない', (tester) async {
     // 一覧の位置は「基準の行から何ピクセルか」で持たれていて、このピクセルは
     // 内側のスクロールが作り直されたときなどに 0 へ戻る。基準が初回の着地
@@ -2312,6 +2395,8 @@ void main() {
     expect(read.first, greaterThan(40));
 
     // 基準からの距離が溜まっていないこと（＝基準が今いる行に移っている）。
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pumpAndSettle();
     final position = listScrollPosition(tester);
     expect(position.pixels.abs(), lessThan(200));
 
